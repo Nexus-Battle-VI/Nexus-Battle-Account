@@ -15,3 +15,17 @@ export class AccountNotFoundError extends Error {
     this.name = 'AccountNotFoundError'
   }
 }
+
+export class AuthenticationRequiredError extends Error {
+  constructor() {
+    super('Se requiere autenticacion.')
+    this.name = 'AuthenticationRequiredError'
+  }
+}
+
+export class PersonalDataUnavailableError extends Error {
+  constructor() {
+    super('No fue posible obtener los datos personales.')
+    this.name = 'PersonalDataUnavailableError'
+  }
+}
