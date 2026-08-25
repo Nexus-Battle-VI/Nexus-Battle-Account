@@ -15,9 +15,14 @@ import { buildLiveness, buildReadiness, buildVersion } from '../../src/infrastru
 
 const AT = new Date('2026-08-21T10:00:00.000Z')
 
-const buildAccount = (id = 'acc-1', email = 'jugador@nexus.test'): Account =>
+const buildAccount = (
+  id = 'acc-1',
+  email = 'jugador@nexus.test',
+  subject = `sujeto-${id}`,
+): Account =>
   Account.register({
     id: AccountId.create(id),
+    subject,
     email: EmailAddress.create(email),
     displayName: DisplayName.create('Ana Ramirez'),
     occurredAt: AT,

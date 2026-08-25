@@ -88,6 +88,7 @@ describe('API de cuentas con autenticacion activa', () => {
 
     const created = await request(app.getHttpServer())
       .post('/api/accounts')
+      .set('Authorization', `Bearer token-jugador`)
       .send({ email: 'ana@nexus.test', displayName: 'Ana Ramirez' })
 
     accountId = (created.body as { id: string }).id
@@ -107,12 +108,38 @@ describe('API de cuentas con autenticacion activa', () => {
   const bearer = (token: string) => `Bearer ${token}`
 
   describe('Rutas publicas', () => {
-    it('el registro no exige testimonio: quien se registra todavia no tiene ninguno', async () => {
+    /**
+     * El registro exige testimonio, y no es una restriccion arbitraria: con un
+     * proveedor real el alta ocurre en su propia pantalla, de modo que al
+     * llegar aqui la identidad YA existe y lo que falta es la cuenta del
+     * producto.
+     */
+    it('el registro exige testimonio', async () => {
       const response = await request(app.getHttpServer())
         .post('/api/accounts')
         .send({ email: 'nuevo@nexus.test', displayName: 'Persona Nueva' })
 
+      expect(response.status).toBe(401)
+    })
+
+    it('registra la cuenta vinculada al sujeto del testimonio', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/api/accounts')
+        .set('Authorization', bearer('token-moderador'))
+        .send({ email: 'moderador@nexus.test', displayName: 'Persona Moderadora' })
+
       expect(response.status).toBe(201)
+
+      // El sujeto NO se expone en la respuesta: es un vinculo interno. Que el
+      // vinculo existe se comprueba leyendo /me con el mismo testimonio.
+      expect(response.body).not.toHaveProperty('subject')
+
+      const propia = await request(app.getHttpServer())
+        .get('/api/accounts/me')
+        .set('Authorization', bearer('token-moderador'))
+
+      expect(propia.status).toBe(200)
+      expect(propia.body).toMatchObject({ email: 'moderador@nexus.test' })
     })
 
     it.each(['/api/health/live', '/api/health/ready'])(
@@ -140,13 +167,62 @@ describe('API de cuentas con autenticacion activa', () => {
       expect(response.status).toBe(401)
     })
 
-    it('responde 200 con un testimonio valido', async () => {
+    /**
+     * Leer una cuenta ARBITRARIA por su identificador interno exige rol de
+     * administrador. Una persona no necesita esta ruta para leer la suya: para
+     * eso esta `/me`, que no obliga a conocer ni a exponer identificadores.
+     */
+    it('responde 403 a un jugador que lee una cuenta por su identificador', async () => {
       const response = await request(app.getHttpServer())
         .get(`/api/accounts/${accountId}`)
         .set('Authorization', bearer('token-jugador'))
 
+      expect(response.status).toBe(403)
+    })
+
+    it('permite a un administrador leer cualquier cuenta', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/accounts/${accountId}`)
+        .set('Authorization', bearer('token-administrador'))
+
       expect(response.status).toBe(200)
       expect(response.body).toMatchObject({ email: 'ana@nexus.test' })
+    })
+  })
+
+  describe('La propia cuenta se resuelve por el sujeto del testimonio', () => {
+    it('responde 401 sin testimonio', async () => {
+      expect((await request(app.getHttpServer()).get('/api/accounts/me')).status).toBe(401)
+    })
+
+    it('devuelve la cuenta vinculada al sujeto', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/accounts/me')
+        .set('Authorization', bearer('token-jugador'))
+
+      expect(response.status).toBe(200)
+      expect(response.body).toMatchObject({ email: 'ana@nexus.test' })
+    })
+
+    /**
+     * Este es el arreglo, expresado como prueba: un testimonio valido de OTRA
+     * persona no alcanza la cuenta de la primera. Antes, cualquier testimonio
+     * valido servia para leer cualquier cuenta.
+     */
+    it('no devuelve la cuenta de otra persona a quien no la posee', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/accounts/me')
+        .set('Authorization', bearer('token-administrador'))
+
+      expect(response.status).toBe(404)
+    })
+
+    it('la ruta literal `me` no la captura el parametro de identificador', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/accounts/me')
+        .set('Authorization', bearer('token-jugador'))
+
+      expect(response.status).not.toBe(403)
     })
   })
 

@@ -3,11 +3,17 @@ import { APP_GUARD, Reflector } from '@nestjs/core'
 
 import { AccountsController } from '../../adapters/inbound/http/accounts.controller'
 import { HealthController } from '../../adapters/inbound/http/health.controller'
-import { GET_ACCOUNT, REGISTER_ACCOUNT, VERIFY_ACCOUNT } from '../../adapters/inbound/http/tokens'
+import {
+  GET_ACCOUNT,
+  GET_OWN_ACCOUNT,
+  REGISTER_ACCOUNT,
+  VERIFY_ACCOUNT,
+} from '../../adapters/inbound/http/tokens'
 import { READINESS_CHECKS, VERSION_REPORT } from '../../adapters/inbound/http/tokens.health'
 
 import { RegisterAccount } from '../../application/use-cases/RegisterAccount'
 import { GetAccount } from '../../application/use-cases/GetAccount'
+import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import { IDENTITY_PROVIDER } from '../../application/ports/IdentityProviderPort'
@@ -22,6 +28,7 @@ import type { IdGeneratorPort } from '../../application/ports/IdGeneratorPort'
 
 import { JwtAuthGuard } from '../../adapters/inbound/http/auth/jwt-auth.guard'
 import { RolesGuard } from '../../adapters/inbound/http/auth/roles.guard'
+import { AnonymousIdentityGuard } from '../../adapters/inbound/http/auth/anonymous.guard'
 import { TOKEN_VERIFIER } from '../../application/ports/TokenVerifierPort'
 import type { TokenVerifierPort } from '../../application/ports/TokenVerifierPort'
 import { CognitoTokenVerifier } from '../../adapters/outbound/identity/CognitoTokenVerifier'
@@ -126,7 +133,9 @@ export const LOGGER = Symbol('Logger')
       ): CanActivate =>
         config.authMode === AuthMode.Jwt
           ? new JwtAuthGuard(reflector, verifier)
-          : { canActivate: (): boolean => true },
+          : // Sin proveedor no se deja pasar sin mas: se atribuye la identidad
+            // anonima, para que lo que se guarde diga que nadie fue verificado.
+            new AnonymousIdentityGuard(),
       inject: [APP_CONFIG, Reflector, TOKEN_VERIFIER],
     },
     {
@@ -162,6 +171,11 @@ export const LOGGER = Symbol('Logger')
     {
       provide: GET_ACCOUNT,
       useFactory: (accounts: AccountRepositoryPort): GetAccount => new GetAccount(accounts),
+      inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: GET_OWN_ACCOUNT,
+      useFactory: (accounts: AccountRepositoryPort): GetOwnAccount => new GetOwnAccount(accounts),
       inject: [ACCOUNT_REPOSITORY],
     },
     {

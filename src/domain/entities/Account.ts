@@ -12,6 +12,8 @@ import { accountVerified } from '../events/AccountVerified'
 
 export interface AccountSnapshot {
   readonly id: string
+  /** Sujeto de la cuenta en el proveedor de identidad. Vease ADR-004. */
+  readonly subject: string
   readonly email: string
   readonly displayName: string
   readonly status: AccountStatus
@@ -27,6 +29,20 @@ export interface AccountSnapshot {
  */
 export class Account {
   readonly id: AccountId
+
+  /**
+   * Identificador de esta cuenta en el proveedor de identidad.
+   *
+   * Es lo que permite responder a la pregunta "esta cuenta es de quien la
+   * pide". Sin el, un testimonio valido servia para leer CUALQUIER cuenta,
+   * porque no habia forma de relacionar el `sub` del token con un agregado.
+   *
+   * Es inmutable: el correo puede cambiar y el nombre visible tambien, pero el
+   * sujeto es lo unico estable a lo largo de la vida de la cuenta. Por eso el
+   * vinculo se hace contra el, y no contra el correo.
+   */
+  readonly subject: string
+
   private email: EmailAddress
   private displayName: DisplayName
   private status: AccountStatus
@@ -35,12 +51,14 @@ export class Account {
 
   private constructor(params: {
     id: AccountId
+    subject: string
     email: EmailAddress
     displayName: DisplayName
     status: AccountStatus
     roles: Set<Role>
   }) {
     this.id = params.id
+    this.subject = params.subject
     this.email = params.email
     this.displayName = params.displayName
     this.status = params.status
@@ -50,12 +68,18 @@ export class Account {
   /** Registra una cuenta nueva. Nace pendiente de verificacion. */
   static register(params: {
     id: AccountId
+    subject: string
     email: EmailAddress
     displayName: DisplayName
     occurredAt: Date
   }): Account {
+    if (params.subject.trim().length === 0) {
+      throw new DomainError('Una cuenta debe quedar vinculada a un sujeto de identidad.')
+    }
+
     const account = new Account({
       id: params.id,
+      subject: params.subject,
       email: params.email,
       displayName: params.displayName,
       status: AccountStatus.PendingVerification,
@@ -77,6 +101,7 @@ export class Account {
   /** Reconstituye una cuenta ya persistida. No emite eventos. */
   static restore(params: {
     id: AccountId
+    subject: string
     email: EmailAddress
     displayName: DisplayName
     status: AccountStatus
@@ -86,8 +111,13 @@ export class Account {
       throw new DomainError('Una cuenta restaurada debe conservar al menos un rol.')
     }
 
+    if (params.subject.trim().length === 0) {
+      throw new DomainError('Una cuenta restaurada debe conservar su sujeto de identidad.')
+    }
+
     return new Account({
       id: params.id,
+      subject: params.subject,
       email: params.email,
       displayName: params.displayName,
       status: params.status,
@@ -217,6 +247,7 @@ export class Account {
   toSnapshot(): AccountSnapshot {
     return {
       id: this.id.value,
+      subject: this.subject,
       email: this.email.value,
       displayName: this.displayName.value,
       status: this.status,

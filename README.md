@@ -21,12 +21,19 @@ El servicio comprueba el testimonio que acompaña a cada petición contra el JWK
 
 La comprobación de firma la hace [`aws-jwt-verify`](https://github.com/awslabs/aws-jwt-verify). **No se implementa verificación criptográfica a mano**: es la clase de código donde un error sutil no falla, sino que acepta tokens falsificados en silencio.
 
-| Ruta                                  | Protección                                                 |
-| ------------------------------------- | ---------------------------------------------------------- |
-| `POST /api/accounts`                  | **Pública.** Quien se registra todavía no tiene testimonio |
-| `GET /api/accounts/:id`               | Testimonio válido                                          |
-| `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                    |
-| `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio            |
+| Ruta                                  | Protección                                              |
+| ------------------------------------- | ------------------------------------------------------- |
+| `POST /api/accounts`                  | Testimonio válido. La cuenta queda vinculada a su `sub` |
+| `GET /api/accounts/me`                | Testimonio válido. Resuelve **la propia cuenta**        |
+| `GET /api/accounts/:id`               | Rol **`ADMINISTRATOR`**                                 |
+| `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                 |
+| `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio         |
+
+### El registro exige testimonio, y no es arbitrario
+
+Con un proveedor real, el alta de la identidad ocurre en **su propia pantalla de registro**. Cuando se llega a `POST /api/accounts`, la persona ya existe en el proveedor y lo que falta es su cuenta en el producto.
+
+Por eso el caso de uso acepta un `subject` ya existente: darlo de alta otra vez produciría **dos identidades para la misma persona**. Y la compensación ante un fallo de persistencia alcanza **únicamente al sujeto que este caso de uso creó** — revocar uno ajeno dejaría sin identidad a alguien que la tenía antes de la petición.
 
 **La protección es el comportamiento por defecto.** El guard se registra de forma global y hay que excluir explícitamente lo que deba ser público con `@Public()`. Al revés —proteger ruta por ruta— cualquier endpoint nuevo nacería desprotegido, y ese olvido no falla ninguna prueba.
 
@@ -41,11 +48,15 @@ Con `NODE_ENV=production` y `AUTH_MODE=disabled`, `loadConfig` lanza `Configurat
 
 Los roles llegan en el claim `cognito:groups`. **Los grupos que no corresponden a un rol conocido se descartan**: aceptarlos convertiría el pool en una fuente de roles arbitrarios, donde bastaría crear un grupo con cualquier nombre para inventar un permiso.
 
-### Lo que todavía NO comprueba
+### El agregado guarda a quién pertenece
 
-**No hay comprobación de propiedad.** Cualquier testimonio válido puede leer cualquier cuenta, porque el agregado `Account` **no guarda el sujeto de identidad**: no existe forma de saber que una cuenta pertenece a quien pregunta.
+`Account` almacena el **sujeto** del proveedor de identidad, y es inmutable. El correo cambia y el nombre visible también; el sujeto es lo único estable a lo largo de la vida de la cuenta, y por eso el vínculo se hace contra él y **no contra el correo**.
 
-Vincularlo por correo sería un vínculo frágil —el correo cambia— y afirmar la propiedad sin comprobarla sería peor. Añadir `subject` al agregado es el paso siguiente, y hasta entonces esta limitación queda declarada en lugar de disimulada.
+Una cuenta sin sujeto **no puede existir**: `register` y `restore` la rechazan. Una cuenta que no se puede atribuir a nadie es peor que un error al crearla.
+
+**El sujeto no se expone en la respuesta.** Es un vínculo interno; `AccountDto` se declara aparte de la instantánea del agregado precisamente para que un cambio interno no se filtre al contrato público.
+
+Con eso, `GET /api/accounts/me` resuelve la propia cuenta sin que quien pregunta necesite conocer ningún identificador interno, y `GET /api/accounts/:id` —lectura de una cuenta arbitraria— queda restringida a administradores.
 
 Ver `docs/adr/ADR-004-identity-directory.md` en Nexus-Battle-Infrastructure.
 

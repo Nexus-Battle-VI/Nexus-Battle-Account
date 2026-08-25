@@ -12,6 +12,7 @@ const AT = new Date('2026-08-21T10:00:00.000Z')
 const buildAccount = (): Account =>
   Account.register({
     id: AccountId.create('acc-1'),
+    subject: 'sujeto-1',
     email: EmailAddress.create('jugador@nexus.test'),
     displayName: DisplayName.create('Ana Ramirez'),
     occurredAt: AT,
@@ -260,6 +261,7 @@ describe('Account', () => {
   it('reconstituye una cuenta persistida sin emitir eventos', () => {
     const account = Account.restore({
       id: AccountId.create('acc-9'),
+      subject: 'sujeto-9',
       email: EmailAddress.create('otro@nexus.test'),
       displayName: DisplayName.create('Otro Jugador'),
       status: AccountStatus.Active,
@@ -275,6 +277,7 @@ describe('Account', () => {
     expect(() =>
       Account.restore({
         id: AccountId.create('acc-9'),
+        subject: 'sujeto-9',
         email: EmailAddress.create('otro@nexus.test'),
         displayName: DisplayName.create('Otro Jugador'),
         status: AccountStatus.Active,
@@ -288,10 +291,60 @@ describe('Account', () => {
 
     expect(account.toSnapshot()).toEqual({
       id: 'acc-1',
+      subject: 'sujeto-1',
       email: 'jugador@nexus.test',
       displayName: 'Ana Ramirez',
       status: AccountStatus.PendingVerification,
       roles: [Role.Player],
     })
+  })
+})
+
+describe('Vinculo con el sujeto de identidad', () => {
+  it('conserva el sujeto en la instantanea', () => {
+    expect(buildAccount().toSnapshot().subject).toBe('sujeto-1')
+  })
+
+  /**
+   * Sin sujeto no hay forma de saber de quien es la cuenta, y una cuenta que no
+   * se puede atribuir a nadie no deberia poder existir. Fallar al crearla es
+   * preferible a crearla y descubrirlo al intentar autorizar.
+   */
+  it('rechaza registrar una cuenta sin sujeto', () => {
+    expect(() =>
+      Account.register({
+        id: AccountId.create('acc-2'),
+        subject: '   ',
+        email: EmailAddress.create('otro@nexus.test'),
+        displayName: DisplayName.create('Otro Jugador'),
+        occurredAt: AT,
+      }),
+    ).toThrow(/sujeto de identidad/)
+  })
+
+  it('rechaza reconstituir una cuenta sin sujeto', () => {
+    expect(() =>
+      Account.restore({
+        id: AccountId.create('acc-2'),
+        subject: '',
+        email: EmailAddress.create('otro@nexus.test'),
+        displayName: DisplayName.create('Otro Jugador'),
+        status: AccountStatus.Active,
+        roles: [Role.Player],
+      }),
+    ).toThrow(/sujeto de identidad/)
+  })
+
+  /**
+   * El correo cambia y devuelve la cuenta a pendiente de verificacion. El
+   * sujeto NO cambia: es lo unico estable, y por eso el vinculo se hace contra
+   * el y no contra el correo.
+   */
+  it('mantiene el sujeto cuando cambia el correo', () => {
+    const account = buildAccount()
+    account.changeEmail(EmailAddress.create('nuevo@nexus.test'), AT)
+
+    expect(account.subject).toBe('sujeto-1')
+    expect(account.currentEmail.value).toBe('nuevo@nexus.test')
   })
 })

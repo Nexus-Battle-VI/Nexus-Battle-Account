@@ -20,10 +20,13 @@ import {
 } from '../../../application/errors/ApplicationError'
 import { RegisterAccount } from '../../../application/use-cases/RegisterAccount'
 import { GetAccount } from '../../../application/use-cases/GetAccount'
+import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../../application/use-cases/VerifyAccount'
 import { Role } from '../../../domain/entities/Role'
-import { Public, Roles } from './auth/decorators'
-import { REGISTER_ACCOUNT, GET_ACCOUNT, VERIFY_ACCOUNT } from './tokens'
+import { CurrentIdentity, Roles } from './auth/decorators'
+import { ANONYMOUS_IDENTITY } from './auth/anonymous.guard'
+import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
+import { REGISTER_ACCOUNT, GET_ACCOUNT, GET_OWN_ACCOUNT, VERIFY_ACCOUNT } from './tokens'
 import { AccountResponse, RegisterAccountRequest } from './accounts.dto'
 
 /**
@@ -40,38 +43,76 @@ export class AccountsController {
   constructor(
     @Inject(REGISTER_ACCOUNT) private readonly registerAccount: RegisterAccount,
     @Inject(GET_ACCOUNT) private readonly getAccount: GetAccount,
+    @Inject(GET_OWN_ACCOUNT) private readonly getOwnAccount: GetOwnAccount,
     @Inject(VERIFY_ACCOUNT) private readonly verifyAccount: VerifyAccount,
   ) {}
 
-  // El registro es la unica operacion que no puede exigir testimonio: quien se
-  // registra todavia no tiene ninguno.
-  @Public()
+  /**
+   * Crea el perfil local de una persona que YA existe en el proveedor.
+   *
+   * Exige testimonio, y eso no es una restriccion arbitraria: con un proveedor
+   * real, el alta ocurre en su propia pantalla de registro. Cuando se llega
+   * aqui, la identidad ya existe y lo que falta es la cuenta del producto.
+   */
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Registra una cuenta nueva' })
+  @ApiOperation({ summary: 'Registra la cuenta asociada al testimonio' })
   @ApiResponse({ status: 201, description: 'Cuenta registrada', type: AccountResponse })
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
   @ApiResponse({ status: 409, description: 'El correo ya esta registrado' })
-  async register(@Body() body: RegisterAccountRequest): Promise<AccountResponse> {
+  async register(
+    @Body() body: RegisterAccountRequest,
+    @CurrentIdentity() identity: VerifiedIdentity,
+  ): Promise<AccountResponse> {
     try {
+      // La identidad anonima NO es un sujeto: todas las peticiones comparten la
+      // misma cadena. Vincular cuentas a ella las haria indistinguibles entre
+      // si, asi que en ese caso se deja que el proveedor genere un sujeto.
+      const subject = identity.subject === ANONYMOUS_IDENTITY.subject ? undefined : identity.subject
+
       return await this.registerAccount.execute({
         email: body.email,
         displayName: body.displayName,
+        ...(subject === undefined ? {} : { subject }),
       })
     } catch (error: unknown) {
       throw AccountsController.translate(error)
     }
   }
 
-  // Exige testimonio valido, pero NO comprueba propiedad: el agregado todavia
-  // no guarda el sujeto de identidad, asi que no hay forma de saber que esta
-  // cuenta es la de quien pregunta. Comprobarlo por correo seria un vinculo
-  // fragil, y afirmarlo sin comprobarlo seria peor. Queda declarado en el
-  // README y es el paso siguiente de ADR-004.
-  @Get(':id')
-  @ApiOperation({ summary: 'Recupera una cuenta por su identificador' })
+  /**
+   * La propia cuenta, resuelta por el sujeto del testimonio.
+   *
+   * Se declara ANTES de `:id` a proposito: NestJS resuelve las rutas en orden
+   * de declaracion, y al reves el parametro capturaria la cadena literal `me`.
+   */
+  @Get('me')
+  @ApiOperation({ summary: 'Recupera la cuenta asociada al testimonio' })
   @ApiResponse({ status: 200, description: 'Cuenta encontrada', type: AccountResponse })
   @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
+  @ApiResponse({ status: 404, description: 'El sujeto no tiene cuenta en este servicio' })
+  async findOwn(@CurrentIdentity() identity: VerifiedIdentity): Promise<AccountResponse> {
+    try {
+      return await this.getOwnAccount.execute(identity.subject)
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  /**
+   * Lectura de una cuenta ARBITRARIA por su identificador interno.
+   *
+   * Exige rol de administrador. Una persona no necesita esta ruta para leer su
+   * propia cuenta: para eso esta `/me`, que no obliga a conocer ni a exponer
+   * identificadores internos.
+   */
+  @Roles(Role.Administrator)
+  @Get(':id')
+  @ApiOperation({ summary: 'Recupera una cuenta por su identificador. Requiere ADMINISTRATOR' })
+  @ApiResponse({ status: 200, description: 'Cuenta encontrada', type: AccountResponse })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
+  @ApiResponse({ status: 403, description: 'La identidad no es administradora' })
   @ApiResponse({ status: 404, description: 'La cuenta no existe' })
   async findOne(@Param('id') id: string): Promise<AccountResponse> {
     try {

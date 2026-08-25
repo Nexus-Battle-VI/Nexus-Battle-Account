@@ -42,6 +42,16 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
     return Promise.resolve(null)
   }
 
+  findBySubject(subject: string): Promise<Account | null> {
+    for (const snapshot of this.byId.values()) {
+      if (snapshot.subject === subject) {
+        return Promise.resolve(InMemoryAccountRepository.hydrate(snapshot))
+      }
+    }
+
+    return Promise.resolve(null)
+  }
+
   existsByEmail(email: EmailAddress): Promise<boolean> {
     for (const snapshot of this.byId.values()) {
       if (snapshot.email === email.value) {
@@ -63,6 +73,7 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
   private static hydrate(snapshot: AccountSnapshot): Account {
     return AccountAggregate.restore({
       id: AccountId.create(snapshot.id),
+      subject: snapshot.subject,
       email: EmailAddress.create(snapshot.email),
       displayName: DisplayName.create(snapshot.displayName),
       status: snapshot.status,
