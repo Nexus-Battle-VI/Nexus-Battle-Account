@@ -13,7 +13,41 @@ Este repositorio contiene código y Pull Requests. No contiene Issues ni Product
 
 El agregado `Account` modela la cuenta y sus roles, no las credenciales. El registro y la verificación de credenciales pertenecen a un proveedor de identidad externo, detrás de `IdentityProviderPort`.
 
-No existe todavía un proveedor de identidad autorizado ni presupuesto aprobado para un directorio corporativo. Es un **blocker declarado** del proyecto. Hasta que se resuelva, opera `FakeIdentityProvider`, que implementa el contrato completo del puerto sobre almacenamiento en memoria y sin credenciales. Ver `docs/adr/ADR-004-identity-directory.md` en Nexus-Battle-Infrastructure.
+El proveedor está decidido: **Amazon Cognito, plan Essentials** (ADR-004, `Accepted` el 2026-08-25). El alta del sujeto sigue operando con `FakeIdentityProvider`, que implementa el contrato completo del puerto sobre almacenamiento en memoria y sin credenciales.
+
+## Verificación de identidad en las peticiones
+
+El servicio comprueba el testimonio que acompaña a cada petición contra el JWKS del user pool. Se verifica el **token de acceso**, no el de identidad: el de identidad describe al usuario para la interfaz, el de acceso es el que autoriza y el único cuyo `client_id` puede comprobarse.
+
+La comprobación de firma la hace [`aws-jwt-verify`](https://github.com/awslabs/aws-jwt-verify). **No se implementa verificación criptográfica a mano**: es la clase de código donde un error sutil no falla, sino que acepta tokens falsificados en silencio.
+
+| Ruta                                  | Protección                                                 |
+| ------------------------------------- | ---------------------------------------------------------- |
+| `POST /api/accounts`                  | **Pública.** Quien se registra todavía no tiene testimonio |
+| `GET /api/accounts/:id`               | Testimonio válido                                          |
+| `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                    |
+| `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio            |
+
+**La protección es el comportamiento por defecto.** El guard se registra de forma global y hay que excluir explícitamente lo que deba ser público con `@Public()`. Al revés —proteger ruta por ruta— cualquier endpoint nuevo nacería desprotegido, y ese olvido no falla ninguna prueba.
+
+### Un binario de producción sin autenticación no arranca
+
+Con `NODE_ENV=production` y `AUTH_MODE=disabled`, `loadConfig` lanza `ConfigurationError` y el servicio **no llega a escuchar**. Es la traducción en código del blocker de ADR-004: un aviso en el registro se pasa por alto; un arranque que falla, no.
+
+| Variable             | Efecto                                              |
+| -------------------- | --------------------------------------------------- |
+| `AUTH_MODE=disabled` | Ninguna ruta comprueba nada. **Estado del blocker** |
+| `AUTH_MODE=jwt`      | Exige `COGNITO_USER_POOL_ID` y `COGNITO_CLIENT_ID`  |
+
+Los roles llegan en el claim `cognito:groups`. **Los grupos que no corresponden a un rol conocido se descartan**: aceptarlos convertiría el pool en una fuente de roles arbitrarios, donde bastaría crear un grupo con cualquier nombre para inventar un permiso.
+
+### Lo que todavía NO comprueba
+
+**No hay comprobación de propiedad.** Cualquier testimonio válido puede leer cualquier cuenta, porque el agregado `Account` **no guarda el sujeto de identidad**: no existe forma de saber que una cuenta pertenece a quien pregunta.
+
+Vincularlo por correo sería un vínculo frágil —el correo cambia— y afirmar la propiedad sin comprobarla sería peor. Añadir `subject` al agregado es el paso siguiente, y hasta entonces esta limitación queda declarada en lugar de disimulada.
+
+Ver `docs/adr/ADR-004-identity-directory.md` en Nexus-Battle-Infrastructure.
 
 ## Requisitos
 

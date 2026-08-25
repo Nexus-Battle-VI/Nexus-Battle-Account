@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common'
+import { Module, type CanActivate } from '@nestjs/common'
+import { APP_GUARD, Reflector } from '@nestjs/core'
 
 import { AccountsController } from '../../adapters/inbound/http/accounts.controller'
 import { HealthController } from '../../adapters/inbound/http/health.controller'
@@ -19,6 +20,12 @@ import type { NotificationRequestPort } from '../../application/ports/Notificati
 import type { ClockPort } from '../../application/ports/ClockPort'
 import type { IdGeneratorPort } from '../../application/ports/IdGeneratorPort'
 
+import { JwtAuthGuard } from '../../adapters/inbound/http/auth/jwt-auth.guard'
+import { RolesGuard } from '../../adapters/inbound/http/auth/roles.guard'
+import { TOKEN_VERIFIER } from '../../application/ports/TokenVerifierPort'
+import type { TokenVerifierPort } from '../../application/ports/TokenVerifierPort'
+import { CognitoTokenVerifier } from '../../adapters/outbound/identity/CognitoTokenVerifier'
+
 import { InMemoryAccountRepository } from '../../adapters/outbound/persistence/InMemoryAccountRepository'
 import { FakeIdentityProvider } from '../../adapters/outbound/identity/FakeIdentityProvider'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
@@ -26,7 +33,7 @@ import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
 
 import { createLogger, type Logger } from '../observability/logger'
-import { loadConfig, PersistenceDriver, type AppConfig } from '../config/env'
+import { AuthMode, loadConfig, PersistenceDriver, type AppConfig } from '../config/env'
 import type { ReadinessCheck, VersionReport } from '../health/health'
 
 export const APP_CONFIG = Symbol('AppConfig')
@@ -83,6 +90,52 @@ export const LOGGER = Symbol('Logger')
       useFactory: (ids: IdGeneratorPort): IdentityProviderPort =>
         new FakeIdentityProvider(() => ids.generate()),
       inject: [ID_GENERATOR],
+    },
+    {
+      provide: TOKEN_VERIFIER,
+      useFactory: (config: AppConfig, logger: Logger): TokenVerifierPort => {
+        if (config.cognito === null) {
+          // No se devuelve un verificador que acepte cualquier cosa: sin
+          // proveedor, el guard directamente no se registra. Un verificador
+          // permisivo daria la apariencia de que hay comprobacion.
+          logger.warn('authentication_disabled', {
+            detail:
+              'AUTH_MODE=disabled: ninguna ruta verifica quien realiza la peticion. BLOCKER de ADR-004.',
+          })
+
+          return {
+            verify: (): Promise<never> => {
+              throw new Error('No hay verificador de testimonios configurado.')
+            },
+          }
+        }
+
+        return new CognitoTokenVerifier(config.cognito)
+      },
+      inject: [APP_CONFIG, LOGGER],
+    },
+    // Los guards se registran de forma global SOLO cuando hay proveedor. El
+    // orden importa: JwtAuthGuard deja la identidad verificada en la peticion y
+    // RolesGuard la lee. NestJS los ejecuta en el orden de declaracion.
+    {
+      provide: APP_GUARD,
+      useFactory: (
+        config: AppConfig,
+        reflector: Reflector,
+        verifier: TokenVerifierPort,
+      ): CanActivate =>
+        config.authMode === AuthMode.Jwt
+          ? new JwtAuthGuard(reflector, verifier)
+          : { canActivate: (): boolean => true },
+      inject: [APP_CONFIG, Reflector, TOKEN_VERIFIER],
+    },
+    {
+      provide: APP_GUARD,
+      useFactory: (config: AppConfig, reflector: Reflector): CanActivate =>
+        config.authMode === AuthMode.Jwt
+          ? new RolesGuard(reflector)
+          : { canActivate: (): boolean => true },
+      inject: [APP_CONFIG, Reflector],
     },
     {
       provide: NOTIFICATION_REQUEST,

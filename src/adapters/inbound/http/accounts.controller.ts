@@ -11,7 +11,7 @@ import {
   Param,
   Post,
 } from '@nestjs/common'
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 
 import { DomainError } from '../../../domain/errors/DomainError'
 import {
@@ -21,6 +21,8 @@ import {
 import { RegisterAccount } from '../../../application/use-cases/RegisterAccount'
 import { GetAccount } from '../../../application/use-cases/GetAccount'
 import { VerifyAccount } from '../../../application/use-cases/VerifyAccount'
+import { Role } from '../../../domain/entities/Role'
+import { Public, Roles } from './auth/decorators'
 import { REGISTER_ACCOUNT, GET_ACCOUNT, VERIFY_ACCOUNT } from './tokens'
 import { AccountResponse, RegisterAccountRequest } from './accounts.dto'
 
@@ -32,6 +34,7 @@ import { AccountResponse, RegisterAccountRequest } from './accounts.dto'
  * de dominio y de aplicacion en codigos HTTP. No contiene reglas de negocio.
  */
 @ApiTags('accounts')
+@ApiBearerAuth()
 @Controller('accounts')
 export class AccountsController {
   constructor(
@@ -40,6 +43,9 @@ export class AccountsController {
     @Inject(VERIFY_ACCOUNT) private readonly verifyAccount: VerifyAccount,
   ) {}
 
+  // El registro es la unica operacion que no puede exigir testimonio: quien se
+  // registra todavia no tiene ninguno.
+  @Public()
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Registra una cuenta nueva' })
@@ -57,9 +63,15 @@ export class AccountsController {
     }
   }
 
+  // Exige testimonio valido, pero NO comprueba propiedad: el agregado todavia
+  // no guarda el sujeto de identidad, asi que no hay forma de saber que esta
+  // cuenta es la de quien pregunta. Comprobarlo por correo seria un vinculo
+  // fragil, y afirmarlo sin comprobarlo seria peor. Queda declarado en el
+  // README y es el paso siguiente de ADR-004.
   @Get(':id')
   @ApiOperation({ summary: 'Recupera una cuenta por su identificador' })
   @ApiResponse({ status: 200, description: 'Cuenta encontrada', type: AccountResponse })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
   @ApiResponse({ status: 404, description: 'La cuenta no existe' })
   async findOne(@Param('id') id: string): Promise<AccountResponse> {
     try {
@@ -69,11 +81,14 @@ export class AccountsController {
     }
   }
 
+  @Roles(Role.Administrator)
   @Post(':id/verification')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Marca la cuenta como verificada' })
+  @ApiOperation({ summary: 'Marca la cuenta como verificada. Requiere rol ADMINISTRATOR' })
   @ApiResponse({ status: 200, description: 'Cuenta verificada', type: AccountResponse })
   @ApiResponse({ status: 400, description: 'La cuenta no admite verificacion' })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
+  @ApiResponse({ status: 403, description: 'La identidad no es administradora' })
   @ApiResponse({ status: 404, description: 'La cuenta no existe' })
   async verify(@Param('id') id: string): Promise<AccountResponse> {
     try {
