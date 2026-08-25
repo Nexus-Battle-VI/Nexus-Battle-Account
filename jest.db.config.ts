@@ -22,6 +22,20 @@ const config: Config = {
   // Arrancar la imagen de PostgreSQL la primera vez puede tardar bastante mas
   // que el limite por defecto de Jest.
   testTimeout: 120_000,
+
+  // Esta suite mide SU propia superficie: el adaptador de PostgreSQL y la
+  // infraestructura de persistencia, que la suite por defecto no puede ver.
+  // Entre las dos configuraciones no queda codigo sin medir.
+  collectCoverageFrom: [
+    'src/adapters/outbound/persistence/PostgresAccountRepository.ts',
+    'src/infrastructure/persistence/**/*.ts',
+    '!src/infrastructure/persistence/migrate.ts',
+  ],
+  coverageDirectory: 'coverage-db',
+  coverageReporters: ['text-summary'],
+  coverageThreshold: {
+    global: { branches: 80, functions: 80, lines: 80, statements: 80 },
+  },
 }
 
 export default config
