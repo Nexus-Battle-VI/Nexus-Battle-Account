@@ -15,9 +15,14 @@ import { buildLiveness, buildReadiness, buildVersion } from '../../src/infrastru
 
 const AT = new Date('2026-08-21T10:00:00.000Z')
 
-const buildAccount = (id = 'acc-1', email = 'jugador@nexus.test'): Account =>
+const buildAccount = (
+  id = 'acc-1',
+  email = 'jugador@nexus.test',
+  subject = `sujeto-${id}`,
+): Account =>
   Account.register({
     id: AccountId.create(id),
+    subject,
     email: EmailAddress.create(email),
     displayName: DisplayName.create('Ana Ramirez'),
     occurredAt: AT,
@@ -214,17 +219,27 @@ describe('loadConfig', () => {
       swaggerEnabled: true,
       persistenceDriver: 'memory',
       databaseUrl: null,
+      authMode: 'disabled',
+      cognito: null,
     })
   })
 
+  // Produccion exige autenticacion configurada: `loadConfig` rechaza arrancar
+  // sin ella. Estas pruebas la aportan porque su objeto es la documentacion
+  // interactiva, no la autenticacion, que se ejercita en auth.spec.ts.
+  const PRODUCTION_ENV = {
+    NODE_ENV: 'production',
+    AUTH_MODE: 'jwt',
+    COGNITO_USER_POOL_ID: 'us-east-1_abc',
+    COGNITO_CLIENT_ID: 'cliente',
+  } as const
+
   it('deshabilita la documentacion interactiva en produccion por defecto', () => {
-    expect(loadConfig({ NODE_ENV: 'production' }).swaggerEnabled).toBe(false)
+    expect(loadConfig(PRODUCTION_ENV).swaggerEnabled).toBe(false)
   })
 
   it('permite habilitar la documentacion de forma explicita', () => {
-    expect(loadConfig({ NODE_ENV: 'production', SWAGGER_ENABLED: 'true' }).swaggerEnabled).toBe(
-      true,
-    )
+    expect(loadConfig({ ...PRODUCTION_ENV, SWAGGER_ENABLED: 'true' }).swaggerEnabled).toBe(true)
   })
 
   it('lee la configuracion aportada por el entorno', () => {

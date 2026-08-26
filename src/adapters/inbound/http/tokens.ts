@@ -7,4 +7,5 @@
  */
 export const REGISTER_ACCOUNT = Symbol('RegisterAccount')
 export const GET_ACCOUNT = Symbol('GetAccount')
+export const GET_OWN_ACCOUNT = Symbol('GetOwnAccount')
 export const VERIFY_ACCOUNT = Symbol('VerifyAccount')

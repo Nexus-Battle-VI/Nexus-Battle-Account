@@ -15,6 +15,14 @@ export interface AccountRepositoryPort {
   save(account: Account): Promise<void>
   findById(id: AccountId): Promise<Account | null>
   findByEmail(email: EmailAddress): Promise<Account | null>
+
+  /**
+   * Recupera la cuenta vinculada a un sujeto del proveedor de identidad.
+   *
+   * Es la consulta que responde "cual es MI cuenta" a partir del testimonio,
+   * sin que quien pregunta tenga que conocer ningun identificador interno.
+   */
+  findBySubject(subject: string): Promise<Account | null>
   existsByEmail(email: EmailAddress): Promise<boolean>
 }
 

@@ -1,5 +1,6 @@
 import { RegisterAccount } from '../../src/application/use-cases/RegisterAccount'
 import { GetAccount } from '../../src/application/use-cases/GetAccount'
+import { GetOwnAccount } from '../../src/application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../src/application/use-cases/VerifyAccount'
 import {
   AccountAlreadyExistsError,
@@ -195,5 +196,39 @@ describe('VerifyAccount', () => {
     await harness.verifyAccount.execute(created.id)
 
     await expect(harness.verifyAccount.execute(created.id)).rejects.toBeInstanceOf(DomainError)
+  })
+})
+
+/**
+ * El sujeto es el vinculo interno con el proveedor de identidad. Devolverlo en
+ * el cuerpo de un 404 no aporta nada a quien pregunta —ya sabe quien es— y saca
+ * del servicio un identificador que no tiene por que salir.
+ */
+describe('GetOwnAccount', () => {
+  const buildUseCase = (): GetOwnAccount => new GetOwnAccount(new InMemoryAccountRepository())
+
+  it('falla cuando el testimonio no tiene cuenta asociada', async () => {
+    await expect(buildUseCase().execute('sub-sin-cuenta')).rejects.toBeInstanceOf(
+      AccountNotFoundError,
+    )
+  })
+
+  it('no incluye el sujeto en el mensaje, pero lo conserva para el registro', async () => {
+    await expect(buildUseCase().execute('sub-secreto')).rejects.toMatchObject({
+      message: expect.not.stringContaining('sub-secreto'),
+      reference: 'sub-secreto',
+    })
+  })
+
+  /**
+   * `AccountDto` no expone el sujeto, y eso es deliberado: por eso hay que
+   * indicarlo al registrar para poder comprobar la lectura por ese camino.
+   */
+  it('devuelve la cuenta vinculada al sujeto', async () => {
+    const harness = buildHarness()
+    const created = await harness.registerAccount.execute({ ...command, subject: 'sub-propio' })
+    const useCase = new GetOwnAccount(harness.accounts)
+
+    expect(await useCase.execute('sub-propio')).toEqual(created)
   })
 })

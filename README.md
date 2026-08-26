@@ -13,7 +13,93 @@ Este repositorio contiene código y Pull Requests. No contiene Issues ni Product
 
 El agregado `Account` modela la cuenta y sus roles, no las credenciales. El registro y la verificación de credenciales pertenecen a un proveedor de identidad externo, detrás de `IdentityProviderPort`.
 
-No existe todavía un proveedor de identidad autorizado ni presupuesto aprobado para un directorio corporativo. Es un **blocker declarado** del proyecto. Hasta que se resuelva, opera `FakeIdentityProvider`, que implementa el contrato completo del puerto sobre almacenamiento en memoria y sin credenciales. Ver `docs/adr/ADR-004-identity-directory.md` en Nexus-Battle-Infrastructure.
+El proveedor está decidido: **Amazon Cognito, plan Essentials** (ADR-004, `Accepted` el 2026-08-25). El alta del sujeto sigue operando con `FakeIdentityProvider`, que implementa el contrato completo del puerto sobre almacenamiento en memoria y sin credenciales.
+
+## Verificación de identidad en las peticiones
+
+El servicio comprueba el testimonio que acompaña a cada petición contra el JWKS del user pool. Se verifica el **token de acceso**, no el de identidad: el de identidad describe al usuario para la interfaz, el de acceso es el que autoriza y el único cuyo `client_id` puede comprobarse.
+
+La comprobación de firma la hace [`aws-jwt-verify`](https://github.com/awslabs/aws-jwt-verify). **No se implementa verificación criptográfica a mano**: es la clase de código donde un error sutil no falla, sino que acepta tokens falsificados en silencio.
+
+| Ruta                                  | Protección                                              |
+| ------------------------------------- | ------------------------------------------------------- |
+| `POST /api/accounts`                  | Testimonio válido. La cuenta queda vinculada a su `sub` |
+| `GET /api/accounts/me`                | Testimonio válido. Resuelve **la propia cuenta**        |
+| `GET /api/accounts/:id`               | Rol **`ADMINISTRATOR`**                                 |
+| `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                 |
+| `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio         |
+
+### El registro exige testimonio, y no es arbitrario
+
+Con un proveedor real, el alta de la identidad ocurre en **su propia pantalla de registro**. Cuando se llega a `POST /api/accounts`, la persona ya existe en el proveedor y lo que falta es su cuenta en el producto.
+
+Por eso el caso de uso acepta un `subject` ya existente: darlo de alta otra vez produciría **dos identidades para la misma persona**. Y la compensación ante un fallo de persistencia alcanza **únicamente al sujeto que este caso de uso creó** — revocar uno ajeno dejaría sin identidad a alguien que la tenía antes de la petición.
+
+**La protección es el comportamiento por defecto.** El guard se registra de forma global y hay que excluir explícitamente lo que deba ser público con `@Public()`. Al revés —proteger ruta por ruta— cualquier endpoint nuevo nacería desprotegido, y ese olvido no falla ninguna prueba.
+
+### Un binario de producción sin autenticación no arranca
+
+Con `NODE_ENV=production` y `AUTH_MODE=disabled`, `loadConfig` lanza `ConfigurationError` y el servicio **no llega a escuchar**. Es la traducción en código del blocker de ADR-004: un aviso en el registro se pasa por alto; un arranque que falla, no.
+
+| Variable             | Efecto                                              |
+| -------------------- | --------------------------------------------------- |
+| `AUTH_MODE=disabled` | Ninguna ruta comprueba nada. **Estado del blocker** |
+| `AUTH_MODE=jwt`      | Exige `COGNITO_USER_POOL_ID` y `COGNITO_CLIENT_ID`  |
+
+Los roles llegan en el claim `cognito:groups`. **Los grupos que no corresponden a un rol conocido se descartan**: aceptarlos convertiría el pool en una fuente de roles arbitrarios, donde bastaría crear un grupo con cualquier nombre para inventar un permiso.
+
+### El agregado guarda a quién pertenece
+
+`Account` almacena el **sujeto** del proveedor de identidad, y es inmutable. El correo cambia y el nombre visible también; el sujeto es lo único estable a lo largo de la vida de la cuenta, y por eso el vínculo se hace contra él y **no contra el correo**.
+
+Una cuenta sin sujeto **no puede existir**: `register` y `restore` la rechazan. Una cuenta que no se puede atribuir a nadie es peor que un error al crearla.
+
+**El sujeto no se expone en la respuesta.** Es un vínculo interno; `AccountDto` se declara aparte de la instantánea del agregado precisamente para que un cambio interno no se filtre al contrato público.
+
+Con eso, `GET /api/accounts/me` resuelve la propia cuenta sin que quien pregunta necesite conocer ningún identificador interno, y `GET /api/accounts/:id` —lectura de una cuenta arbitraria— queda restringida a administradores.
+
+Ver `docs/adr/ADR-004-identity-directory.md` en Nexus-Battle-Infrastructure.
+
+## Persistencia
+
+PostgreSQL con **Kysely** ([ADR-012](https://github.com/Nexus-Battle-VI/Nexus-Battle-Infrastructure/blob/main/docs/adr/ADR-012-orm-odm.md)). Kysely es un constructor de consultas, no un ORM: **cada consulta esta escrita a la vista**, y no hay carga perezosa que dispare consultas dentro de un bucle sin que aparezcan en el codigo.
+
+| Variable                      | Efecto                                                       |
+| ----------------------------- | ------------------------------------------------------------ |
+| `PERSISTENCE_DRIVER=memory`   | Repositorio en proceso. **El estado se pierde al reiniciar** |
+| `PERSISTENCE_DRIVER=postgres` | Adaptador real. Exige `DATABASE_URL`                         |
+
+### El esquema no se migra al arrancar
+
+```bash
+npm run migrate
+```
+
+Es un paso explicito del despliegue, y el motivo es concreto: migrar desde el arranque hace que **varias replicas migren a la vez**, y que un despliegue con una migracion rota deje el servicio en **bucle de reinicio** en lugar de fallar una sola vez, de forma visible.
+
+### La version de Kysely esta fijada en la linea 0.28 a proposito
+
+**Kysely 0.29 es ESM puro**, y este servicio compila a CommonJS porque el CLI de NestJS 11 lo hace. TypeScript 5.9.3 **no permite importar un modulo ESM desde CommonJS** en ninguno de sus modos, ni siquiera `node20` — se comprobo uno por uno.
+
+Node 24 si soporta `require()` de ESM, asi que la limitacion es del compilador, no del motor. Hasta que TypeScript lo admita, la linea `0.28` es la ultima que publica una compilacion CommonJS.
+
+Se usa `0.28.17` y no una anterior porque las versiones previas arrastran **tres avisos de seguridad** de inyeccion SQL, el ultimo corregido justo en `0.28.17`.
+
+### Las restricciones viven en el motor
+
+El esquema valida el vocabulario de estados y de roles con restricciones `CHECK`: **un rol inventado no llega a escribirse**, aunque el codigo se equivoque.
+
+Una migracion no puede importar el dominio —queda congelada en el tiempo y debe seguir siendo ejecutable tal y como se escribio—, asi que ese vocabulario se repite en SQL. Hay **una prueba que compara ambos** y falla si alguien anade un estado o un rol al dominio sin escribir la migracion correspondiente.
+
+### Pruebas contra el motor real
+
+```bash
+npm run test:db
+```
+
+Levantan PostgreSQL en un contenedor con Testcontainers. **Necesitan Docker**, y por eso estan fuera de `npm test`: quien trabaja en el dominio o en los casos de uso no deberia necesitarlo. El CI ejecuta ambas suites.
+
+Lo que comprueban no se puede comprobar de otra forma: que el SQL sea valido, que las restricciones existan de verdad y que la transaccion de guardado haga lo que dice. Un doble de prueba habria pasado con un esquema equivocado.
 
 ## Requisitos
 
