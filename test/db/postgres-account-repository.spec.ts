@@ -378,6 +378,15 @@ describe('PostgresAccountRepository', () => {
       expect(questions.map((question) => question.id)).toEqual(['sq-01', 'sq-02', 'sq-03', 'sq-04'])
     })
 
+    it('la semilla vigente bloquea terminos conocidos y deja pasar apodos limpios', async () => {
+      const blacklist = new PostgresNicknameBlacklist(db)
+
+      expect(await blacklist.isBlocked('Ana Ramirez')).toBe(false)
+      expect(await blacklist.isBlocked('admin')).toBe(true)
+      expect(await blacklist.isBlocked('xX_Gonorrea_99')).toBe(true)
+      expect(await blacklist.isBlocked('AbelardoDeLaEspriella')).toBe(true)
+    })
+
     it('la lista negra solo bloquea terminos activos', async () => {
       const blacklist = new PostgresNicknameBlacklist(db)
 

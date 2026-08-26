@@ -1,0 +1,855 @@
+# Lista negra de apodos
+
+Semilla de `nickname_blacklist_entries` para el registro (HU-01). El documento del cliente pide bloquear palabras ofensivas, políticos, celebridades y marcas mediante una lista **actualizable**; no enumera los términos.
+
+- Fuente de implementación: `src/adapters/outbound/persistence/nickname-blacklist-seed.ts`
+- Volcado plano: [nickname-blacklist.txt](./nickname-blacklist.txt)
+- Términos vigentes: **778**
+
+## Cómo se aplica
+
+El matcher es `nickname.toLowerCase().includes(term)`. No quita tildes ni leetspeak. Por eso hay variantes (`uribe` / `álvaro uribe` / `alvarouribe`).
+
+`RegisterAccount` consulta `NicknameBlacklistPort` **antes** de crear identidad o avatar. Un acierto responde HTTP 400:
+
+> El apodo no esta permitido por la lista negra vigente.
+
+En Web, `RegistrationPage` muestra ese mensaje.
+
+## Cómo probarlo
+
+Con PostgreSQL:
+
+```bash
+cd Nexus-Battle-Account
+npm run migrate:dev
+npm run dev
+```
+
+En Web, registra un apodo limpio (`AnaTester`) y uno bloqueado (`admin`, `gonorrea`, `AbelardoDeLaEspriella`).
+
+Con `PERSISTENCE_DRIVER=memory` la semilla también carga: `InMemoryNicknameBlacklist` nace hidratada.
+
+Desactivar un término sin redeploy:
+
+```sql
+update nickname_blacklist_entries
+set active = false, updated_at = now()
+where id = 'bl-petro';
+```
+
+## Qué no entra (falsos positivos)
+
+`ass`, `sex`, `hp`, `mk`, `mod`, `bot`, `gm`, `anal`, `chimba`, `verraco`, `parce`, `restrepo`, `valencia`, `luna`, `santos`, `duque`, `lopez`, `gaviria`, `galan`, `oviedo`, `char`, `paz`, `cuevas`, `cono`.
+
+`petro`, `uribe`, `cepeda` y `espriella` sí están: en Colombia se usan como marca política y tumbarán nicks tipo `Petrolero` o `UribeGamer`.
+
+Marcas cortas (`tigo`, `claro`, `nike`, `feid`) también pegan por substring: `Testigo` cae por `tigo`. Si molesta, desactiva el término en la tabla.
+
+## Reservados e impersonación del juego
+
+- `admin`
+- `administrador`
+- `administrator`
+- `superadmin`
+- `superuser`
+- `moderador`
+- `moderator`
+- `oficial`
+- `official`
+- `soporte`
+- `support`
+- `staff`
+- `sistema`
+- `system`
+- `root`
+- `null`
+- `undefined`
+- `owner`
+- `founder`
+- `developer`
+- `webmaster`
+- `postmaster`
+- `security`
+- `seguridad`
+- `helpdesk`
+- `gamemaster`
+- `maestrojuego`
+- `maestrodejuego`
+- `nexus`
+- `n3xus`
+- `4dmin`
+- `thenexus`
+- `nexusbattles`
+- `thenexusbattles`
+- `nexusbattlesv`
+- `nexusbattlesvi`
+- `nexusadmin`
+- `nexusmod`
+- `nexusoficial`
+- `nexusofficial`
+- `cuentaoficial`
+- `cuentasoporte`
+
+## Ofensivas comunes (español e inglés)
+
+- `puta`
+- `puto`
+- `putas`
+- `putos`
+- `putazo`
+- `putada`
+- `mierda`
+- `mierdas`
+- `joder`
+- `jodido`
+- `jodida`
+- `coño`
+- `cabron`
+- `cabrón`
+- `cabrona`
+- `pendejo`
+- `pendeja`
+- `pendejos`
+- `pendejas`
+- `idiota`
+- `idiot`
+- `imbecil`
+- `imbécil`
+- `estupido`
+- `estúpido`
+- `estupida`
+- `estúpida`
+- `culero`
+- `culera`
+- `verga`
+- `vergas`
+- `vergazo`
+- `hijodeputa`
+- `hijadeputa`
+- `hijoputa`
+- `pinche`
+- `chinga`
+- `chingado`
+- `chingada`
+- `perra`
+- `zorra`
+- `ramera`
+- `prostituta`
+- `prostitutas`
+- `fuck`
+- `fucking`
+- `fucker`
+- `motherfucker`
+- `shit`
+- `bitch`
+- `asshole`
+- `bastard`
+- `whore`
+- `slut`
+- `nigger`
+- `nigga`
+- `faggot`
+- `retard`
+- `retarded`
+- `nazi`
+- `hitler`
+- `heilhitler`
+
+## Jerga colombiana
+
+- `gonorrea`
+- `gonorreas`
+- `gonorriento`
+- `gonorrienta`
+- `gonorreita`
+- `hijueputa`
+- `hijueputas`
+- `hijuepucha`
+- `hijuepuchas`
+- `iueputa`
+- `ijueputa`
+- `jueputa`
+- `juepucha`
+- `juepumadre`
+- `hpta`
+- `hptd`
+- `h1jueputa`
+- `malparido`
+- `malparida`
+- `malparidos`
+- `malparidas`
+- `malnacido`
+- `malnacida`
+- `pirobo`
+- `piroba`
+- `pirobos`
+- `pirobito`
+- `caremonda`
+- `caremondá`
+- `carechimba`
+- `careculo`
+- `carepito`
+- `careverga`
+- `carevergas`
+- `carenalga`
+- `monda`
+- `mondá`
+- `guevon`
+- `güevón`
+- `guevona`
+- `güevona`
+- `huevon`
+- `huevón`
+- `huevona`
+- `huevonazo`
+- `güevonazo`
+- `marica`
+- `maricas`
+- `maricon`
+- `maricón`
+- `maricones`
+- `mariconazo`
+- `mariconada`
+- `cacorro`
+- `cacorra`
+- `lambon`
+- `lambón`
+- `lambona`
+- `comemierda`
+- `lameculos`
+- `chupamedias`
+- `culicagado`
+- `culicagao`
+- `garbimba`
+- `desgracado`
+- `desgraciado`
+- `gamin`
+- `gamín`
+- `gamines`
+- `ñero`
+- `ñera`
+- `ñeros`
+- `veneco`
+- `venecos`
+- `veneca`
+- `paraco`
+- `paracos`
+- `paramilitar`
+- `paramilitares`
+- `guerrillero`
+- `guerrillera`
+- `narco`
+- `narcos`
+- `sicario`
+- `sicarios`
+- `traqueto`
+- `traqueta`
+- `traquetos`
+- `nojoda`
+- `mamón`
+- `mamona`
+- `lámpara`
+- `lampara`
+- `chusma`
+- `chusmero`
+- `desechable`
+- `desechables`
+- `soplón`
+- `soplona`
+- `cagada`
+- `cagado`
+- `cagao`
+- `valeverga`
+- `mevaleverga`
+- `triplehijueputa`
+- `doblehijueputa`
+- `lagranputa`
+- `sumadre`
+- `sumama`
+- `retrasado`
+- `retrasada`
+- `mongolico`
+- `mongólico`
+- `subnormal`
+- `tombo`
+- `tombos`
+
+## Política Colombia 2026
+
+- `abelardo de la espriella`
+- `abelardodelaespriella`
+- `de la espriella`
+- `de-la-espriella`
+- `espriella`
+- `espriellaotero`
+- `tigreabelardo`
+- `abelardoeltigre`
+- `josemanuelrestrepo`
+- `jose manuel restrepo`
+- `josé manuel restrepo`
+- `restrepoabondano`
+- `defensoresdelapatria`
+- `ivan cepeda`
+- `iván cepeda`
+- `ivancepeda`
+- `iváncepeda`
+- `cepeda`
+- `cepedacastro`
+- `aida quilcue`
+- `aída quilcué`
+- `aidaquilcue`
+- `quilcue`
+- `quilcué`
+- `pactohistorico`
+- `pacto histórico`
+- `pactohistórico`
+- `paloma valencia`
+- `palomavalencia`
+- `palomasusana`
+- `valencialaserna`
+- `juandanieloviedo`
+- `juan daniel oviedo`
+- `sergio fajardo`
+- `sergiofajardo`
+- `fajardopresidente`
+- `ednabonilla`
+- `edna bonilla`
+- `dignidadycompromiso`
+- `claudia lopez`
+- `claudia lópez`
+- `claudialopez`
+- `claudianayibe`
+- `santiago botero`
+- `santiagobotero`
+- `roy barreras`
+- `roybarreras`
+- `royleonardo`
+- `marthaluciazamora`
+- `martha lucia zamora`
+- `mauricio lizcano`
+- `mauriciolizcano`
+- `miguel uribe londoño`
+- `migueluribelondono`
+- `migueluribelondoño`
+- `sondra macollins`
+- `sondramacollins`
+- `macollins`
+- `gustavo matamoros`
+- `gustavomatamoros`
+- `luis gilberto murillo`
+- `luisgilbertomurillo`
+- `carlos caicedo`
+- `carloscaicedo`
+- `caicedoomar`
+- `juan manuel galan`
+- `juanmanuelgalan`
+- `juanmanuelgalán`
+- `juan carlos pinzon`
+- `juancarlospinzon`
+- `juancarlospinzón`
+- `vicky davila`
+- `vicky dávila`
+- `vickydavila`
+- `victoriaeugenia`
+- `enrique penalosa`
+- `enrique peñalosa`
+- `enriquepenalosa`
+- `enriquepeñalosa`
+- `anibal gaviria`
+- `aníbal gaviria`
+- `anibalgaviria`
+- `david luna sanchez`
+- `davidlunasanchez`
+- `mauricio cardenas`
+- `mauricio cárdenas`
+- `mauriciocardenas`
+- `carolina corcho`
+- `carolinacorcho`
+- `gustavo bolivar`
+- `gustavo bolívar`
+- `gustavobolivar`
+- `susana muhamad`
+- `susanamuhamad`
+- `maria jose pizarro`
+- `maría josé pizarro`
+- `mariajosepizarro`
+- `francia marquez`
+- `francia márquez`
+- `franciamarquez`
+- `franciamárquez`
+- `veronica alcocer`
+- `verónica alcocer`
+- `veronicaalcocer`
+- `miguel uribe turbay`
+- `migueluribe`
+- `migueluribeturbay`
+- `uribe turbay`
+- `maria fernanda cabal`
+- `maría fernanda cabal`
+- `mariafernandacabal`
+- `fernandacabal`
+- `paola holguin`
+- `paola holguín`
+- `paolaholguin`
+- `juan fernando cristo`
+- `juanfernandocristo`
+- `camilo romero`
+- `camiloromero`
+- `clara lopez`
+- `clara lópez`
+- `claralopez`
+- `daniel quintero`
+- `danielquintero`
+- `quinterocalle`
+- `federico gutierrez`
+- `federico gutiérrez`
+- `federicogutierrez`
+- `ficogutierrez`
+- `alejandro gaviria`
+- `alejandrogaviria`
+- `alejandrochar`
+- `alexchar`
+- `arturochar`
+- `elsa noguera`
+- `elsanoguera`
+- `carlos amaya`
+- `carlosamaya`
+- `jaime pumarejo`
+- `jaimepumarejo`
+- `polopolo`
+- `miguelpolopolo`
+- `jotapehernandez`
+- `jotape`
+- `francisco barbosa`
+- `franciscobarbosa`
+- `efrain cepeda`
+- `efraín cepeda`
+- `efraincepeda`
+- `daniel palacios`
+- `danielpalacios`
+- `pipecordoba`
+- `pipecórdoba`
+- `luis carlos reyes`
+- `luiscarlosreyes`
+- `ingrid betancourt`
+- `ingridbetancourt`
+- `maurice armitage`
+- `mauricearmitage`
+- `humberto de la calle`
+- `humbertodelacalle`
+- `antonio navarro`
+- `antonionavarro`
+- `angelica lozano`
+- `angélica lozano`
+- `angelicalozano`
+- `catherine juvinao`
+- `catherinejuvinao`
+- `jennifer pedraza`
+- `jenniferpedraza`
+- `katherine miranda`
+- `katherinemiranda`
+- `david racero`
+- `davidracero`
+- `alirio uribe`
+- `aliriouribe`
+- `aida avella`
+- `aída avella`
+- `aidaavella`
+- `piedad cordoba`
+- `piedad córdoba`
+- `piedadcordoba`
+- `armando benedetti`
+- `armandobenedetti`
+- `laura sarabia`
+- `laurasarabia`
+- `hollman morris`
+- `hollmanmorris`
+- `ivan velasquez`
+- `iván velásquez`
+- `ivanvelasquez`
+- `jose antonio ocampo`
+- `joseantonioocampo`
+- `ricardo bonilla`
+- `ricardobonilla`
+- `guillermo jaramillo`
+- `guillermojaramillo`
+- `gloria ines ramirez`
+- `gloriainesramirez`
+- `marta lucia ramirez`
+- `marta lucía ramírez`
+- `martaluciaramirez`
+- `german vargas lleras`
+- `germán vargas lleras`
+- `vargaslleras`
+- `oscar ivan zuluaga`
+- `óscar iván zuluaga`
+- `oscarivanzuluaga`
+- `franciscosantos`
+- `jose obdulio`
+- `josé obdulio`
+- `joseobdulio`
+- `rafaelnieto`
+- `dilianfrancisca`
+- `dilianfranciscatoro`
+- `carlos fernando galan`
+- `carlosfernandogalan`
+- `carlosfernandogalán`
+- `luis carlos galan`
+- `luiscarlosgalan`
+- `luiscarlosgalán`
+- `jorge eliecer gaitan`
+- `jorge eliecer gaitán`
+- `jorgeeliecergaitan`
+
+## Presidentes y figuras históricas
+
+- `gustavo petro`
+- `gustavopetro`
+- `petro urrego`
+- `petrourrego`
+- `petro`
+- `p3tro`
+- `álvaro uribe`
+- `alvaro uribe`
+- `alvarouribe`
+- `álvarouribe`
+- `uribe velez`
+- `uribe vélez`
+- `uribevelez`
+- `uribe`
+- `ur1be`
+- `ivan duque`
+- `iván duque`
+- `ivanduque`
+- `ivánduque`
+- `juan manuel santos`
+- `juanmanuelsantos`
+- `andres pastrana`
+- `andrés pastrana`
+- `andrespastrana`
+- `ernesto samper`
+- `ernestosamper`
+- `cesar gaviria`
+- `césar gaviria`
+- `cesargaviria`
+- `virgilio barco`
+- `virgiliobarco`
+- `belisario betancur`
+- `belisariobetancur`
+- `julio cesar turbay`
+- `juliocesarturbay`
+- `alfonso lopez michelsen`
+- `lopezmichelsen`
+- `misael pastrana`
+- `misaelpastrana`
+- `carlos lleras`
+- `carloslleras`
+- `alberto lleras`
+- `albertolleras`
+- `laureano gomez`
+- `laureanogomez`
+- `mariano ospina`
+- `marianoospina`
+- `enrique olaya`
+- `enriqueolaya`
+- `gustavo rojas pinilla`
+- `rojaspinilla`
+- `alfonso lopez pumarejo`
+- `lopezpumarejo`
+
+## Partidos e instituciones
+
+- `centrodemocratico`
+- `centro democrático`
+- `centrodemocrático`
+- `colombiahumana`
+- `colombia humana`
+- `partido liberal`
+- `partidoliberal`
+- `partido conservador`
+- `partidoconservador`
+- `cambio radical`
+- `cambioradical`
+- `alianza verde`
+- `alianzaverde`
+- `polo democratico`
+- `polo democrático`
+- `polodemocratico`
+- `union patriotica`
+- `unión patriótica`
+- `unionpatriotica`
+- `comunesfarc`
+- `partidocomunes`
+- `marchapatriotica`
+- `marcha patriótica`
+- `fuerzaciudadana`
+- `fuerza ciudadana`
+- `partidomira`
+- `nuevo liberalismo`
+- `nuevoliberalismo`
+- `partido de la u`
+- `partidodelau`
+- `salvacion nacional`
+- `salvación nacional`
+- `ligaanticorrupcion`
+- `ligaanticorrupción`
+- `uribista`
+- `uribistas`
+- `petrista`
+- `petristas`
+- `cepedista`
+- `cepedistas`
+- `presidencia`
+- `casadenarino`
+- `casa de nariño`
+- `casa de narino`
+- `fiscalia`
+- `fiscalía`
+- `procuraduria`
+- `procuraduría`
+- `registraduria`
+- `registraduría`
+- `contraloria`
+- `contraloría`
+- `defensoria`
+- `defensoría`
+- `mindefensa`
+- `mininterior`
+- `mineducacion`
+- `corteconstitucional`
+- `cortesuprema`
+- `consejodeestado`
+- `consejonacionalelectoral`
+- `policianacional`
+- `ejercitonacional`
+- `ejércitonacional`
+- `fuerzasmilitares`
+- `armada nacional`
+- `fuerzaaerea`
+- `diancolombia`
+- `bancodelarepublica`
+- `icbfcolombia`
+- `inpec`
+- `sijin`
+- `dijin`
+- `ctifiscalia`
+
+## Grupos armados y crimen reconocido
+
+- `farc`
+- `farcep`
+- `farc-ep`
+- `elncolombia`
+- `elnguerrilla`
+- `eplguerrilla`
+- `m19guerrilla`
+- `auccolombia`
+- `clandelgolfo`
+- `urabeños`
+- `urabenos`
+- `rastrojos`
+- `oficinadeenvigado`
+- `carteldemedellin`
+- `carteldemedellín`
+- `cartelcali`
+- `cartelnortedelvalle`
+- `lospepes`
+- `disidenciasfarc`
+- `pablo escobar`
+- `pabloescobar`
+- `elpatron`
+- `el patrón`
+- `elpatronmd`
+- `griselda blanco`
+- `griseldablanco`
+- `rodriguez gacha`
+- `rodriguezgacha`
+- `carlos lehder`
+- `carloslehder`
+- `gilbertorodriguez`
+- `popeyevelasquez`
+- `jhonjairotvelasquez`
+- `donberna`
+- `salvatore mancuso`
+- `salvatoremancuso`
+- `jorge40`
+- `timochenko`
+- `ivan marquez`
+- `iván márquez`
+- `ivanmarquez`
+- `jesus santrich`
+- `jesús santrich`
+- `jesussantrich`
+- `gentil duarte`
+- `gentilduarte`
+- `otoniel`
+- `dairo antonio usuga`
+- `aliasotoniel`
+
+## Celebridades y deporte
+
+- `shakira`
+- `jbalvin`
+- `j balvin`
+- `maluma`
+- `karolg`
+- `karol g`
+- `feid`
+- `ryancastro`
+- `blessd`
+- `manuelturizo`
+- `sebastianyatra`
+- `sebastián yatra`
+- `camiloecheverry`
+- `evaluna`
+- `fonseca`
+- `andrescepeda`
+- `andrés cepeda`
+- `silvestredangond`
+- `diomedesdiaz`
+- `diomedes díaz`
+- `kalethmorales`
+- `joe arroyo`
+- `joearroyo`
+- `gruponiche`
+- `aterciopelados`
+- `morat`
+- `piso21`
+- `carlos vives`
+- `carlosvives`
+- `juanes`
+- `sofia vergara`
+- `sofía vergara`
+- `sofiavergara`
+- `john leguizamo`
+- `johnleguizamo`
+- `catalina sandino`
+- `gabriel garcia marquez`
+- `gabrielgarciamarquez`
+- `gabogarcia`
+- `fernando botero`
+- `fernandobotero`
+- `westcol`
+- `laliendra`
+- `la liendra`
+- `aidavictoria`
+- `ricardoquevedo`
+- `lisspereira`
+- `hassam`
+- `donjediondo`
+- `yamidamat`
+- `danielcoronell`
+- `mariajimena`
+- `saludhernandez`
+- `gonzaloguillen`
+- `james rodriguez`
+- `jamesrodriguez`
+- `radamel falcao`
+- `falcao`
+- `radamelfalcao`
+- `luis diaz`
+- `luis díaz`
+- `luisdiaz`
+- `renehiguita`
+- `higuita`
+- `carlos valderrama`
+- `elpibe`
+- `pibevalderrama`
+- `faustino asprilla`
+- `asprilla`
+- `david ospina`
+- `davidospina`
+- `juan fernando quintero`
+- `juanfernandoquintero`
+- `teogutierrez`
+- `carlos bacca`
+- `carlosbacca`
+- `yerry mina`
+- `yerrymina`
+- `juan cuadrado`
+- `juancuadrado`
+- `davinson sanchez`
+- `davinsonsanchez`
+- `nairo quintana`
+- `nairoquintana`
+- `egan bernal`
+- `eganbernal`
+- `rigobertouran`
+- `mariana pajon`
+- `marianapajón`
+- `marianapajon`
+- `caterine ibarguen`
+- `caterineibarguen`
+
+## Marcas
+
+- `nintendo`
+- `playstation`
+- `xboxlive`
+- `riotgames`
+- `blizzard`
+- `minecraft`
+- `fortnite`
+- `activision`
+- `ubisoft`
+- `epicgames`
+- `steamoficial`
+- `bancolombia`
+- `davivienda`
+- `nequi`
+- `daviplata`
+- `rappi`
+- `mercadolibre`
+- `avianca`
+- `ecopetrol`
+- `epmcolombia`
+- `claro`
+- `movistar`
+- `tigo`
+- `womcolombia`
+- `bavaria`
+- `cervezapoker`
+- `cervezaaguila`
+- `clubcolombia`
+- `postobon`
+- `postobón`
+- `colombiana`
+- `juanvaldez`
+- `cafedecolombia`
+- `cocacola`
+- `coca cola`
+- `pepsi`
+- `adidas`
+- `nike`
+- `grupoexito`
+- `falabella`
+- `alkosto`
+- `ktronix`
+- `homecenter`
+
+## Figuras internacionales
+
+- `donaldtrump`
+- `donald trump`
+- `javier milei`
+- `javiermilei`
+- `nayib bukele`
+- `nayibbukele`
+- `nicolas maduro`
+- `nicolás maduro`
+- `nicolasmaduro`
+- `hugo chavez`
+- `hugochávez`
+- `hugochavez`
+- `vladimir putin`
+- `vladimirputin`
+- `zelenski`
+- `benjamin netanyahu`
+- `netanyahu`
+- `claudia sheinbaum`
+- `sheinbaum`
+- `luladasilva`
+- `lula da silva`
+- `santiago abascal`
+- `abascal`

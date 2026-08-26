@@ -1,4 +1,9 @@
 import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
+import { InMemoryNicknameBlacklist } from '../../src/adapters/outbound/persistence/InMemoryNicknameBlacklist'
+import {
+  NICKNAME_BLACKLIST_SEED,
+  buildBlacklistSeed,
+} from '../../src/adapters/outbound/persistence/nickname-blacklist-seed'
 import { FakeIdentityProvider } from '../../src/adapters/outbound/identity/FakeIdentityProvider'
 import { LoggingNotificationRequester } from '../../src/adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../src/adapters/outbound/system/SystemClock'
@@ -445,5 +450,30 @@ describe('sondas de salud', () => {
       version: '0.1.0',
       nodeEnv: 'test',
     })
+  })
+})
+
+describe('Semilla de lista negra', () => {
+  it('no repite identificadores ni terminos', () => {
+    const ids = NICKNAME_BLACKLIST_SEED.map((entry) => entry.id)
+    const terms = NICKNAME_BLACKLIST_SEED.map((entry) => entry.term.toLowerCase())
+
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(new Set(terms).size).toBe(terms.length)
+    expect(NICKNAME_BLACKLIST_SEED.length).toBeGreaterThan(400)
+  })
+
+  it('descarta vacios y duplicados al construir la semilla', () => {
+    expect(buildBlacklistSeed([' Admin ', 'admin', '', 'petro'])).toEqual([
+      { id: 'bl-admin', term: 'Admin' },
+      { id: 'bl-petro', term: 'petro' },
+    ])
+  })
+
+  it('nace hidratada y bloquea un termino de la semilla', async () => {
+    const blacklist = new InMemoryNicknameBlacklist()
+
+    expect(await blacklist.isBlocked('Ana Ramirez')).toBe(false)
+    expect(await blacklist.isBlocked('NexusAdmin')).toBe(true)
   })
 })

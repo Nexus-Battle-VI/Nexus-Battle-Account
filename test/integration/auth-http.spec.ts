@@ -126,7 +126,7 @@ describe('API de cuentas con autenticacion activa', () => {
     it('registra la cuenta vinculada al sujeto del testimonio', async () => {
       const response = await registerAccountRequest(app, {
         email: 'moderador@nexus.test',
-        nickname: 'Persona Moderadora',
+        nickname: 'Cuenta Vinculada Uno',
       }).set('Authorization', bearer('token-moderador'))
 
       expect(response.status).toBe(201)

@@ -185,6 +185,15 @@ describe('RegisterAccount', () => {
     expect(harness.identity.size).toBe(0)
   })
 
+  it('rechaza un apodo que contiene un termino de la semilla vigente', async () => {
+    const harness = buildHarness()
+
+    await expect(
+      harness.registerAccount.execute(validCommand({ displayName: 'GonorreaKing' })),
+    ).rejects.toBeInstanceOf(NicknameBlacklistedError)
+    expect(harness.identity.size).toBe(0)
+  })
+
   it('un termino inactivo no bloquea el apodo', async () => {
     const harness = buildHarness()
     harness.blacklist.add('ramirez', false)

@@ -10,6 +10,7 @@ import { Pool } from 'pg'
 import type { Database } from '../../adapters/outbound/persistence/schema'
 import * as migration001 from '../../adapters/outbound/persistence/migrations/001-accounts'
 import * as migrationHu01 from '../../adapters/outbound/persistence/migrations/hu01-registration'
+import * as migrationHu02BlacklistSeed from '../../adapters/outbound/persistence/migrations/hu02-nickname-blacklist-seed'
 
 export interface DatabaseOptions {
   readonly connectionString: string
@@ -51,6 +52,7 @@ const migrations: MigrationProvider = {
     Promise.resolve({
       '001-accounts': migration001,
       'hu01-registration': migrationHu01,
+      'hu02-nickname-blacklist-seed': migrationHu02BlacklistSeed,
     }),
 }
 

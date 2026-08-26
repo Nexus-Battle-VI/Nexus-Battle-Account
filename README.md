@@ -96,6 +96,8 @@ npm run dev
 
 `POST /api/accounts` recibe `multipart/form-data` (el avatar es archivo, no Base64). El apodo viaja como `nickname` y se persiste en `display_name`. La contraseña no se guarda en PostgreSQL: entra por `IdentityProviderPort` (`FakeIdentityProvider` en local; Cognito sustituye el adaptador).
 
+Tras `migrate:dev`, el registro rechaza apodos que contengan un término activo de la lista negra. La semilla y el volcado están en [docs/nickname-blacklist.md](docs/nickname-blacklist.md) y [docs/nickname-blacklist.txt](docs/nickname-blacklist.txt).
+
 ### El esquema no se migra al arrancar
 
 ```bash

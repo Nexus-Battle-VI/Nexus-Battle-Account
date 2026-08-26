@@ -37,6 +37,7 @@ const config: Config = {
     '!src/main.ts',
     '!src/adapters/outbound/persistence/Postgres*.ts',
     '!src/adapters/outbound/persistence/migrations/hu01-registration.ts',
+    '!src/adapters/outbound/persistence/migrations/hu02-nickname-blacklist-seed.ts',
     '!src/infrastructure/persistence/**',
   ],
   coverageDirectory: 'coverage',

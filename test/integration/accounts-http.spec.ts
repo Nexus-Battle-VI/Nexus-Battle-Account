@@ -89,6 +89,16 @@ describe('API de cuentas', () => {
     expect(response.status).toBe(400)
   })
 
+  it('POST /api/accounts responde 400 si el apodo esta en la lista negra', async () => {
+    const response = await registerAccountRequest(app, {
+      email: 'lista-negra@nexus.test',
+      nickname: 'admin',
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.message).toBe('El apodo no esta permitido por la lista negra vigente.')
+  })
+
   it('POST /api/accounts responde 400 ante un apodo demasiado corto', async () => {
     const response = await registerAccountRequest(app, {
       email: 'corto@nexus.test',
