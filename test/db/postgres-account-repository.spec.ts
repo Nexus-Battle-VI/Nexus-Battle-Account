@@ -102,6 +102,25 @@ describe('PostgresAccountRepository', () => {
     expect(await repository.existsByDisplayName(DisplayName.create('Otro Apodo'))).toBe(false)
   })
 
+  /**
+   * HU-02: el login por apodo reutiliza el indice unico insensible a
+   * mayusculas ya creado en la migracion de HU-01 (`accounts_display_name_ci`),
+   * no uno nuevo.
+   */
+  it('recupera por apodo sin distinguir mayusculas (HU-02)', async () => {
+    const account = buildAccount()
+    await repository.save(account)
+
+    const encontrada = await repository.findByDisplayName(account.currentDisplayName)
+    const enMayusculas = await repository.findByDisplayName(
+      DisplayName.create(account.currentDisplayName.value.toUpperCase()),
+    )
+
+    expect(encontrada?.id.value).toBe(account.id.value)
+    expect(enMayusculas?.id.value).toBe(account.id.value)
+    expect(await repository.findByDisplayName(DisplayName.create('Nadie Aqui'))).toBeNull()
+  })
+
   it('responde sobre la existencia por correo', async () => {
     const account = buildAccount()
     await repository.save(account)
@@ -224,6 +243,30 @@ describe('PostgresAccountRepository', () => {
           .values({ account_id: account.id.value, role: 'SUPERUSUARIO' })
           .execute(),
       ).rejects.toThrow()
+    })
+
+    /**
+     * La migracion `hu03-super-administrator-role` (HU-02) ALTERA la
+     * restriccion original de `001-accounts` para admitir este rol. Esta
+     * prueba demuestra que la union de ambas migraciones -no solo la primera-
+     * describe el vocabulario vigente en el motor.
+     */
+    it('acepta SUPER_ADMINISTRATOR tras la migracion de HU-02', async () => {
+      const account = buildAccount()
+      await repository.save(account)
+
+      await expect(
+        db
+          .insertInto('account_roles')
+          .values({ account_id: account.id.value, role: Role.SuperAdministrator })
+          .execute(),
+      ).resolves.not.toThrow()
+
+      const found = await repository.findById(account.id)
+
+      expect(found?.currentRoles).toEqual(
+        expect.arrayContaining([Role.Player, Role.SuperAdministrator]),
+      )
     })
 
     it('rechaza un estado que no pertenece al vocabulario', async () => {

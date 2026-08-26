@@ -33,6 +33,17 @@ export interface AccountRepositoryPort {
    * sin que quien pregunta tenga que conocer ningun identificador interno.
    */
   findBySubject(subject: string): Promise<Account | null>
+
+  /**
+   * Recupera la cuenta por su apodo (HU-02, login con identificador = apodo).
+   *
+   * Comparacion insensible a mayusculas, igual que `existsByDisplayName`: es
+   * la misma semantica de unicidad ya aprobada en HU-01, no una nueva regla de
+   * normalizacion. En PostgreSQL reutiliza el indice unico
+   * `accounts_display_name_ci` creado en la migracion de HU-01.
+   */
+  findByDisplayName(displayName: DisplayName): Promise<Account | null>
+
   existsByEmail(email: EmailAddress): Promise<boolean>
   existsByDisplayName(displayName: DisplayName): Promise<boolean>
 

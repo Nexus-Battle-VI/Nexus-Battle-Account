@@ -52,6 +52,18 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
     return Promise.resolve(null)
   }
 
+  findByDisplayName(displayName: DisplayName): Promise<Account | null> {
+    const needle = displayName.value.toLowerCase()
+
+    for (const snapshot of this.byId.values()) {
+      if (snapshot.displayName.toLowerCase() === needle) {
+        return Promise.resolve(hydrateAccount(snapshot))
+      }
+    }
+
+    return Promise.resolve(null)
+  }
+
   existsByEmail(email: EmailAddress): Promise<boolean> {
     for (const snapshot of this.byId.values()) {
       if (snapshot.email === email.value) {

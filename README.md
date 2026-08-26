@@ -27,6 +27,8 @@ La comprobación de firma la hace [`aws-jwt-verify`](https://github.com/awslabs/
 | `GET /api/accounts/me`                | Testimonio válido. Resuelve **la propia cuenta**        |
 | `GET /api/accounts/:id`               | Rol **`ADMINISTRATOR`**                                 |
 | `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                 |
+| `POST /api/sessions`                  | **Pública.** Pedirla ya exigiría la sesión que crea     |
+| `POST /api/sessions/second-factor`    | **Pública.** Continúa el login administrativo (HU-02)   |
 | `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio         |
 
 ### El registro exige testimonio, y no es arbitrario
@@ -179,9 +181,44 @@ Documentación interactiva de la API en `http://localhost:3000/api/docs`.
 | `GET`  | `/api/accounts/me`               | Recupera la cuenta del testimonio                              |
 | `GET`  | `/api/accounts/:id`              | Recupera una cuenta                                            |
 | `POST` | `/api/accounts/:id/verification` | Marca la cuenta como verificada                                |
+| `POST` | `/api/sessions`                  | Inicia sesion con correo/apodo + contrasena (HU-02)            |
+| `POST` | `/api/sessions/second-factor`    | Completa el segundo factor administrativo (HU-02)              |
 | `GET`  | `/api/health/live`               | El proceso responde. No consulta dependencias                  |
 | `GET`  | `/api/health/ready`              | Evalúa las dependencias reales. Responde `503` si alguna falla |
 | `GET`  | `/api/version`                   | Servicio, versión y entorno                                    |
+
+## Inicio de sesion y RBAC (HU-02)
+
+`POST /api/sessions` recibe `identifier` (correo o apodo) y `password`. El
+servicio resuelve el identificador internamente -Web nunca traduce un apodo a
+un correo- y delega la verificacion de la contrasena en
+`AuthenticationProviderPort`, un puerto separado de `IdentityProviderPort`
+(vease la justificacion en el propio archivo de puertos). El contrato NO
+acepta un campo `role`: el rol siempre se lee de la cuenta ya persistida.
+
+Roles reconocidos: `PLAYER`, `MODERATOR`, `ADMINISTRATOR` y
+`SUPER_ADMINISTRATOR`. Esta rama solo LEE el rol vigente; asignarlo es HU-39,
+todavia no implementada. No existe una API publica que cree un
+`SUPER_ADMINISTRATOR`: es una cuenta raiz unica, fuera del alcance de HU-01 y
+HU-04.
+
+Para `ADMINISTRATOR`/`SUPER_ADMINISTRATOR`, una contrasena correcta nunca
+basta: `POST /api/sessions` responde `SECOND_FACTOR_REQUIRED` en lugar de
+completar la sesion, y `POST /api/sessions/second-factor` es quien la
+completa. El caso de uso falla cerrado -responde `503`- si una cuenta
+administrativa se autentica sin que el proveedor emita ningun reto: eso
+significa que el segundo factor no se esta aplicando para esa cuenta, no que
+el login tuvo exito.
+
+**Estado real de la integracion:** igual que `IdentityProviderPort` para el
+alta (HU-01), el adaptador Cognito de `AuthenticationProviderPort` sigue
+pendiente. Opera `FakeAuthenticationProvider`, una implementacion real y
+probada del puerto sobre almacenamiento en memoria, sembrada explicitamente en
+las pruebas. El mecanismo de segundo factor aprobado por el cliente es correo
+electronico, pero el user pool de Cognito ya aprovisionado tiene TOTP, no
+correo, porque el correo exige SES y esa decision sigue pendiente (vease
+ADR-004 en Nexus-Battle-Infrastructure). Este puerto no asume ninguno de los
+dos: transporta el reto tal como el proveedor lo emita.
 
 ## Estructura
 
@@ -222,9 +259,11 @@ La imagen es multi-etapa, se ejecuta con el usuario sin privilegios `node`, incl
 
 - **La persistencia por defecto es en memoria y se pierde al reiniciar.** Con `PERSISTENCE_DRIVER=postgres` opera el adaptador real sobre PostgreSQL con Kysely, probado contra un motor en contenedor. El repositorio en memoria no es un resto del andamiaje: es lo que permite probar el dominio y los casos de uso **sin Docker**.
 - **El alta de identidad sigue simulada.** `FakeIdentityProvider` implementa `IdentityProviderPort` (email + contraseña, sin persistir la contraseña). Cognito sustituye ese adaptador sin tocar el dominio. Ver ADR-004.
+- **La autenticación (HU-02) también sigue simulada, por la misma razón.** `FakeAuthenticationProvider` implementa `AuthenticationProviderPort`. Mientras el registro cree el sujeto con `FakeIdentityProvider` en lugar de un usuario real del pool, no hay ningún usuario real contra el que autenticar: los dos adaptadores Cognito pendientes están acoplados.
+- **El mecanismo de segundo factor aprobado (correo) no coincide con lo aprovisionado (TOTP).** El pool de Cognito exige SES para MFA por correo, todavía no decidido. Ver ADR-004 en Nexus-Battle-Infrastructure.
 - **El avatar se guarda en disco local.** `LocalAvatarStorage` escribe bajo `AVATAR_STORAGE_PATH`. Un adaptador AWS sustituye ese puerto sin tocar `RegisterAccount`.
 - **Las solicitudes de notificación no se publican en una cola.** Se registran con la forma exacta del mensaje que consumirá Notifications; la publicación real depende de ADR-006.
-- La autenticación, la emisión de JWT y el segundo factor por correo no forman parte de este alcance. El agregado ya distingue si una cuenta puede autenticarse, que es la regla de negocio que corresponde a este contexto.
+- La asignación y modificación de roles (`HU-39`) no forma parte de este alcance: HU-02 solo lee el rol vigente de la cuenta.
 
 ## Contribución
 

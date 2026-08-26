@@ -2,10 +2,13 @@ import { Module, type CanActivate } from '@nestjs/common'
 import { APP_GUARD, Reflector } from '@nestjs/core'
 
 import { AccountsController } from '../../adapters/inbound/http/accounts.controller'
+import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
 import { HealthController } from '../../adapters/inbound/http/health.controller'
 import {
+  COMPLETE_SECOND_FACTOR,
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
+  LOGIN_ACCOUNT,
   REGISTER_ACCOUNT,
   VERIFY_ACCOUNT,
 } from '../../adapters/inbound/http/tokens'
@@ -15,8 +18,11 @@ import { RegisterAccount } from '../../application/use-cases/RegisterAccount'
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
+import { LoginAccount } from '../../application/use-cases/LoginAccount'
+import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecondFactor'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import { IDENTITY_PROVIDER } from '../../application/ports/IdentityProviderPort'
+import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
 import { CLOCK } from '../../application/ports/ClockPort'
 import { ID_GENERATOR } from '../../application/ports/IdGeneratorPort'
@@ -25,6 +31,7 @@ import { NICKNAME_BLACKLIST } from '../../application/ports/NicknameBlacklistPor
 import { SECURITY_QUESTION_CATALOG } from '../../application/ports/SecurityQuestionCatalogPort'
 import type { AccountRepositoryPort } from '../../application/ports/AccountRepositoryPort'
 import type { IdentityProviderPort } from '../../application/ports/IdentityProviderPort'
+import type { AuthenticationProviderPort } from '../../application/ports/AuthenticationProviderPort'
 import type { NotificationRequestPort } from '../../application/ports/NotificationRequestPort'
 import type { ClockPort } from '../../application/ports/ClockPort'
 import type { IdGeneratorPort } from '../../application/ports/IdGeneratorPort'
@@ -50,6 +57,7 @@ import { createDatabase } from '../persistence/database'
 import type { Database } from '../../adapters/outbound/persistence/schema'
 import type { Kysely } from 'kysely'
 import { FakeIdentityProvider } from '../../adapters/outbound/identity/FakeIdentityProvider'
+import { FakeAuthenticationProvider } from '../../adapters/outbound/identity/FakeAuthenticationProvider'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
@@ -71,7 +79,7 @@ export const DATABASE = Symbol('Database')
  * framework y podria ejecutarse fuera de el sin cambios.
  */
 @Module({
-  controllers: [AccountsController, HealthController],
+  controllers: [AccountsController, SessionsController, HealthController],
   providers: [
     {
       provide: APP_CONFIG,
@@ -142,6 +150,19 @@ export const DATABASE = Symbol('Database')
       provide: IDENTITY_PROVIDER,
       useFactory: (ids: IdGeneratorPort): IdentityProviderPort =>
         new FakeIdentityProvider(() => ids.generate()),
+      inject: [ID_GENERATOR],
+    },
+    {
+      // El adaptador Cognito de este puerto (HU-02) sigue pendiente, igual que
+      // el de IDENTITY_PROVIDER para el registro: ninguno de los dos puede
+      // completarse mientras el alta de HU-01 siga creando el sujeto con
+      // FakeIdentityProvider en lugar de un usuario real del pool. Ver el
+      // reporte de HU-02 para el detalle del blocker. Sin sembrar (`seed`),
+      // este Fake no autentica a nadie: es la raiz de composicion, no el
+      // arnes de pruebas, y aqui no hay credenciales de prueba que sembrar.
+      provide: AUTHENTICATION_PROVIDER,
+      useFactory: (ids: IdGeneratorPort): AuthenticationProviderPort =>
+        new FakeAuthenticationProvider(() => ids.generate()),
       inject: [ID_GENERATOR],
     },
     {
@@ -250,6 +271,22 @@ export const DATABASE = Symbol('Database')
       useFactory: (accounts: AccountRepositoryPort, clock: ClockPort): VerifyAccount =>
         new VerifyAccount({ accounts, clock }),
       inject: [ACCOUNT_REPOSITORY, CLOCK],
+    },
+    {
+      provide: LOGIN_ACCOUNT,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        authenticationProvider: AuthenticationProviderPort,
+      ): LoginAccount => new LoginAccount({ accounts, authenticationProvider }),
+      inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
+    },
+    {
+      provide: COMPLETE_SECOND_FACTOR,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        authenticationProvider: AuthenticationProviderPort,
+      ): CompleteSecondFactor => new CompleteSecondFactor({ accounts, authenticationProvider }),
+      inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
     },
     {
       provide: READINESS_CHECKS,

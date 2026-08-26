@@ -9,6 +9,7 @@ import {
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { ALL_ROLES, Role } from '../../src/domain/entities/Role'
 import { up } from '../../src/adapters/outbound/persistence/migrations/001-accounts'
+import { up as upSuperAdministratorRole } from '../../src/adapters/outbound/persistence/migrations/hu03-super-administrator-role'
 import { describeError } from '../../src/infrastructure/observability/describe-error'
 
 const ROW: AccountRow = {
@@ -90,25 +91,42 @@ describe('Traduccion entre fila e instantanea', () => {
  * Esta prueba es lo que evita que esa duplicacion se convierta en divergencia:
  * si alguien anade un estado o un rol al dominio sin escribir la migracion
  * correspondiente, falla aqui y no en produccion al intentar guardar.
+ *
+ * El vocabulario de roles ya no vive en un unico archivo: `001-accounts`
+ * declaro la restriccion original (PLAYER/MODERATOR/ADMINISTRATOR) y
+ * `hu03-super-administrator-role` la ALTERA para anadir SUPER_ADMINISTRATOR
+ * (HU-02). Una migracion aplicada no se edita, asi que el vocabulario EFECTIVO
+ * de hoy es la union de ambos textos, no solo el de `001-accounts`.
  */
 describe('El vocabulario del dominio y el de la migracion no divergen', () => {
   const sqlDeLaMigracion = up.toString()
+  const sqlDelVocabularioDeRoles = up.toString() + upSuperAdministratorRole.toString()
 
   it.each(Object.values(AccountStatus))('la migracion admite el estado %s', (status) => {
     expect(sqlDeLaMigracion).toContain(`'${status}'`)
   })
 
-  it.each(ALL_ROLES)('la migracion admite el rol %s', (role) => {
-    expect(sqlDeLaMigracion).toContain(`'${role}'`)
+  it.each(ALL_ROLES)('la union de migraciones admite el rol %s', (role) => {
+    expect(sqlDelVocabularioDeRoles).toContain(`'${role}'`)
   })
 
-  it('la migracion no admite valores que el dominio desconoce', () => {
+  it('la migracion inicial no admite valores que el dominio desconoce', () => {
     const enLaRestriccion = [...sqlDeLaMigracion.matchAll(/'([A-Z_]{3,})'/g)].map(
       (match) => match[1]!,
     )
     const conocidos: readonly string[] = [...Object.values(AccountStatus), ...ALL_ROLES]
 
     expect(enLaRestriccion.filter((value) => !conocidos.includes(value))).toEqual([])
+  })
+
+  it('la migracion de SUPER_ADMINISTRATOR no admite valores que el dominio desconoce', () => {
+    const enLaRestriccion = [
+      ...upSuperAdministratorRole.toString().matchAll(/'([A-Z_]{3,})'/g),
+    ].map((match) => match[1]!)
+
+    expect(
+      enLaRestriccion.filter((value) => !(ALL_ROLES as readonly string[]).includes(value)),
+    ).toEqual([])
   })
 })
 

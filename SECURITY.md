@@ -45,7 +45,10 @@ El equipo propietario acusa recibo y coordina la corrección junto con los Scrum
 
 ## Consideraciones específicas del servicio
 
-- **Este servicio no almacena contraseñas ni secretos de autenticación.** El registro y la verificación de credenciales pertenecen al proveedor de identidad externo, detrás de `IdentityProviderPort`. Esa separación es deliberada y no debe romperse añadiendo un campo de contraseña al agregado.
+- **Este servicio no almacena contraseñas ni secretos de autenticación.** El registro y la verificación de credenciales pertenecen al proveedor de identidad externo, detrás de `IdentityProviderPort` (alta) y `AuthenticationProviderPort` (verificación de contraseña y segundo factor, HU-02). Esa separación es deliberada y no debe romperse añadiendo un campo de contraseña al agregado.
+- **El login (HU-02) no distingue "correo inexistente" de "contraseña incorrecta" en su respuesta.** Ambos casos, y una cuenta pendiente de verificación o suspendida, producen exactamente el mismo resultado (`invalidCredentials`, HTTP 401 con el mismo mensaje), para no permitir enumerar cuentas por su existencia o su estado.
+- **El rol nunca se acepta desde la petición de login.** El contrato HTTP no declara un campo `role`; el `ValidationPipe` global lo rechaza con 400 si llega. El rol se lee siempre de la cuenta ya persistida.
+- **Una cuenta `ADMINISTRATOR` o `SUPER_ADMINISTRATOR` no obtiene sesión solo con la contraseña.** El caso de uso exige completar un segundo factor y falla cerrado (no concede la sesión) si el proveedor no emite un reto para una cuenta de ese nivel, en lugar de asumir que la ausencia de reto significa que no hace falta.
 - El servicio trata correos electrónicos y nombres visibles, que son datos personales. La observabilidad registra el dominio del correo, nunca la dirección completa.
 - La validación de entrada descarta propiedades no declaradas y rechaza la petición si llegan campos desconocidos, de modo que un cliente no puede inyectar atributos que el contrato no contempla.
 - Los roles no se aceptan desde la petición de registro: toda cuenta nace con el rol base y solo un administrador puede elevarla.

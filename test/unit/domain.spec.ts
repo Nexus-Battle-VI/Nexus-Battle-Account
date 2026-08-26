@@ -1,6 +1,6 @@
 import { Account } from '../../src/domain/entities/Account'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
-import { ALL_ROLES, Role, isRole } from '../../src/domain/entities/Role'
+import { ALL_ROLES, Role, isAdministrativeRole, isRole } from '../../src/domain/entities/Role'
 import { RolePolicy } from '../../src/domain/policies/RolePolicy'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
@@ -84,10 +84,18 @@ describe('AccountId', () => {
 })
 
 describe('Role', () => {
-  it('reconoce los roles validos', () => {
-    expect(ALL_ROLES).toHaveLength(3)
+  it('reconoce los roles validos, incluido SUPER_ADMINISTRATOR (HU-02)', () => {
+    expect(ALL_ROLES).toHaveLength(4)
     expect(isRole('ADMINISTRATOR')).toBe(true)
+    expect(isRole('SUPER_ADMINISTRATOR')).toBe(true)
     expect(isRole('SUPERUSER')).toBe(false)
+  })
+
+  it('identifica los roles que exigen segundo factor (HU-02, CA-06)', () => {
+    expect(isAdministrativeRole([Role.Administrator])).toBe(true)
+    expect(isAdministrativeRole([Role.SuperAdministrator])).toBe(true)
+    expect(isAdministrativeRole([Role.Player, Role.Moderator])).toBe(false)
+    expect(isAdministrativeRole([])).toBe(false)
   })
 })
 
