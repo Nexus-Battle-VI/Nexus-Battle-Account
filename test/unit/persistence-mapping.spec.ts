@@ -9,6 +9,7 @@ import {
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { ALL_ROLES, Role } from '../../src/domain/entities/Role'
 import { up } from '../../src/adapters/outbound/persistence/migrations/001-accounts'
+import { describeError } from '../../src/infrastructure/observability/describe-error'
 
 const ROW: AccountRow = {
   id: 'acc-1',
@@ -94,5 +95,36 @@ describe('El vocabulario del dominio y el de la migracion no divergen', () => {
     const conocidos: readonly string[] = [...Object.values(AccountStatus), ...ALL_ROLES]
 
     expect(enLaRestriccion.filter((value) => !conocidos.includes(value))).toEqual([])
+  })
+})
+
+/**
+ * Muchas bibliotecas rechazan con `unknown`. Pasar eso por `String()` a secas
+ * convierte cualquier objeto en `[object Object]` justo cuando mas falta hace
+ * saber que ocurrio.
+ */
+describe('describeError', () => {
+  it('usa el mensaje cuando es un Error', () => {
+    expect(describeError(new Error('algo fallo'))).toBe('algo fallo')
+  })
+
+  it('serializa un objeto en lugar de producir [object Object]', () => {
+    expect(describeError({ code: '23505', detail: 'duplicado' })).toBe(
+      '{"code":"23505","detail":"duplicado"}',
+    )
+  })
+
+  it.each([
+    [undefined, 'undefined'],
+    [null, 'null'],
+  ])('describe %s sin romperse', (valor, esperado) => {
+    expect(describeError(valor)).toBe(esperado)
+  })
+
+  it('no se rompe con una estructura circular', () => {
+    const circular: Record<string, unknown> = {}
+    circular.yo = circular
+
+    expect(describeError(circular)).toBe('error no serializable')
   })
 })

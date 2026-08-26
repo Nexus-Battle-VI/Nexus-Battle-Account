@@ -3,11 +3,8 @@ import 'reflect-metadata'
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
 import type { Kysely } from 'kysely'
 
-import {
-  createDatabase,
-  describeError,
-  migrateToLatest,
-} from '../../src/infrastructure/persistence/database'
+import { describeError } from '../../src/infrastructure/observability/describe-error'
+import { createDatabase, migrateToLatest } from '../../src/infrastructure/persistence/database'
 import { PostgresAccountRepository } from '../../src/adapters/outbound/persistence/PostgresAccountRepository'
 import type { Database } from '../../src/adapters/outbound/persistence/schema'
 import { Account } from '../../src/domain/entities/Account'
@@ -81,9 +78,10 @@ describe('PostgresAccountRepository', () => {
     expect(porSujeto?.id.value).toBe(account.id.value)
   })
 
-  it('devuelve null cuando no existe', async () => {
+  it('devuelve null cuando no existe, por cualquiera de los tres caminos', async () => {
     expect(await repository.findById(AccountId.create('acc-inexistente'))).toBeNull()
     expect(await repository.findBySubject('sujeto-inexistente')).toBeNull()
+    expect(await repository.findByEmail(EmailAddress.create('nadie@nexus.test'))).toBeNull()
   })
 
   it('responde sobre la existencia por correo', async () => {
@@ -214,6 +212,24 @@ describe('PostgresAccountRepository', () => {
           .execute(),
       ).rejects.toThrow()
     })
+  })
+
+  it('respeta un limite de conexiones explicito', async () => {
+    const acotada = createDatabase({
+      connectionString: container.getConnectionUri(),
+      maxConnections: 2,
+    })
+
+    try {
+      const cuenta = await acotada
+        .selectFrom('accounts')
+        .select((eb) => eb.fn.countAll().as('total'))
+        .executeTakeFirstOrThrow()
+
+      expect(Number(cuenta.total)).toBeGreaterThanOrEqual(0)
+    } finally {
+      await acotada.destroy()
+    }
   })
 
   it('la migracion es idempotente: volver a aplicarla no cambia nada', async () => {

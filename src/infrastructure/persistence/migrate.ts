@@ -1,6 +1,7 @@
 import { loadConfig } from '../config/env'
 import { createLogger } from '../observability/logger'
-import { createDatabase, describeError, migrateToLatest } from './database'
+import { describeError } from '../observability/describe-error'
+import { createDatabase, migrateToLatest } from './database'
 
 /**
  * Punto de entrada de `npm run migrate`.

@@ -52,31 +52,6 @@ const migrations: MigrationProvider = {
     }),
 }
 
-/**
- * Describe un error de origen desconocido sin producir `[object Object]`.
- *
- * El migrador devuelve `unknown`, y pasarlo por `String()` a secas convierte
- * cualquier objeto en texto inutil justo cuando mas falta hace saber que paso.
- */
-export const describeError = (error: unknown): string => {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  // `JSON.stringify` declara devolver `string`, pero con `undefined` devuelve
-  // `undefined` en ejecucion. Se atiende el caso antes en lugar de confiar en
-  // el tipo, que aqui miente.
-  if (error === undefined || error === null) {
-    return String(error)
-  }
-
-  try {
-    return JSON.stringify(error)
-  } catch {
-    return 'error no serializable'
-  }
-}
-
 export interface MigrationOutcome {
   readonly applied: readonly string[]
   readonly error: unknown
