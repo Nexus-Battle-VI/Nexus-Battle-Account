@@ -34,6 +34,8 @@ import type { TokenVerifierPort } from '../../application/ports/TokenVerifierPor
 import { CognitoTokenVerifier } from '../../adapters/outbound/identity/CognitoTokenVerifier'
 
 import { InMemoryAccountRepository } from '../../adapters/outbound/persistence/InMemoryAccountRepository'
+import { PostgresAccountRepository } from '../../adapters/outbound/persistence/PostgresAccountRepository'
+import { createDatabase } from '../persistence/database'
 import { FakeIdentityProvider } from '../../adapters/outbound/identity/FakeIdentityProvider'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
@@ -74,17 +76,28 @@ export const LOGGER = Symbol('Logger')
     {
       provide: ACCOUNT_REPOSITORY,
       useFactory: (config: AppConfig, logger: Logger): AccountRepositoryPort => {
-        if (config.persistenceDriver === PersistenceDriver.Postgres) {
-          // La configuracion se valida al arrancar para que un despliegue mal
-          // parametrizado falle de inmediato. El adaptador PostgreSQL depende
-          // de que ADR-005 decida el ORM; no se sustituye por una simulacion.
-          logger.warn('postgres_driver_not_available', {
-            detail:
-              'El adaptador PostgreSQL requiere ADR-005 aprobado. Se usa el repositorio en memoria.',
+        if (config.persistenceDriver !== PersistenceDriver.Postgres) {
+          logger.warn('in_memory_persistence', {
+            detail: 'PERSISTENCE_DRIVER=memory: el estado se pierde al reiniciar el servicio.',
           })
+
+          return new InMemoryAccountRepository()
         }
 
-        return new InMemoryAccountRepository()
+        // `loadConfig` ya garantiza que DATABASE_URL existe con este driver: un
+        // servicio mal configurado no debe arrancar y aparentar salud.
+        if (config.databaseUrl === null) {
+          throw new Error('DATABASE_URL es obligatorio con PERSISTENCE_DRIVER=postgres.')
+        }
+
+        logger.info('postgres_persistence', { detail: 'Adaptador PostgreSQL activo.' })
+
+        // El esquema NO se migra aqui. Migrar al arrancar hace que varias
+        // replicas migren a la vez y que una migracion rota deje el servicio en
+        // bucle de reinicio. Es un paso explicito: `npm run migrate`.
+        return new PostgresAccountRepository(
+          createDatabase({ connectionString: config.databaseUrl }),
+        )
       },
       inject: [APP_CONFIG, LOGGER],
     },

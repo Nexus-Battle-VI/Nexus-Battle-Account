@@ -60,6 +60,47 @@ Con eso, `GET /api/accounts/me` resuelve la propia cuenta sin que quien pregunta
 
 Ver `docs/adr/ADR-004-identity-directory.md` en Nexus-Battle-Infrastructure.
 
+## Persistencia
+
+PostgreSQL con **Kysely** ([ADR-012](https://github.com/Nexus-Battle-VI/Nexus-Battle-Infrastructure/blob/main/docs/adr/ADR-012-orm-odm.md)). Kysely es un constructor de consultas, no un ORM: **cada consulta esta escrita a la vista**, y no hay carga perezosa que dispare consultas dentro de un bucle sin que aparezcan en el codigo.
+
+| Variable                      | Efecto                                                       |
+| ----------------------------- | ------------------------------------------------------------ |
+| `PERSISTENCE_DRIVER=memory`   | Repositorio en proceso. **El estado se pierde al reiniciar** |
+| `PERSISTENCE_DRIVER=postgres` | Adaptador real. Exige `DATABASE_URL`                         |
+
+### El esquema no se migra al arrancar
+
+```bash
+npm run migrate
+```
+
+Es un paso explicito del despliegue, y el motivo es concreto: migrar desde el arranque hace que **varias replicas migren a la vez**, y que un despliegue con una migracion rota deje el servicio en **bucle de reinicio** en lugar de fallar una sola vez, de forma visible.
+
+### La version de Kysely esta fijada en la linea 0.28 a proposito
+
+**Kysely 0.29 es ESM puro**, y este servicio compila a CommonJS porque el CLI de NestJS 11 lo hace. TypeScript 5.9.3 **no permite importar un modulo ESM desde CommonJS** en ninguno de sus modos, ni siquiera `node20` — se comprobo uno por uno.
+
+Node 24 si soporta `require()` de ESM, asi que la limitacion es del compilador, no del motor. Hasta que TypeScript lo admita, la linea `0.28` es la ultima que publica una compilacion CommonJS.
+
+Se usa `0.28.17` y no una anterior porque las versiones previas arrastran **tres avisos de seguridad** de inyeccion SQL, el ultimo corregido justo en `0.28.17`.
+
+### Las restricciones viven en el motor
+
+El esquema valida el vocabulario de estados y de roles con restricciones `CHECK`: **un rol inventado no llega a escribirse**, aunque el codigo se equivoque.
+
+Una migracion no puede importar el dominio —queda congelada en el tiempo y debe seguir siendo ejecutable tal y como se escribio—, asi que ese vocabulario se repite en SQL. Hay **una prueba que compara ambos** y falla si alguien anade un estado o un rol al dominio sin escribir la migracion correspondiente.
+
+### Pruebas contra el motor real
+
+```bash
+npm run test:db
+```
+
+Levantan PostgreSQL en un contenedor con Testcontainers. **Necesitan Docker**, y por eso estan fuera de `npm test`: quien trabaja en el dominio o en los casos de uso no deberia necesitarlo. El CI ejecuta ambas suites.
+
+Lo que comprueban no se puede comprobar de otra forma: que el SQL sea valido, que las restricciones existan de verdad y que la transaccion de guardado haga lo que dice. Un doble de prueba habria pasado con un esquema equivocado.
+
 ## Requisitos
 
 | Herramienta | Versión                                       |

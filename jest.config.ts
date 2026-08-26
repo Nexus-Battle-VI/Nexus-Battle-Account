@@ -26,7 +26,18 @@ const config: Config = {
       testMatch: ['<rootDir>/test/integration/**/*.spec.ts'],
     },
   ],
-  collectCoverageFrom: ['src/**/*.ts', '!src/**/*.module.ts', '!src/**/index.ts', '!src/main.ts'],
+  // El adaptador de PostgreSQL y su infraestructura NO los ejercita esta suite:
+  // los cubre `npm run test:db`, que mide su propia cobertura con su propio
+  // umbral. Se excluyen aqui para que el porcentaje describa lo que esta suite
+  // realmente puede ver, en lugar de penalizar codigo que si esta probado.
+  collectCoverageFrom: [
+    'src/**/*.ts',
+    '!src/**/*.module.ts',
+    '!src/**/index.ts',
+    '!src/main.ts',
+    '!src/adapters/outbound/persistence/PostgresAccountRepository.ts',
+    '!src/infrastructure/persistence/**',
+  ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text-summary', 'lcov', 'json-summary'],
   coverageThreshold: {
