@@ -1,4 +1,9 @@
-import { SetMetadata, createParamDecorator, type ExecutionContext } from '@nestjs/common'
+import {
+  SetMetadata,
+  UnauthorizedException,
+  createParamDecorator,
+  type ExecutionContext,
+} from '@nestjs/common'
 
 import type { Role } from '../../../../domain/entities/Role'
 import type { VerifiedIdentity } from '../../../../application/ports/TokenVerifierPort'
@@ -28,7 +33,21 @@ export interface RequestWithIdentity {
  * Inyecta la identidad ya verificada. Nunca lee nada del cuerpo ni de la
  * cabecera: solo lo que el guard dejo tras comprobar la firma.
  */
+export const currentIdentityOf = (context: ExecutionContext): VerifiedIdentity => {
+  const { identity } = context.switchToHttp().getRequest<RequestWithIdentity>()
+
+  // Hoy no puede ocurrir: un guard u otro deja siempre identidad. Pero el tipo
+  // que veian los controladores decia `VerifiedIdentity` mientras el valor podia
+  // ser `undefined`, y bastaria reordenar los guards para que la ausencia se
+  // manifestara como un `TypeError` —un 500— en vez de como lo que seria: una
+  // peticion sin identidad. Falla cerrado y con el codigo que corresponde.
+  if (identity === undefined) {
+    throw new UnauthorizedException('La peticion no llego con una identidad verificada.')
+  }
+
+  return identity
+}
+
 export const CurrentIdentity = createParamDecorator(
-  (_data: unknown, context: ExecutionContext): VerifiedIdentity | undefined =>
-    context.switchToHttp().getRequest<RequestWithIdentity>().identity,
+  (_data: unknown, context: ExecutionContext): VerifiedIdentity => currentIdentityOf(context),
 )

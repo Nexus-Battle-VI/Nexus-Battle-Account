@@ -6,7 +6,11 @@ import type { Reflector } from '@nestjs/core'
 import { toVerifiedIdentity } from '../../src/adapters/outbound/identity/CognitoTokenVerifier'
 import { JwtAuthGuard } from '../../src/adapters/inbound/http/auth/jwt-auth.guard'
 import { RolesGuard } from '../../src/adapters/inbound/http/auth/roles.guard'
-import { IS_PUBLIC, REQUIRED_ROLES } from '../../src/adapters/inbound/http/auth/decorators'
+import {
+  IS_PUBLIC,
+  REQUIRED_ROLES,
+  currentIdentityOf,
+} from '../../src/adapters/inbound/http/auth/decorators'
 import { Role } from '../../src/domain/entities/Role'
 import {
   TokenVerificationError,
@@ -60,6 +64,20 @@ describe('Traduccion del token a identidad verificada', () => {
     ).toBe('ana@nexus.test')
   })
 
+  /**
+   * Antes se rellenaba con cadena vacia. Un token con firma valida pero sin
+   * `sub` se convertia asi en una identidad utilizable, y todos los tokens mal
+   * formados compartian sujeto: acabarian en la MISMA cuenta.
+   */
+  it.each([
+    ['falta', {}],
+    ['es vacio', { sub: '' }],
+    ['no es una cadena', { sub: 42 }],
+    ['es nulo', { sub: null }],
+  ])('rechaza el token cuando el sujeto %s', (_caso, payload) => {
+    expect(() => toVerifiedIdentity(payload)).toThrow(TokenVerificationError)
+  })
+
   it('no otorga ningun rol cuando el token no trae grupos', () => {
     expect(toVerifiedIdentity({ sub: 's' }).roles.size).toBe(0)
     expect(toVerifiedIdentity({ sub: 's', 'cognito:groups': 'ADMINISTRATOR' }).roles.size).toBe(0)
@@ -99,6 +117,11 @@ describe('JwtAuthGuard', () => {
     ['sin esquema', 'abc.def.ghi'],
     ['con esquema equivocado', 'Basic abc'],
     ['sin valor', 'Bearer '],
+    // Con `split(' ')` a secas estas tres pasaban: se leia el segundo campo y
+    // se ignoraba el resto de la cabecera en silencio.
+    ['con un campo de mas', 'Bearer token sobra'],
+    ['con espacio doble tras el esquema', 'Bearer  token'],
+    ['con solo el esquema', 'Bearer'],
   ])('rechaza una cabecera %s', async (_caso, authorization) => {
     const { context, reflector } = contextFor({ headers: { authorization } })
     const guard = new JwtAuthGuard(
@@ -145,6 +168,31 @@ describe('JwtAuthGuard', () => {
     )
 
     await expect(guard.canActivate(context)).rejects.not.toBeInstanceOf(UnauthorizedException)
+  })
+})
+
+/**
+ * El decorador se anuncia como `VerifiedIdentity`, sin `undefined`. Esa promesa
+ * hay que sostenerla en tiempo de ejecucion: si algun dia un cambio en el orden
+ * de los guards deja la peticion sin identidad, el controlador debe recibir un
+ * 401 y no reventar con un `TypeError` que el cliente veria como un 500.
+ */
+describe('CurrentIdentity', () => {
+  const resolve = (request: FakeRequest): VerifiedIdentity =>
+    currentIdentityOf(contextFor(request).context)
+
+  it('devuelve la identidad que dejo el guard', () => {
+    const identity: VerifiedIdentity = {
+      subject: 'sujeto-1',
+      email: null,
+      roles: new Set([Role.Player]),
+    }
+
+    expect(resolve({ headers: {}, identity })).toBe(identity)
+  })
+
+  it('responde 401 cuando la peticion no trae identidad', () => {
+    expect(() => resolve({ headers: {} })).toThrow(UnauthorizedException)
   })
 })
 

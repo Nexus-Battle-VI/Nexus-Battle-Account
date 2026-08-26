@@ -21,7 +21,10 @@ export class GetOwnAccount {
     const account = await this.accounts.findBySubject(subject)
 
     if (account === null) {
-      throw new AccountNotFoundError(subject)
+      throw new AccountNotFoundError(
+        subject,
+        'El testimonio no tiene ninguna cuenta asociada en este servicio.',
+      )
     }
 
     return toAccountDto(account.toSnapshot())

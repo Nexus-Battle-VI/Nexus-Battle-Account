@@ -10,8 +10,21 @@ export class AccountAlreadyExistsError extends Error {
 }
 
 export class AccountNotFoundError extends Error {
-  constructor(reference: string) {
-    super(`No existe una cuenta identificada por "${reference}".`)
+  /**
+   * Lo que se buscaba. Se conserva aparte del mensaje porque no siempre puede
+   * devolverse: un identificador que el cliente acaba de enviar puede repetirse
+   * en la respuesta, pero el sujeto del testimonio es un vinculo interno con el
+   * proveedor de identidad y no tiene por que salir del servicio. Sigue estando
+   * disponible para el registro, que es donde hace falta.
+   */
+  readonly reference: string
+
+  constructor(
+    reference: string,
+    message = `No existe una cuenta identificada por "${reference}".`,
+  ) {
+    super(message)
     this.name = 'AccountNotFoundError'
+    this.reference = reference
   }
 }
