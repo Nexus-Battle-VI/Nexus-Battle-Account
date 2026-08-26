@@ -32,6 +32,11 @@ export interface RegisterAccountDependencies {
  * persistencia falla despues de dar de alta el sujeto, se retira el sujeto
  * para no dejar identidades huerfanas: es una compensacion explicita, no una
  * transaccion distribuida.
+ *
+ * La compensacion alcanza UNICAMENTE al sujeto que este caso de uso creo.
+ * Cuando el sujeto llega ya verificado en el testimonio, no se da de alta y
+ * tampoco se revoca: retirarlo dejaria sin identidad a alguien que la tenia
+ * antes de esta peticion.
  */
 export class RegisterAccount {
   private readonly deps: RegisterAccountDependencies
@@ -48,10 +53,17 @@ export class RegisterAccount {
       throw new AccountAlreadyExistsError(email.value)
     }
 
-    const subject = await this.deps.identityProvider.register(email.value)
+    // Si quien registra llega con un testimonio verificado, el sujeto YA existe
+    // en el proveedor: darlo de alta otra vez produciria dos identidades para la
+    // misma persona.
+    const provided = command.subject?.trim() ?? ''
+    const createdSubject =
+      provided.length > 0 ? null : (await this.deps.identityProvider.register(email.value)).subject
+    const subject = createdSubject ?? provided
 
     const account = Account.register({
       id: AccountId.create(this.deps.ids.generate()),
+      subject,
       email,
       displayName,
       occurredAt: this.deps.clock.now(),
@@ -60,7 +72,12 @@ export class RegisterAccount {
     try {
       await this.deps.accounts.save(account)
     } catch (error: unknown) {
-      await this.deps.identityProvider.revoke(subject.subject)
+      // Solo se retira lo que este caso de uso creo. Revocar un sujeto ajeno
+      // dejaria sin identidad a alguien que ya la tenia antes de esta peticion.
+      if (createdSubject !== null) {
+        await this.deps.identityProvider.revoke(createdSubject)
+      }
+
       throw error
     }
 

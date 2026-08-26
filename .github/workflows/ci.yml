@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # Sin filtro de rama destino: se valida TODO pull request, tambien los
+  # apilados sobre otra rama de trabajo. Con el filtro anterior, un PR que no
+  # apuntara a `main` no ejecutaba ninguna comprobacion, de modo que no habia
+  # forma de verificarlo antes de integrarlo.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
@@ -56,6 +59,13 @@ jobs:
       - name: Pruebas de integracion
         run: npm run test:integration
 
+      # Estas pruebas levantan PostgreSQL en un contenedor con Testcontainers y
+      # ejercitan el adaptador contra el motor REAL. Estan fuera de `npm test`
+      # para que quien trabaja en el dominio no necesite Docker, pero el CI las
+      # ejecuta siempre: un esquema equivocado solo se detecta aqui.
+      - name: Pruebas contra PostgreSQL real
+        run: npm run test:db
+
       - name: Cobertura
         run: npm run test:coverage
 
@@ -97,9 +107,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # La imagen corre con NODE_ENV=production, y en produccion el servicio se
+      # NIEGA a arrancar sin verificacion de identidad (ADR-004). Por eso la
+      # prueba de humo aporta configuracion de autenticacion: son valores de
+      # relleno, y basta con que existan porque el JWKS solo se descarga en la
+      # primera peticion protegida y las sondas de salud son publicas.
+      #
+      # No se rebaja la regla para que la prueba pase: se configura la prueba
+      # como habria que configurar un despliegue real.
+      - name: Verificar que la imagen se NIEGA a arrancar sin autenticacion
+        run: |
+          if docker run --rm nexus-battle-account:ci 2>&1 | grep -q 'AUTH_MODE'; then
+            echo "Correcto: la imagen de produccion no arranca sin AUTH_MODE."
+          else
+            echo "FALLO: la imagen arranco sin verificacion de identidad."
+            exit 1
+          fi
+
       - name: Verificar arranque del contenedor
         run: |
-          docker run -d --name account-ci -p 3000:3000 nexus-battle-account:ci
+          docker run -d --name account-ci -p 3000:3000             -e AUTH_MODE=jwt             -e COGNITO_USER_POOL_ID=us-east-1_ci             -e COGNITO_CLIENT_ID=cliente-ci             nexus-battle-account:ci
           for attempt in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:3000/api/health/ready > /dev/null; then
               echo "readiness correcta en el intento ${attempt}"

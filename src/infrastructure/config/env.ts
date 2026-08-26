@@ -5,6 +5,24 @@ export class ConfigurationError extends Error {
   }
 }
 
+export const AuthMode = {
+  /**
+   * Sin verificacion de identidad. Es el estado que describe el BLOCKER de
+   * ADR-004, no una opcion de conveniencia: ningun servicio comprueba quien
+   * realiza la peticion.
+   */
+  Disabled: 'disabled',
+  /** Se exige un testimonio firmado por el proveedor de identidad. */
+  Jwt: 'jwt',
+} as const
+
+export type AuthMode = (typeof AuthMode)[keyof typeof AuthMode]
+
+export interface CognitoConfig {
+  readonly userPoolId: string
+  readonly clientId: string
+}
+
 export const PersistenceDriver = {
   Memory: 'memory',
   Postgres: 'postgres',
@@ -22,6 +40,8 @@ export interface AppConfig {
   readonly swaggerEnabled: boolean
   readonly persistenceDriver: PersistenceDriver
   readonly databaseUrl: string | null
+  readonly authMode: AuthMode
+  readonly cognito: CognitoConfig | null
 }
 
 type RawEnv = Readonly<Record<string, string | undefined>>
@@ -118,6 +138,30 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     PersistenceDriver.Memory,
   )
 
+  const authMode = readEnum(env, 'AUTH_MODE', [AuthMode.Disabled, AuthMode.Jwt], AuthMode.Disabled)
+
+  // Un binario de produccion sin verificacion de identidad no arranca.
+  //
+  // Es la traduccion en codigo del BLOCKER de ADR-004: mientras ningun servicio
+  // compruebe quien realiza la peticion, cualquiera puede actuar en nombre de
+  // otra persona. Un aviso en el registro se pasa por alto; un arranque que
+  // falla, no.
+  if (nodeEnv === 'production' && authMode === AuthMode.Disabled) {
+    throw new ConfigurationError(
+      'AUTH_MODE no puede ser "disabled" con NODE_ENV=production. Sin verificacion de ' +
+        'identidad el servicio no debe exponerse. Vease ADR-004.',
+    )
+  }
+
+  const userPoolId = readString(env, 'COGNITO_USER_POOL_ID', '')
+  const clientId = readString(env, 'COGNITO_CLIENT_ID', '')
+
+  if (authMode === AuthMode.Jwt && (userPoolId === '' || clientId === '')) {
+    throw new ConfigurationError(
+      'COGNITO_USER_POOL_ID y COGNITO_CLIENT_ID son obligatorios cuando AUTH_MODE es "jwt".',
+    )
+  }
+
   const databaseUrl = env.DATABASE_URL ?? null
 
   if (
@@ -141,5 +185,7 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     swaggerEnabled: readBoolean(env, 'SWAGGER_ENABLED', nodeEnv !== 'production'),
     persistenceDriver,
     databaseUrl: databaseUrl === '' ? null : databaseUrl,
+    authMode,
+    cognito: authMode === AuthMode.Jwt ? { userPoolId, clientId } : null,
   }
 }
