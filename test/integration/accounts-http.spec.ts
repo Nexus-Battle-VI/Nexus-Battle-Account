@@ -7,12 +7,8 @@ import request from 'supertest'
 import { AppModule } from '../../src/infrastructure/bootstrap/app.module'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { Role } from '../../src/domain/entities/Role'
+import { registerAccountRequest } from '../support/http-register'
 
-/**
- * Pruebas de integracion sobre la aplicacion NestJS real: se levanta el modulo
- * completo, con su raiz de composicion, sus tuberias de validacion y sus
- * controladores. No se sustituye ningun adaptador.
- */
 describe('API de cuentas', () => {
   let app: INestApplication
 
@@ -32,19 +28,18 @@ describe('API de cuentas', () => {
     await app.close()
   })
 
-  const register = (body: Record<string, unknown>) =>
-    request(app.getHttpServer()).post('/api/accounts').send(body)
-
   it('POST /api/accounts registra una cuenta y responde 201', async () => {
-    const response = await register({
+    const response = await registerAccountRequest(app, {
       email: 'jugador1@nexus.test',
-      displayName: 'Ana Ramirez',
+      nickname: 'Ana Uno',
     })
 
     expect(response.status).toBe(201)
     expect(response.body).toMatchObject({
       email: 'jugador1@nexus.test',
-      displayName: 'Ana Ramirez',
+      displayName: 'Ana Uno',
+      firstNames: 'Ana',
+      lastNames: 'Ramirez',
       status: AccountStatus.PendingVerification,
       roles: [Role.Player],
     })
@@ -52,40 +47,82 @@ describe('API de cuentas', () => {
   })
 
   it('POST /api/accounts responde 409 si el correo ya existe', async () => {
-    await register({ email: 'duplicado@nexus.test', displayName: 'Primero Usuario' })
-
-    const response = await register({
+    await registerAccountRequest(app, {
       email: 'duplicado@nexus.test',
-      displayName: 'Segundo Usuario',
+      nickname: 'Primero Usuario',
+    })
+
+    const response = await registerAccountRequest(app, {
+      email: 'duplicado@nexus.test',
+      nickname: 'Segundo Usuario',
     })
 
     expect(response.status).toBe(409)
   })
 
   it('POST /api/accounts responde 400 ante un correo con formato invalido', async () => {
-    const response = await register({ email: 'no-es-correo', displayName: 'Ana Ramirez' })
+    const response = await registerAccountRequest(app, {
+      email: 'no-es-correo',
+      nickname: 'Ana Ramirez',
+    })
 
     expect(response.status).toBe(400)
   })
 
-  it('POST /api/accounts responde 400 ante un nombre demasiado corto', async () => {
-    const response = await register({ email: 'corto@nexus.test', displayName: 'Ab' })
+  it('POST /api/accounts responde 400 si falta el avatar', async () => {
+    const response = await registerAccountRequest(
+      app,
+      { email: 'sin-avatar@nexus.test', nickname: 'Ana Sin Avatar' },
+      false,
+    )
+
+    expect(response.status).toBe(400)
+  })
+
+  it('POST /api/accounts responde 400 si no se aceptan los terminos', async () => {
+    const response = await registerAccountRequest(app, {
+      email: 'sin-terminos@nexus.test',
+      nickname: 'Ana Sin Terminos',
+      termsAccepted: 'false',
+    })
+
+    expect(response.status).toBe(400)
+  })
+
+  it('POST /api/accounts responde 400 si el apodo esta en la lista negra', async () => {
+    const response = await registerAccountRequest(app, {
+      email: 'lista-negra@nexus.test',
+      nickname: 'admin',
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.message).toBe('El apodo no esta permitido por la lista negra vigente.')
+  })
+
+  it('POST /api/accounts responde 400 ante un apodo demasiado corto', async () => {
+    const response = await registerAccountRequest(app, {
+      email: 'corto@nexus.test',
+      nickname: 'Ab',
+    })
 
     expect(response.status).toBe(400)
   })
 
   it('POST /api/accounts rechaza campos no declarados en el contrato', async () => {
-    const response = await register({
+    const response = await registerAccountRequest(app, {
       email: 'extra@nexus.test',
-      displayName: 'Ana Ramirez',
-      roles: ['ADMINISTRATOR'],
+      nickname: 'Ana Extra',
+      roles: 'ADMINISTRATOR',
     })
 
     expect(response.status).toBe(400)
   })
 
   it('GET /api/accounts/:id recupera la cuenta registrada', async () => {
-    const created = await register({ email: 'lectura@nexus.test', displayName: 'Ana Ramirez' })
+    const created = await registerAccountRequest(app, {
+      email: 'lectura@nexus.test',
+      nickname: 'Ana Lectura',
+    })
 
     const response = await request(app.getHttpServer()).get(
       `/api/accounts/${String(created.body.id)}`,
@@ -102,7 +139,10 @@ describe('API de cuentas', () => {
   })
 
   it('POST /api/accounts/:id/verification activa la cuenta', async () => {
-    const created = await register({ email: 'verifica@nexus.test', displayName: 'Ana Ramirez' })
+    const created = await registerAccountRequest(app, {
+      email: 'verifica@nexus.test',
+      nickname: 'Ana Verifica',
+    })
     const id = String(created.body.id)
 
     const response = await request(app.getHttpServer()).post(`/api/accounts/${id}/verification`)
@@ -115,7 +155,10 @@ describe('API de cuentas', () => {
   })
 
   it('POST /api/accounts/:id/verification responde 400 si ya estaba verificada', async () => {
-    const created = await register({ email: 'doble@nexus.test', displayName: 'Ana Ramirez' })
+    const created = await registerAccountRequest(app, {
+      email: 'doble@nexus.test',
+      nickname: 'Ana Doble',
+    })
     const id = String(created.body.id)
     await request(app.getHttpServer()).post(`/api/accounts/${id}/verification`)
 

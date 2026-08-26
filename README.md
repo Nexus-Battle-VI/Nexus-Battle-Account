@@ -64,10 +64,39 @@ Ver `docs/adr/ADR-004-identity-directory.md` en Nexus-Battle-Infrastructure.
 
 PostgreSQL con **Kysely** ([ADR-012](https://github.com/Nexus-Battle-VI/Nexus-Battle-Infrastructure/blob/main/docs/adr/ADR-012-orm-odm.md)). Kysely es un constructor de consultas, no un ORM: **cada consulta esta escrita a la vista**, y no hay carga perezosa que dispare consultas dentro de un bucle sin que aparezcan en el codigo.
 
-| Variable                      | Efecto                                                       |
-| ----------------------------- | ------------------------------------------------------------ |
-| `PERSISTENCE_DRIVER=memory`   | Repositorio en proceso. **El estado se pierde al reiniciar** |
-| `PERSISTENCE_DRIVER=postgres` | Adaptador real. Exige `DATABASE_URL`                         |
+| Variable                      | Efecto                                                              |
+| ----------------------------- | ------------------------------------------------------------------- |
+| `PERSISTENCE_DRIVER=memory`   | Repositorio en proceso. **El estado se pierde al reiniciar**        |
+| `PERSISTENCE_DRIVER=postgres` | `PostgresAccountRepository` + catalogos HU-01. Exige `DATABASE_URL` |
+
+### Desarrollo local HU-01
+
+La base local se llama `nexus_battle_account`. No se despliega AWS: el mismo puerto de persistencia apuntará más adelante al PostgreSQL de la EC2 de datos.
+
+```bash
+docker compose up -d
+```
+
+En `.env`:
+
+```bash
+NODE_ENV=development
+PERSISTENCE_DRIVER=postgres
+DATABASE_URL=postgresql://nexus:nexus@127.0.0.1:5433/nexus_battle_account
+AUTH_MODE=disabled
+AVATAR_STORAGE_PATH=./data/avatars
+```
+
+`AUTH_MODE=disabled` solo es válido fuera de producción: con `NODE_ENV=production` el servicio no arranca.
+
+```bash
+npm run migrate:dev
+npm run dev
+```
+
+`POST /api/accounts` recibe `multipart/form-data` (el avatar es archivo, no Base64). El apodo viaja como `nickname` y se persiste en `display_name`. La contraseña no se guarda en PostgreSQL: entra por `IdentityProviderPort` (`FakeIdentityProvider` en local; Cognito sustituye el adaptador).
+
+Tras `migrate:dev`, el registro rechaza apodos que contengan un término activo de la lista negra. La semilla y el volcado están en [docs/nickname-blacklist.md](docs/nickname-blacklist.md) y [docs/nickname-blacklist.txt](docs/nickname-blacklist.txt).
 
 ### El esquema no se migra al arrancar
 
@@ -120,7 +149,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Con la configuración por defecto el servicio arranca con el repositorio en memoria y el proveedor de identidad simulado: no requiere base de datos ni servicios externos.
+Con la configuración por defecto el servicio arranca con el repositorio en memoria y el proveedor de identidad simulado: no requiere base de datos ni servicios externos. Para HU-01 en local, usa PostgreSQL según la sección de persistencia.
 
 Documentación interactiva de la API en `http://localhost:3000/api/docs`.
 
@@ -146,7 +175,8 @@ Documentación interactiva de la API en `http://localhost:3000/api/docs`.
 
 | Método | Ruta                             | Descripción                                                    |
 | ------ | -------------------------------- | -------------------------------------------------------------- |
-| `POST` | `/api/accounts`                  | Registra una cuenta nueva                                      |
+| `POST` | `/api/accounts`                  | Registra una cuenta de jugador (`multipart/form-data`, HU-01)  |
+| `GET`  | `/api/accounts/me`               | Recupera la cuenta del testimonio                              |
 | `GET`  | `/api/accounts/:id`              | Recupera una cuenta                                            |
 | `POST` | `/api/accounts/:id/verification` | Marca la cuenta como verificada                                |
 | `GET`  | `/api/health/live`               | El proceso responde. No consulta dependencias                  |
@@ -191,7 +221,8 @@ La imagen es multi-etapa, se ejecuta con el usuario sin privilegios `node`, incl
 ## Limitaciones conocidas del alcance actual
 
 - **La persistencia por defecto es en memoria y se pierde al reiniciar.** Con `PERSISTENCE_DRIVER=postgres` opera el adaptador real sobre PostgreSQL con Kysely, probado contra un motor en contenedor. El repositorio en memoria no es un resto del andamiaje: es lo que permite probar el dominio y los casos de uso **sin Docker**.
-- **La identidad es simulada.** Ver la sección correspondiente arriba.
+- **El alta de identidad sigue simulada.** `FakeIdentityProvider` implementa `IdentityProviderPort` (email + contraseña, sin persistir la contraseña). Cognito sustituye ese adaptador sin tocar el dominio. Ver ADR-004.
+- **El avatar se guarda en disco local.** `LocalAvatarStorage` escribe bajo `AVATAR_STORAGE_PATH`. Un adaptador AWS sustituye ese puerto sin tocar `RegisterAccount`.
 - **Las solicitudes de notificación no se publican en una cola.** Se registran con la forma exacta del mensaje que consumirá Notifications; la publicación real depende de ADR-006.
 - La autenticación, la emisión de JWT y el segundo factor por correo no forman parte de este alcance. El agregado ya distingue si una cuenta puede autenticarse, que es la regla de negocio que corresponde a este contexto.
 

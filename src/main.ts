@@ -5,10 +5,11 @@ import { ValidationPipe } from '@nestjs/common'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 
 import { AppModule } from './infrastructure/bootstrap/app.module'
-import { loadConfig } from './infrastructure/config/env'
+import { applyEnvFile, loadConfig } from './infrastructure/config/env'
 import { createLogger } from './infrastructure/observability/logger'
 
 const bootstrap = async (): Promise<void> => {
+  applyEnvFile()
   const config = loadConfig(process.env)
   const logger = createLogger({
     level: config.logLevel,
@@ -17,6 +18,13 @@ const bootstrap = async (): Promise<void> => {
   })
 
   const app = await NestFactory.create(AppModule, { logger: false })
+
+  if (config.corsOrigins.length > 0) {
+    app.enableCors({
+      origin: [...config.corsOrigins],
+      credentials: true,
+    })
+  }
 
   app.setGlobalPrefix(config.globalPrefix)
 

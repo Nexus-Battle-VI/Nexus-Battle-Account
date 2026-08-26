@@ -1,4 +1,4 @@
-import { loadConfig } from '../config/env'
+import { applyEnvFile, loadConfig } from '../config/env'
 import { createLogger } from '../observability/logger'
 import { describeError } from '../observability/describe-error'
 import { createDatabase, migrateToLatest } from './database'
@@ -16,6 +16,7 @@ import { createDatabase, migrateToLatest } from './database'
  * cualquier otro suceso, no un `console.log` suelto.
  */
 const main = async (): Promise<void> => {
+  applyEnvFile()
   const config = loadConfig(process.env)
   const logger = createLogger({
     level: config.logLevel,

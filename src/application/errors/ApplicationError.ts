@@ -9,6 +9,20 @@ export class AccountAlreadyExistsError extends Error {
   }
 }
 
+export class DisplayNameAlreadyTakenError extends Error {
+  constructor(displayName: string) {
+    super(`Ya existe una cuenta registrada con el apodo "${displayName}".`)
+    this.name = 'DisplayNameAlreadyTakenError'
+  }
+}
+
+export class NicknameBlacklistedError extends Error {
+  constructor() {
+    super('El apodo no esta permitido por la lista negra vigente.')
+    this.name = 'NicknameBlacklistedError'
+  }
+}
+
 export class AccountNotFoundError extends Error {
   /**
    * Lo que se buscaba. Se conserva aparte del mensaje porque no siempre puede

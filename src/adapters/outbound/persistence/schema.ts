@@ -33,6 +33,13 @@ export interface AccountsTable {
   readonly email: string
 
   readonly display_name: string
+  readonly first_names: string
+  readonly last_names: string
+  readonly terms_accepted: boolean
+  readonly avatar_storage_key: string
+  readonly avatar_mime_type: string
+  readonly avatar_size_bytes: number
+  readonly avatar_original_name: string
   readonly status: string
   readonly created_at: Generated<Date>
   readonly updated_at: Generated<Date>
@@ -54,7 +61,31 @@ export interface AccountRolesTable {
   readonly role: string
 }
 
+export interface SecurityQuestionsTable {
+  readonly id: string
+  readonly statement: string
+  readonly active: boolean
+}
+
+export interface AccountSecurityAnswersTable {
+  readonly account_id: string
+  readonly question_id: string
+  readonly answer_hash: string
+  readonly created_at: Generated<Date>
+}
+
+export interface NicknameBlacklistEntriesTable {
+  readonly id: string
+  readonly term: string
+  readonly active: boolean
+  readonly created_at: Generated<Date>
+  readonly updated_at: Generated<Date>
+}
+
 export interface Database {
   readonly accounts: AccountsTable
   readonly account_roles: AccountRolesTable
+  readonly security_questions: SecurityQuestionsTable
+  readonly account_security_answers: AccountSecurityAnswersTable
+  readonly nickname_blacklist_entries: NicknameBlacklistEntriesTable
 }

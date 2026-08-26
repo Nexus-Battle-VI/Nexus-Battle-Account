@@ -1,24 +1,60 @@
 import { ApiProperty } from '@nestjs/swagger'
-import { IsEmail, IsString, Length, MaxLength } from 'class-validator'
+import { Transform } from 'class-transformer'
+import { Allow, IsBoolean, IsEmail, IsString, MaxLength } from 'class-validator'
 
 /**
- * Contrato de entrada del registro de cuentas.
+ * Contrato de entrada del registro (multipart/form-data).
  *
- * La validacion aqui es de forma, no de negocio: comprueba que la peticion sea
- * sintacticamente utilizable. Las reglas de negocio siguen viviendo en los
- * objetos de valor del dominio, que se aplican igualmente aunque la peticion
- * llegue por otro adaptador.
+ * La validacion aqui es de forma. Las reglas de negocio viven en dominio y
+ * en RegisterAccount.
  */
 export class RegisterAccountRequest {
+  @ApiProperty({ example: 'Ana' })
+  @IsString()
+  firstNames!: string
+
+  @ApiProperty({ example: 'Ramirez' })
+  @IsString()
+  lastNames!: string
+
   @ApiProperty({ example: 'jugador@nexus.test', maxLength: 254 })
   @IsEmail({}, { message: 'El correo debe tener un formato valido.' })
   @MaxLength(254)
   email!: string
 
-  @ApiProperty({ example: 'Ana Ramirez', minLength: 3, maxLength: 32 })
+  @ApiProperty({ example: 'Abcdefg1!' })
   @IsString()
-  @Length(3, 32, { message: 'El nombre visible debe tener entre 3 y 32 caracteres.' })
-  displayName!: string
+  password!: string
+
+  @ApiProperty({ example: 'Ana Ramirez', description: 'Apodo (display_name)', maxLength: 32 })
+  @IsString()
+  @MaxLength(32)
+  nickname!: string
+
+  @ApiProperty({ example: true })
+  @Transform(({ value }: { value: unknown }) => value === true || value === 'true')
+  @IsBoolean()
+  termsAccepted!: boolean
+
+  @ApiProperty({
+    example:
+      '[{"questionId":"sq-01","answer":"..."},{"questionId":"sq-02","answer":"..."},{"questionId":"sq-03","answer":"..."},{"questionId":"sq-04","answer":"..."}]',
+  })
+  @IsString()
+  securityAnswers!: string
+
+  /**
+   * El archivo lo lee FileInterceptor, no este DTO. @Allow evita que el
+   * ValidationPipe (forbidNonWhitelisted) trate la parte multipart como
+   * campo extra. La regla image/* y el tamano viven en el dominio.
+   */
+  @ApiProperty({
+    type: 'string',
+    format: 'binary',
+    description: 'Avatar obligatorio (image/*, maximo 500 MB)',
+  })
+  @Allow()
+  avatar?: unknown
 }
 
 export class AccountResponse {
@@ -30,6 +66,12 @@ export class AccountResponse {
 
   @ApiProperty({ example: 'Ana Ramirez' })
   readonly displayName!: string
+
+  @ApiProperty({ example: 'Ana' })
+  readonly firstNames!: string
+
+  @ApiProperty({ example: 'Ramirez' })
+  readonly lastNames!: string
 
   @ApiProperty({
     example: 'PENDING_VERIFICATION',

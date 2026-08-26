@@ -20,11 +20,17 @@ import { IDENTITY_PROVIDER } from '../../application/ports/IdentityProviderPort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
 import { CLOCK } from '../../application/ports/ClockPort'
 import { ID_GENERATOR } from '../../application/ports/IdGeneratorPort'
+import { AVATAR_STORAGE } from '../../application/ports/AvatarStoragePort'
+import { NICKNAME_BLACKLIST } from '../../application/ports/NicknameBlacklistPort'
+import { SECURITY_QUESTION_CATALOG } from '../../application/ports/SecurityQuestionCatalogPort'
 import type { AccountRepositoryPort } from '../../application/ports/AccountRepositoryPort'
 import type { IdentityProviderPort } from '../../application/ports/IdentityProviderPort'
 import type { NotificationRequestPort } from '../../application/ports/NotificationRequestPort'
 import type { ClockPort } from '../../application/ports/ClockPort'
 import type { IdGeneratorPort } from '../../application/ports/IdGeneratorPort'
+import type { AvatarStoragePort } from '../../application/ports/AvatarStoragePort'
+import type { NicknameBlacklistPort } from '../../application/ports/NicknameBlacklistPort'
+import type { SecurityQuestionCatalogPort } from '../../application/ports/SecurityQuestionCatalogPort'
 
 import { JwtAuthGuard } from '../../adapters/inbound/http/auth/jwt-auth.guard'
 import { RolesGuard } from '../../adapters/inbound/http/auth/roles.guard'
@@ -35,7 +41,14 @@ import { CognitoTokenVerifier } from '../../adapters/outbound/identity/CognitoTo
 
 import { InMemoryAccountRepository } from '../../adapters/outbound/persistence/InMemoryAccountRepository'
 import { PostgresAccountRepository } from '../../adapters/outbound/persistence/PostgresAccountRepository'
+import { InMemoryNicknameBlacklist } from '../../adapters/outbound/persistence/InMemoryNicknameBlacklist'
+import { PostgresNicknameBlacklist } from '../../adapters/outbound/persistence/PostgresNicknameBlacklist'
+import { InMemorySecurityQuestionCatalog } from '../../adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
+import { PostgresSecurityQuestionCatalog } from '../../adapters/outbound/persistence/PostgresSecurityQuestionCatalog'
+import { LocalAvatarStorage } from '../../adapters/outbound/storage/LocalAvatarStorage'
 import { createDatabase } from '../persistence/database'
+import type { Database } from '../../adapters/outbound/persistence/schema'
+import type { Kysely } from 'kysely'
 import { FakeIdentityProvider } from '../../adapters/outbound/identity/FakeIdentityProvider'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
@@ -47,6 +60,7 @@ import type { ReadinessCheck, VersionReport } from '../health/health'
 
 export const APP_CONFIG = Symbol('AppConfig')
 export const LOGGER = Symbol('Logger')
+export const DATABASE = Symbol('Database')
 
 /**
  * Raiz de composicion.
@@ -74,32 +88,51 @@ export const LOGGER = Symbol('Logger')
       inject: [APP_CONFIG],
     },
     {
-      provide: ACCOUNT_REPOSITORY,
-      useFactory: (config: AppConfig, logger: Logger): AccountRepositoryPort => {
+      provide: DATABASE,
+      useFactory: (config: AppConfig, logger: Logger): Kysely<Database> | null => {
         if (config.persistenceDriver !== PersistenceDriver.Postgres) {
           logger.warn('in_memory_persistence', {
             detail: 'PERSISTENCE_DRIVER=memory: el estado se pierde al reiniciar el servicio.',
           })
 
-          return new InMemoryAccountRepository()
+          return null
         }
 
-        // `loadConfig` ya garantiza que DATABASE_URL existe con este driver: un
-        // servicio mal configurado no debe arrancar y aparentar salud.
         if (config.databaseUrl === null) {
           throw new Error('DATABASE_URL es obligatorio con PERSISTENCE_DRIVER=postgres.')
         }
 
         logger.info('postgres_persistence', { detail: 'Adaptador PostgreSQL activo.' })
 
-        // El esquema NO se migra aqui. Migrar al arrancar hace que varias
-        // replicas migren a la vez y que una migracion rota deje el servicio en
-        // bucle de reinicio. Es un paso explicito: `npm run migrate`.
-        return new PostgresAccountRepository(
-          createDatabase({ connectionString: config.databaseUrl }),
-        )
+        return createDatabase({ connectionString: config.databaseUrl })
       },
       inject: [APP_CONFIG, LOGGER],
+    },
+    {
+      provide: ACCOUNT_REPOSITORY,
+      useFactory: (db: Kysely<Database> | null): AccountRepositoryPort =>
+        db === null ? new InMemoryAccountRepository() : new PostgresAccountRepository(db),
+      inject: [DATABASE],
+    },
+    {
+      provide: NICKNAME_BLACKLIST,
+      useFactory: (db: Kysely<Database> | null): NicknameBlacklistPort =>
+        db === null ? new InMemoryNicknameBlacklist() : new PostgresNicknameBlacklist(db),
+      inject: [DATABASE],
+    },
+    {
+      provide: SECURITY_QUESTION_CATALOG,
+      useFactory: (db: Kysely<Database> | null): SecurityQuestionCatalogPort =>
+        db === null
+          ? new InMemorySecurityQuestionCatalog()
+          : new PostgresSecurityQuestionCatalog(db),
+      inject: [DATABASE],
+    },
+    {
+      provide: AVATAR_STORAGE,
+      useFactory: (config: AppConfig): AvatarStoragePort =>
+        new LocalAvatarStorage(config.avatarStoragePath),
+      inject: [APP_CONFIG],
     },
     {
       provide: ID_GENERATOR,
@@ -177,9 +210,30 @@ export const LOGGER = Symbol('Logger')
         notifications: NotificationRequestPort,
         clock: ClockPort,
         ids: IdGeneratorPort,
+        avatars: AvatarStoragePort,
+        blacklist: NicknameBlacklistPort,
+        questions: SecurityQuestionCatalogPort,
       ): RegisterAccount =>
-        new RegisterAccount({ accounts, identityProvider, notifications, clock, ids }),
-      inject: [ACCOUNT_REPOSITORY, IDENTITY_PROVIDER, NOTIFICATION_REQUEST, CLOCK, ID_GENERATOR],
+        new RegisterAccount({
+          accounts,
+          identityProvider,
+          notifications,
+          clock,
+          ids,
+          avatars,
+          blacklist,
+          questions,
+        }),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        IDENTITY_PROVIDER,
+        NOTIFICATION_REQUEST,
+        CLOCK,
+        ID_GENERATOR,
+        AVATAR_STORAGE,
+        NICKNAME_BLACKLIST,
+        SECURITY_QUESTION_CATALOG,
+      ],
     },
     {
       provide: GET_ACCOUNT,

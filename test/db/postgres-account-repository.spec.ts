@@ -1,18 +1,22 @@
 import 'reflect-metadata'
 
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
-import type { Kysely } from 'kysely'
+import { sql, type Kysely } from 'kysely'
 
 import { describeError } from '../../src/infrastructure/observability/describe-error'
 import { createDatabase, migrateToLatest } from '../../src/infrastructure/persistence/database'
 import { PostgresAccountRepository } from '../../src/adapters/outbound/persistence/PostgresAccountRepository'
+import { PostgresNicknameBlacklist } from '../../src/adapters/outbound/persistence/PostgresNicknameBlacklist'
+import { PostgresSecurityQuestionCatalog } from '../../src/adapters/outbound/persistence/PostgresSecurityQuestionCatalog'
 import type { Database } from '../../src/adapters/outbound/persistence/schema'
 import { Account } from '../../src/domain/entities/Account'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
+import { PersonName } from '../../src/domain/value-objects/PersonName'
 import { Role } from '../../src/domain/entities/Role'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
+import { defaultAvatarMetadata } from '../support/account-factory'
 
 /**
  * Adaptador de PostgreSQL contra un motor REAL, en contenedor.
@@ -33,11 +37,17 @@ describe('PostgresAccountRepository', () => {
   const buildAccount = (): Account => {
     contador += 1
 
+    const id = `acc-${String(contador)}`
+
     return Account.register({
-      id: AccountId.create(`acc-${String(contador)}`),
+      id: AccountId.create(id),
       subject: `sujeto-${String(contador)}`,
       email: EmailAddress.create(`persona${String(contador)}@nexus.test`),
-      displayName: DisplayName.create('Ana Ramirez'),
+      displayName: DisplayName.create(`Ana ${String(contador)}`),
+      firstNames: PersonName.create('Ana', 'Los nombres'),
+      lastNames: PersonName.create('Ramirez', 'Los apellidos'),
+      termsAccepted: true,
+      avatar: defaultAvatarMetadata(id),
       occurredAt: AT,
     })
   }
@@ -82,6 +92,14 @@ describe('PostgresAccountRepository', () => {
     expect(await repository.findById(AccountId.create('acc-inexistente'))).toBeNull()
     expect(await repository.findBySubject('sujeto-inexistente')).toBeNull()
     expect(await repository.findByEmail(EmailAddress.create('nadie@nexus.test'))).toBeNull()
+  })
+
+  it('responde sobre la existencia por apodo', async () => {
+    const account = buildAccount()
+    await repository.save(account)
+
+    expect(await repository.existsByDisplayName(account.currentDisplayName)).toBe(true)
+    expect(await repository.existsByDisplayName(DisplayName.create('Otro Apodo'))).toBe(false)
   })
 
   it('responde sobre la existencia por correo', async () => {
@@ -161,6 +179,10 @@ describe('PostgresAccountRepository', () => {
         subject: 'sujeto-correo-repetido',
         email: primera.currentEmail,
         displayName: DisplayName.create('Otra Persona'),
+        firstNames: PersonName.create('Otra', 'Los nombres'),
+        lastNames: PersonName.create('Persona', 'Los apellidos'),
+        termsAccepted: true,
+        avatar: defaultAvatarMetadata('acc-correo-repetido'),
         occurredAt: AT,
       })
 
@@ -176,6 +198,10 @@ describe('PostgresAccountRepository', () => {
         subject: primera.subject,
         email: EmailAddress.create('otra@nexus.test'),
         displayName: DisplayName.create('Otra Persona'),
+        firstNames: PersonName.create('Otra', 'Los nombres'),
+        lastNames: PersonName.create('Persona', 'Los apellidos'),
+        termsAccepted: true,
+        avatar: defaultAvatarMetadata('acc-sujeto-repetido'),
         occurredAt: AT,
       })
 
@@ -237,6 +263,170 @@ describe('PostgresAccountRepository', () => {
 
     expect(error).toBeUndefined()
     expect(applied).toEqual([])
+  })
+
+  describe('HU-01 esquema de registro', () => {
+    it('impide dos apodos iguales sin distinguir mayusculas', async () => {
+      const primera = buildAccount()
+      await repository.save(primera)
+
+      const segunda = Account.register({
+        id: AccountId.create('acc-apodo-repetido'),
+        subject: 'sujeto-apodo-repetido',
+        email: EmailAddress.create('apodo@nexus.test'),
+        displayName: DisplayName.create(primera.currentDisplayName.value.toUpperCase()),
+        firstNames: PersonName.create('Otra', 'Los nombres'),
+        lastNames: PersonName.create('Persona', 'Los apellidos'),
+        termsAccepted: true,
+        avatar: defaultAvatarMetadata('acc-apodo-repetido'),
+        occurredAt: AT,
+      })
+
+      await expect(repository.save(segunda)).rejects.toThrow()
+    })
+
+    it('no tiene columnas de contrasena', async () => {
+      const columns = await sql<{ column_name: string }>`
+        select column_name from information_schema.columns where table_name = 'accounts'
+      `.execute(db)
+
+      const names = columns.rows.map((row) => row.column_name)
+
+      expect(names.some((name) => name.includes('password') || name.includes('salt'))).toBe(false)
+    })
+
+    it('exige terms_accepted y avatar imagen', async () => {
+      const account = buildAccount()
+      await repository.save(account)
+
+      await expect(
+        db
+          .updateTable('accounts')
+          .set({ avatar_mime_type: 'application/pdf' })
+          .where('id', '=', account.id.value)
+          .execute(),
+      ).rejects.toThrow()
+    })
+
+    it('rechaza terms_accepted nulo', async () => {
+      const account = buildAccount()
+      await repository.save(account)
+
+      await expect(
+        sql`update accounts set terms_accepted = null where id = ${account.id.value}`.execute(db),
+      ).rejects.toThrow()
+    })
+
+    it('rechaza un avatar que supera 500 MB', async () => {
+      const account = buildAccount()
+      await repository.save(account)
+
+      await expect(
+        db
+          .updateTable('accounts')
+          .set({ avatar_size_bytes: 524_288_001 })
+          .where('id', '=', account.id.value)
+          .execute(),
+      ).rejects.toThrow()
+    })
+
+    it('persiste respuestas con PK compuesta y cascada al borrar la cuenta', async () => {
+      const account = buildAccount()
+      await repository.saveRegistration(account, [
+        { questionId: 'sq-01', answerHash: 'a'.repeat(64) },
+        { questionId: 'sq-02', answerHash: 'b'.repeat(64) },
+      ])
+
+      await expect(
+        db
+          .insertInto('account_security_answers')
+          .values({
+            account_id: account.id.value,
+            question_id: 'sq-01',
+            answer_hash: 'c'.repeat(64),
+          })
+          .execute(),
+      ).rejects.toThrow()
+
+      await expect(
+        db
+          .insertInto('account_security_answers')
+          .values({
+            account_id: account.id.value,
+            question_id: 'sq-inexistente',
+            answer_hash: 'd'.repeat(64),
+          })
+          .execute(),
+      ).rejects.toThrow()
+
+      await db.deleteFrom('accounts').where('id', '=', account.id.value).execute()
+
+      const leftover = await db
+        .selectFrom('account_security_answers')
+        .selectAll()
+        .where('account_id', '=', account.id.value)
+        .execute()
+
+      expect(leftover).toEqual([])
+    })
+
+    it('el catalogo vigente tiene las cuatro preguntas semilla', async () => {
+      const catalog = new PostgresSecurityQuestionCatalog(db)
+      const questions = await catalog.listActive()
+
+      expect(questions).toHaveLength(4)
+      expect(questions.map((question) => question.id)).toEqual(['sq-01', 'sq-02', 'sq-03', 'sq-04'])
+    })
+
+    it('la semilla vigente bloquea terminos conocidos y deja pasar apodos limpios', async () => {
+      const blacklist = new PostgresNicknameBlacklist(db)
+
+      expect(await blacklist.isBlocked('Ana Ramirez')).toBe(false)
+      expect(await blacklist.isBlocked('admin')).toBe(true)
+      expect(await blacklist.isBlocked('xX_Gonorrea_99')).toBe(true)
+      expect(await blacklist.isBlocked('AbelardoDeLaEspriella')).toBe(true)
+    })
+
+    it('la lista negra solo bloquea terminos activos', async () => {
+      const blacklist = new PostgresNicknameBlacklist(db)
+
+      expect(await blacklist.isBlocked('Ana Ramirez')).toBe(false)
+
+      await db
+        .insertInto('nickname_blacklist_entries')
+        .values({
+          id: 'bl-1',
+          term: 'ramirez',
+          active: false,
+        })
+        .execute()
+
+      expect(await blacklist.isBlocked('Ana Ramirez')).toBe(false)
+
+      await db
+        .insertInto('nickname_blacklist_entries')
+        .values({
+          id: 'bl-2',
+          term: 'ramirez',
+          active: true,
+        })
+        .execute()
+
+      expect(await blacklist.isBlocked('Ana Ramirez')).toBe(true)
+    })
+
+    it('rechaza una respuesta huérfana sin cuenta', async () => {
+      await expect(
+        db
+          .insertInto('account_security_answers')
+          .values({
+            account_id: 'acc-fantasma',
+            question_id: 'sq-01',
+            answer_hash: 'e'.repeat(64),
+          })
+          .execute(),
+      ).rejects.toThrow()
+    })
   })
 
   beforeEach(() => {

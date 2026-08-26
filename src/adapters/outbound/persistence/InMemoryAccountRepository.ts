@@ -1,22 +1,17 @@
 import type { Account } from '../../../domain/entities/Account'
-import { Account as AccountAggregate } from '../../../domain/entities/Account'
-import { AccountId } from '../../../domain/value-objects/AccountId'
-import { DisplayName } from '../../../domain/value-objects/DisplayName'
-import { EmailAddress } from '../../../domain/value-objects/EmailAddress'
-import type { AccountRepositoryPort } from '../../../application/ports/AccountRepositoryPort'
+import type { AccountId } from '../../../domain/value-objects/AccountId'
+import type { DisplayName } from '../../../domain/value-objects/DisplayName'
+import type { EmailAddress } from '../../../domain/value-objects/EmailAddress'
+import type {
+  AccountRepositoryPort,
+  HashedSecurityAnswer,
+} from '../../../application/ports/AccountRepositoryPort'
 import type { AccountSnapshot } from '../../../domain/entities/Account'
+import { hydrateAccount } from './hydrate-account'
 
-/**
- * Repositorio en memoria del agregado Account.
- *
- * Almacena instantaneas, no referencias al agregado, de modo que una mutacion
- * no persistida nunca se filtra al almacen. Ese detalle importa: con
- * referencias vivas, una prueba pasaria aunque el caso de uso olvidara guardar.
- *
- * El adaptador definitivo sobre PostgreSQL queda sujeto a ADR-005.
- */
 export class InMemoryAccountRepository implements AccountRepositoryPort {
   private readonly byId = new Map<string, AccountSnapshot>()
+  private readonly answersByAccount = new Map<string, readonly HashedSecurityAnswer[]>()
 
   save(account: Account): Promise<void> {
     this.byId.set(account.id.value, account.toSnapshot())
@@ -24,18 +19,23 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
     return Promise.resolve()
   }
 
+  saveRegistration(account: Account, answers: readonly HashedSecurityAnswer[]): Promise<void> {
+    this.byId.set(account.id.value, account.toSnapshot())
+    this.answersByAccount.set(account.id.value, answers)
+
+    return Promise.resolve()
+  }
+
   findById(id: AccountId): Promise<Account | null> {
     const snapshot = this.byId.get(id.value)
 
-    return Promise.resolve(
-      snapshot === undefined ? null : InMemoryAccountRepository.hydrate(snapshot),
-    )
+    return Promise.resolve(snapshot === undefined ? null : hydrateAccount(snapshot))
   }
 
   findByEmail(email: EmailAddress): Promise<Account | null> {
     for (const snapshot of this.byId.values()) {
       if (snapshot.email === email.value) {
-        return Promise.resolve(InMemoryAccountRepository.hydrate(snapshot))
+        return Promise.resolve(hydrateAccount(snapshot))
       }
     }
 
@@ -45,7 +45,7 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
   findBySubject(subject: string): Promise<Account | null> {
     for (const snapshot of this.byId.values()) {
       if (snapshot.subject === subject) {
-        return Promise.resolve(InMemoryAccountRepository.hydrate(snapshot))
+        return Promise.resolve(hydrateAccount(snapshot))
       }
     }
 
@@ -62,22 +62,28 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
     return Promise.resolve(false)
   }
 
+  existsByDisplayName(displayName: DisplayName): Promise<boolean> {
+    const needle = displayName.value.toLowerCase()
+
+    for (const snapshot of this.byId.values()) {
+      if (snapshot.displayName.toLowerCase() === needle) {
+        return Promise.resolve(true)
+      }
+    }
+
+    return Promise.resolve(false)
+  }
+
+  answersOf(accountId: string): readonly HashedSecurityAnswer[] {
+    return this.answersByAccount.get(accountId) ?? []
+  }
+
   get size(): number {
     return this.byId.size
   }
 
   clear(): void {
     this.byId.clear()
-  }
-
-  private static hydrate(snapshot: AccountSnapshot): Account {
-    return AccountAggregate.restore({
-      id: AccountId.create(snapshot.id),
-      subject: snapshot.subject,
-      email: EmailAddress.create(snapshot.email),
-      displayName: DisplayName.create(snapshot.displayName),
-      status: snapshot.status,
-      roles: snapshot.roles,
-    })
+    this.answersByAccount.clear()
   }
 }

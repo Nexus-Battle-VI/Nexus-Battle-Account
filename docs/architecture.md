@@ -10,7 +10,7 @@ No es responsable de autenticar. Autenticar es demostrar que quien solicita es e
 
 ### Datos que posee
 
-Account es propietario exclusivo de las cuentas: identificador, correo, nombre visible, estado y roles. Ningún otro servicio accede a este almacén, ni directamente ni mediante claves foráneas.
+Account es propietario exclusivo de las cuentas: identificador, sujeto, correo, apodo (`display_name`), nombres, apellidos, consentimiento de términos, metadatos de avatar, estado y roles. Las respuestas de seguridad viven como hash en el mismo almacén. Ningún otro servicio accede a este almacén, ni directamente ni mediante claves foráneas.
 
 Account **no posee credenciales**. No almacena contraseñas, hashes, sales, tokens de sesión ni secretos de segundo factor.
 
@@ -40,13 +40,16 @@ Las dependencias apuntan siempre hacia el dominio. El dominio no conoce ninguna 
 
 ## Puertos
 
-| Puerto                    | Responsabilidad                                      | Implementación actual          |
-| ------------------------- | ---------------------------------------------------- | ------------------------------ |
-| `AccountRepositoryPort`   | Persistir y recuperar el agregado                    | `InMemoryAccountRepository`    |
-| `IdentityProviderPort`    | Alta, consulta y baja del sujeto de identidad        | `FakeIdentityProvider`         |
-| `NotificationRequestPort` | Solicitar una notificación al contexto Notifications | `LoggingNotificationRequester` |
-| `ClockPort`               | Proveer el instante actual                           | `SystemClock`                  |
-| `IdGeneratorPort`         | Generar identificadores                              | `UuidGenerator`                |
+| Puerto                        | Responsabilidad                                      | Implementación actual                                     |
+| ----------------------------- | ---------------------------------------------------- | --------------------------------------------------------- |
+| `AccountRepositoryPort`       | Persistir y recuperar el agregado                    | `InMemoryAccountRepository` / `PostgresAccountRepository` |
+| `IdentityProviderPort`        | Alta, consulta y baja del sujeto de identidad        | `FakeIdentityProvider` (Cognito sustituye el adaptador)   |
+| `AvatarStoragePort`           | Guardar y borrar bytes de avatar                     | `LocalAvatarStorage` (AWS sustituye el adaptador)         |
+| `NicknameBlacklistPort`       | Consultar la lista negra vigente de apodos           | `InMemoryNicknameBlacklist` / `PostgresNicknameBlacklist` |
+| `SecurityQuestionCatalogPort` | Catálogo activo de preguntas de seguridad            | En memoria / `PostgresSecurityQuestionCatalog`            |
+| `NotificationRequestPort`     | Solicitar una notificación al contexto Notifications | `LoggingNotificationRequester`                            |
+| `ClockPort`                   | Proveer el instante actual                           | `SystemClock`                                             |
+| `IdGeneratorPort`             | Generar identificadores                              | `UuidGenerator`                                           |
 
 `ClockPort` e `IdGeneratorPort` existen para que el dominio sea determinista: ninguna entidad lee el reloj ni se genera a sí misma un identificador aleatorio, de modo que las pruebas comparan valores exactos en lugar de aproximaciones.
 
@@ -67,14 +70,20 @@ No se aplica CQRS ni Event Sourcing: el contexto no tiene un modelo de lectura d
 `RegisterAccount` coordina dos sistemas que no comparten transacción: el proveedor de identidad y el almacén de cuentas. El orden es deliberado.
 
 ```text
-1. Validar correo y nombre        -> falla temprano, sin efectos
-2. Comprobar unicidad del correo  -> falla temprano, sin efectos
-3. Alta en el proveedor           -> primer efecto externo
-4. Persistir la cuenta            -> si falla, se retira el sujeto (compensacion)
-5. Solicitar el correo            -> no compensa: la cuenta ya es valida
+1. Validar nombres, apellidos, correo, contraseña, apodo, términos,
+   respuestas y avatar                         -> falla temprano, sin efectos
+2. Comprobar unicidad de correo y apodo        -> falla temprano, sin efectos
+3. Consultar lista negra vigente               -> falla temprano, sin efectos
+4. Alta en el proveedor de identidad           -> primer efecto externo
+5. Almacenar avatar                            -> segundo efecto externo
+6. Persistir cuenta, roles y hashes            -> transaccion PostgreSQL;
+                                                 si falla, se borra el avatar
+                                                 y se revoca solo el sujeto
+                                                 creado en esta peticion
+7. Solicitar el correo                         -> no compensa: la cuenta ya es valida
 ```
 
-El paso 5 no participa de la compensación de forma deliberada. Si la solicitud de notificación falla, la cuenta existe y es correcta; deshacer el registro por no haber podido enviar un correo de bienvenida sería peor que reintentar la notificación. El error se propaga para que quede registrado, pero no revierte nada.
+El paso 7 no participa de la compensación de forma deliberada. Si la solicitud de notificación falla, la cuenta existe y es correcta; deshacer el registro por no haber podido enviar un correo de bienvenida sería peor que reintentar la notificación. El error se propaga para que quede registrado, pero no revierte nada.
 
 ## Estados de la cuenta
 
@@ -126,8 +135,8 @@ El correo electrónico es un dato personal: la observabilidad registra el **domi
 
 ## Limitaciones conocidas del alcance actual
 
-- La persistencia es en memoria y se pierde al reiniciar. El adaptador PostgreSQL depende de ADR-005, que debe decidir el ORM u ODM antes de escribir esquema y migraciones.
-- El proveedor de identidad es simulado. Es un blocker declarado del proyecto, no un olvido.
+- El proveedor de identidad es simulado en local (`FakeIdentityProvider`). Cognito sustituye el adaptador sin reescribir el dominio. Es un blocker declarado del proyecto, no un olvido.
+- Los bytes del avatar viven fuera de PostgreSQL (`AvatarStoragePort`). En local se usa disco; AWS sustituye el adaptador.
 - Las solicitudes de notificación se registran en la observabilidad con la forma exacta del mensaje, pero no se publican en una cola. Depende de ADR-006.
 - La emisión de JWT, la sesión y el segundo factor por correo no forman parte de este alcance.
 

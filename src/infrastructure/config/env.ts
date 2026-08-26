@@ -1,7 +1,33 @@
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { parseEnv } from 'node:util'
+
 export class ConfigurationError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'ConfigurationError'
+  }
+}
+
+/**
+ * Carga `.env` del directorio de trabajo si existe.
+ *
+ * No pisa variables ya definidas en el proceso: CI y el shell ganan.
+ * `loadConfig` sigue siendo puro sobre el objeto que reciba.
+ */
+export const applyEnvFile = (cwd = process.cwd()): void => {
+  const envPath = path.resolve(cwd, '.env')
+
+  if (!existsSync(envPath)) {
+    return
+  }
+
+  const parsed = parseEnv(readFileSync(envPath, 'utf8'))
+
+  for (const [key, value] of Object.entries(parsed)) {
+    if (process.env[key] === undefined && value !== undefined) {
+      process.env[key] = value
+    }
   }
 }
 
@@ -42,6 +68,8 @@ export interface AppConfig {
   readonly databaseUrl: string | null
   readonly authMode: AuthMode
   readonly cognito: CognitoConfig | null
+  readonly avatarStoragePath: string
+  readonly corsOrigins: readonly string[]
 }
 
 type RawEnv = Readonly<Record<string, string | undefined>>
@@ -113,6 +141,29 @@ const readBoolean = (env: RawEnv, key: string, fallback: boolean): boolean => {
   }
 
   return raw === 'true'
+}
+
+const LOCAL_WEB_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'] as const
+
+const readCorsOrigins = (env: RawEnv, nodeEnv: AppConfig['nodeEnv']): readonly string[] => {
+  const raw = env.CORS_ORIGINS
+
+  if (raw === undefined || raw === '') {
+    return nodeEnv === 'production' ? [] : LOCAL_WEB_ORIGINS
+  }
+
+  const origins = raw
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0)
+
+  if (nodeEnv === 'production' && origins.includes('*')) {
+    throw new ConfigurationError(
+      'CORS_ORIGINS no puede ser "*" con NODE_ENV=production. Declare origenes explicitos.',
+    )
+  }
+
+  return origins
 }
 
 /**
@@ -187,5 +238,7 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     databaseUrl: databaseUrl === '' ? null : databaseUrl,
     authMode,
     cognito: authMode === AuthMode.Jwt ? { userPoolId, clientId } : null,
+    avatarStoragePath: readString(env, 'AVATAR_STORAGE_PATH', './data/avatars'),
+    corsOrigins: readCorsOrigins(env, nodeEnv),
   }
 }

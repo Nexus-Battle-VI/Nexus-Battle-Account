@@ -6,6 +6,7 @@ import request from 'supertest'
 
 import { AppModule } from '../../src/infrastructure/bootstrap/app.module'
 import { Role } from '../../src/domain/entities/Role'
+import { registerAccountRequest } from '../support/http-register'
 import {
   TOKEN_VERIFIER,
   TokenVerificationError,
@@ -86,10 +87,10 @@ describe('API de cuentas con autenticacion activa', () => {
 
     await app.init()
 
-    const created = await request(app.getHttpServer())
-      .post('/api/accounts')
-      .set('Authorization', `Bearer token-jugador`)
-      .send({ email: 'ana@nexus.test', displayName: 'Ana Ramirez' })
+    const created = await registerAccountRequest(app, {
+      email: 'ana@nexus.test',
+      nickname: 'Ana Ramirez',
+    }).set('Authorization', `Bearer token-jugador`)
 
     accountId = (created.body as { id: string }).id
   })
@@ -117,16 +118,16 @@ describe('API de cuentas con autenticacion activa', () => {
     it('el registro exige testimonio', async () => {
       const response = await request(app.getHttpServer())
         .post('/api/accounts')
-        .send({ email: 'nuevo@nexus.test', displayName: 'Persona Nueva' })
+        .send({ email: 'nuevo@nexus.test', nickname: 'Persona Nueva' })
 
       expect(response.status).toBe(401)
     })
 
     it('registra la cuenta vinculada al sujeto del testimonio', async () => {
-      const response = await request(app.getHttpServer())
-        .post('/api/accounts')
-        .set('Authorization', bearer('token-moderador'))
-        .send({ email: 'moderador@nexus.test', displayName: 'Persona Moderadora' })
+      const response = await registerAccountRequest(app, {
+        email: 'moderador@nexus.test',
+        nickname: 'Cuenta Vinculada Uno',
+      }).set('Authorization', bearer('token-moderador'))
 
       expect(response.status).toBe(201)
 

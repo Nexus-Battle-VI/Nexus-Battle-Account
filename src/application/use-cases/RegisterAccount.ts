@@ -1,15 +1,27 @@
 import { Account } from '../../domain/entities/Account'
 import { AccountId } from '../../domain/value-objects/AccountId'
+import { AvatarMetadata, assertAvatarUpload } from '../../domain/value-objects/AvatarMetadata'
 import { DisplayName } from '../../domain/value-objects/DisplayName'
 import { EmailAddress } from '../../domain/value-objects/EmailAddress'
+import { PersonName } from '../../domain/value-objects/PersonName'
+import { DomainError } from '../../domain/errors/DomainError'
+import { PasswordPolicy } from '../../domain/policies/PasswordPolicy'
 import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
+import type { AvatarStoragePort } from '../ports/AvatarStoragePort'
 import type { ClockPort } from '../ports/ClockPort'
 import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
 import type { IdentityProviderPort } from '../ports/IdentityProviderPort'
+import type { NicknameBlacklistPort } from '../ports/NicknameBlacklistPort'
 import type { NotificationRequestPort } from '../ports/NotificationRequestPort'
-import { AccountAlreadyExistsError } from '../errors/ApplicationError'
+import type { SecurityQuestionCatalogPort } from '../ports/SecurityQuestionCatalogPort'
+import {
+  AccountAlreadyExistsError,
+  DisplayNameAlreadyTakenError,
+  NicknameBlacklistedError,
+} from '../errors/ApplicationError'
 import type { RegisterAccountCommand } from '../dto/RegisterAccountCommand'
 import { type AccountDto, toAccountDto } from '../dto/AccountDto'
+import { hashSecurityAnswer } from '../security/hashSecurityAnswer'
 
 export interface RegisterAccountDependencies {
   readonly accounts: AccountRepositoryPort
@@ -17,26 +29,18 @@ export interface RegisterAccountDependencies {
   readonly notifications: NotificationRequestPort
   readonly clock: ClockPort
   readonly ids: IdGeneratorPort
+  readonly avatars: AvatarStoragePort
+  readonly blacklist: NicknameBlacklistPort
+  readonly questions: SecurityQuestionCatalogPort
 }
 
 /**
- * Registra una cuenta nueva.
+ * Registra una cuenta de jugador (HU-01).
  *
- * Coordina tres colaboradores en un orden deliberado:
- *
- * 1. Se valida y se reserva la unicidad del correo.
- * 2. Se da de alta el sujeto en el proveedor de identidad.
- * 3. Se persiste la cuenta y se solicita el correo de verificacion.
- *
- * Si el proveedor de identidad falla, la cuenta no se persiste. Si la
- * persistencia falla despues de dar de alta el sujeto, se retira el sujeto
- * para no dejar identidades huerfanas: es una compensacion explicita, no una
- * transaccion distribuida.
- *
- * La compensacion alcanza UNICAMENTE al sujeto que este caso de uso creo.
- * Cuando el sujeto llega ya verificado en el testimonio, no se da de alta y
- * tampoco se revoca: retirarlo dejaria sin identidad a alguien que la tenia
- * antes de esta peticion.
+ * Coordina colaboradores fuera de PostgreSQL (identidad y avatar) y persiste
+ * cuenta, roles y respuestas en un unico paso del repositorio. Si la
+ * persistencia falla despues del alta, se compensan solo el avatar y el sujeto
+ * creados en esta peticion.
  */
 export class RegisterAccount {
   private readonly deps: RegisterAccountDependencies
@@ -46,34 +50,86 @@ export class RegisterAccount {
   }
 
   async execute(command: RegisterAccountCommand): Promise<AccountDto> {
+    const firstNames = PersonName.create(command.firstNames, 'Los nombres')
+    const lastNames = PersonName.create(command.lastNames, 'Los apellidos')
     const email = EmailAddress.create(command.email)
-    const displayName = DisplayName.create(command.displayName)
 
     if (await this.deps.accounts.existsByEmail(email)) {
       throw new AccountAlreadyExistsError(email.value)
     }
 
-    // Si quien registra llega con un testimonio verificado, el sujeto YA existe
-    // en el proveedor: darlo de alta otra vez produciria dos identidades para la
-    // misma persona.
+    PasswordPolicy.assertValid(command.password)
+    const displayName = DisplayName.create(command.displayName)
+
+    if (await this.deps.accounts.existsByDisplayName(displayName)) {
+      throw new DisplayNameAlreadyTakenError(displayName.value)
+    }
+
+    if (await this.deps.blacklist.isBlocked(displayName.value)) {
+      throw new NicknameBlacklistedError()
+    }
+
+    if (!command.termsAccepted) {
+      throw new DomainError('El registro exige aceptar los terminos y condiciones.')
+    }
+
+    const hashedAnswers = await this.hashRequiredAnswers(command)
+    const avatarUpload = command.avatar
+
+    if (avatarUpload === undefined) {
+      throw new DomainError('El avatar es obligatorio.')
+    }
+
+    assertAvatarUpload(avatarUpload)
+
     const provided = command.subject?.trim() ?? ''
     const createdSubject =
-      provided.length > 0 ? null : (await this.deps.identityProvider.register(email.value)).subject
+      provided.length > 0
+        ? null
+        : (
+            await this.deps.identityProvider.register({
+              email: email.value,
+              password: command.password,
+            })
+          ).subject
     const subject = createdSubject ?? provided
 
-    const account = Account.register({
-      id: AccountId.create(this.deps.ids.generate()),
-      subject,
-      email,
-      displayName,
-      occurredAt: this.deps.clock.now(),
-    })
+    const accountId = AccountId.create(this.deps.ids.generate())
+    let storedKey: string | null = null
+    let account: Account
 
     try {
-      await this.deps.accounts.save(account)
+      const stored = await this.deps.avatars.store({
+        accountId: accountId.value,
+        mimeType: avatarUpload.mimeType,
+        originalName: avatarUpload.originalName,
+        bytes: avatarUpload.bytes,
+      })
+      storedKey = stored.storageKey
+
+      account = Account.register({
+        id: accountId,
+        subject,
+        email,
+        displayName,
+        firstNames,
+        lastNames,
+        termsAccepted: true,
+        avatar: AvatarMetadata.create({
+          storageKey: stored.storageKey,
+          mimeType: avatarUpload.mimeType,
+          sizeBytes: stored.sizeBytes,
+          originalName: avatarUpload.originalName,
+        }),
+        occurredAt: this.deps.clock.now(),
+      })
+
+      await this.deps.accounts.saveRegistration(account, hashedAnswers)
     } catch (error: unknown) {
-      // Solo se retira lo que este caso de uso creo. Revocar un sujeto ajeno
-      // dejaria sin identidad a alguien que ya la tenia antes de esta peticion.
+      if (storedKey !== null) {
+        await this.deps.avatars.remove(storedKey)
+      }
+
       if (createdSubject !== null) {
         await this.deps.identityProvider.revoke(createdSubject)
       }
@@ -81,9 +137,6 @@ export class RegisterAccount {
       throw error
     }
 
-    // La solicitud de notificacion no participa de la compensacion: la cuenta
-    // ya existe y es valida. Un fallo aqui se propaga para que el adaptador de
-    // entrada lo reporte, pero no revierte el registro.
     await this.deps.notifications.request({
       notificationId: account.id.value,
       recipient: email.value,
@@ -94,5 +147,33 @@ export class RegisterAccount {
     account.pullEvents()
 
     return toAccountDto(account.toSnapshot())
+  }
+
+  private async hashRequiredAnswers(command: RegisterAccountCommand) {
+    const catalog = await this.deps.questions.listActive()
+    const required = new Set(catalog.map((question) => question.id))
+
+    if (required.size === 0) {
+      throw new DomainError('No hay preguntas de seguridad vigentes para el registro.')
+    }
+
+    const seen = new Set<string>()
+
+    for (const entry of command.securityAnswers) {
+      if (seen.has(entry.questionId) || !required.has(entry.questionId)) {
+        throw new DomainError('Las respuestas de seguridad no coinciden con el catalogo vigente.')
+      }
+
+      seen.add(entry.questionId)
+    }
+
+    if (seen.size !== required.size) {
+      throw new DomainError('El registro exige responder todas las preguntas de seguridad.')
+    }
+
+    return command.securityAnswers.map((entry) => ({
+      questionId: entry.questionId,
+      answerHash: hashSecurityAnswer(entry.answer),
+    }))
   }
 }
