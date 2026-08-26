@@ -190,7 +190,7 @@ La imagen es multi-etapa, se ejecuta con el usuario sin privilegios `node`, incl
 
 ## Limitaciones conocidas del alcance actual
 
-- **La persistencia es en memoria.** El repositorio guarda instantáneas y se pierde al reiniciar. El adaptador PostgreSQL depende de que ADR-005 decida el ORM u ODM; hasta entonces no se elige uno de facto. Configurar `PERSISTENCE_DRIVER=postgres` valida la configuración y lo advierte en el registro, pero no habilita un adaptador que no existe.
+- **La persistencia por defecto es en memoria y se pierde al reiniciar.** Con `PERSISTENCE_DRIVER=postgres` opera el adaptador real sobre PostgreSQL con Kysely, probado contra un motor en contenedor. El repositorio en memoria no es un resto del andamiaje: es lo que permite probar el dominio y los casos de uso **sin Docker**.
 - **La identidad es simulada.** Ver la sección correspondiente arriba.
 - **Las solicitudes de notificación no se publican en una cola.** Se registran con la forma exacta del mensaje que consumirá Notifications; la publicación real depende de ADR-006.
 - La autenticación, la emisión de JWT y el segundo factor por correo no forman parte de este alcance. El agregado ya distingue si una cuenta puede autenticarse, que es la regla de negocio que corresponde a este contexto.
