@@ -2,6 +2,8 @@ import { DomainError } from '../errors/DomainError'
 import type { AccountId } from '../value-objects/AccountId'
 import type { EmailAddress } from '../value-objects/EmailAddress'
 import type { DisplayName } from '../value-objects/DisplayName'
+import type { PersonName } from '../value-objects/PersonName'
+import type { AvatarMetadata } from '../value-objects/AvatarMetadata'
 import { AccountStatus } from './AccountStatus'
 import type { Role } from './Role'
 import { RolePolicy } from '../policies/RolePolicy'
@@ -16,6 +18,13 @@ export interface AccountSnapshot {
   readonly subject: string
   readonly email: string
   readonly displayName: string
+  readonly firstNames: string
+  readonly lastNames: string
+  readonly termsAccepted: boolean
+  readonly avatarStorageKey: string
+  readonly avatarMimeType: string
+  readonly avatarSizeBytes: number
+  readonly avatarOriginalName: string
   readonly status: AccountStatus
   readonly roles: readonly Role[]
 }
@@ -45,6 +54,10 @@ export class Account {
 
   private email: EmailAddress
   private displayName: DisplayName
+  private readonly firstNames: PersonName
+  private readonly lastNames: PersonName
+  private readonly termsAccepted: boolean
+  private readonly avatar: AvatarMetadata
   private status: AccountStatus
   private readonly roles: Set<Role>
   private readonly events: DomainEvent[] = []
@@ -54,6 +67,10 @@ export class Account {
     subject: string
     email: EmailAddress
     displayName: DisplayName
+    firstNames: PersonName
+    lastNames: PersonName
+    termsAccepted: boolean
+    avatar: AvatarMetadata
     status: AccountStatus
     roles: Set<Role>
   }) {
@@ -61,6 +78,10 @@ export class Account {
     this.subject = params.subject
     this.email = params.email
     this.displayName = params.displayName
+    this.firstNames = params.firstNames
+    this.lastNames = params.lastNames
+    this.termsAccepted = params.termsAccepted
+    this.avatar = params.avatar
     this.status = params.status
     this.roles = params.roles
   }
@@ -71,10 +92,18 @@ export class Account {
     subject: string
     email: EmailAddress
     displayName: DisplayName
+    firstNames: PersonName
+    lastNames: PersonName
+    termsAccepted: boolean
+    avatar: AvatarMetadata
     occurredAt: Date
   }): Account {
     if (params.subject.trim().length === 0) {
       throw new DomainError('Una cuenta debe quedar vinculada a un sujeto de identidad.')
+    }
+
+    if (!params.termsAccepted) {
+      throw new DomainError('El registro exige aceptar los terminos y condiciones.')
     }
 
     const account = new Account({
@@ -82,6 +111,10 @@ export class Account {
       subject: params.subject,
       email: params.email,
       displayName: params.displayName,
+      firstNames: params.firstNames,
+      lastNames: params.lastNames,
+      termsAccepted: true,
+      avatar: params.avatar,
       status: AccountStatus.PendingVerification,
       roles: new Set<Role>([RolePolicy.baseRole]),
     })
@@ -104,6 +137,10 @@ export class Account {
     subject: string
     email: EmailAddress
     displayName: DisplayName
+    firstNames: PersonName
+    lastNames: PersonName
+    termsAccepted: boolean
+    avatar: AvatarMetadata
     status: AccountStatus
     roles: readonly Role[]
   }): Account {
@@ -120,6 +157,10 @@ export class Account {
       subject: params.subject,
       email: params.email,
       displayName: params.displayName,
+      firstNames: params.firstNames,
+      lastNames: params.lastNames,
+      termsAccepted: params.termsAccepted,
+      avatar: params.avatar,
       status: params.status,
       roles: new Set<Role>(params.roles),
     })
@@ -131,6 +172,22 @@ export class Account {
 
   get currentDisplayName(): DisplayName {
     return this.displayName
+  }
+
+  get currentFirstNames(): PersonName {
+    return this.firstNames
+  }
+
+  get currentLastNames(): PersonName {
+    return this.lastNames
+  }
+
+  get acceptedTerms(): boolean {
+    return this.termsAccepted
+  }
+
+  get currentAvatar(): AvatarMetadata {
+    return this.avatar
   }
 
   get currentStatus(): AccountStatus {
@@ -250,6 +307,13 @@ export class Account {
       subject: this.subject,
       email: this.email.value,
       displayName: this.displayName.value,
+      firstNames: this.firstNames.value,
+      lastNames: this.lastNames.value,
+      termsAccepted: this.termsAccepted,
+      avatarStorageKey: this.avatar.storageKey,
+      avatarMimeType: this.avatar.mimeType,
+      avatarSizeBytes: this.avatar.sizeBytes,
+      avatarOriginalName: this.avatar.originalName,
       status: this.status,
       roles: [...this.roles],
     }

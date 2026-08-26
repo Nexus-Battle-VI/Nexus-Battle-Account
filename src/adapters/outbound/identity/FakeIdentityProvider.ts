@@ -1,5 +1,6 @@
 import type {
   IdentityProviderPort,
+  IdentityRegistrationInput,
   IdentitySubject,
 } from '../../../application/ports/IdentityProviderPort'
 import { IdentityProviderError } from '../../../application/ports/IdentityProviderPort'
@@ -7,13 +8,9 @@ import { IdentityProviderError } from '../../../application/ports/IdentityProvid
 /**
  * Proveedor de identidad para desarrollo y pruebas.
  *
- * No es una prueba falsa: implementa el contrato completo del puerto sobre
- * almacenamiento en memoria. Es el adaptador por defecto mientras no exista un
- * proveedor de identidad autorizado, que es un blocker declarado del proyecto.
- *
- * No almacena, deriva ni verifica contrasenas. Ese es precisamente el motivo de
- * que el puerto exista: cuando se apruebe un proveedor real, se sustituye este
- * adaptador sin tocar el dominio ni los casos de uso.
+ * Recibe la contrasena porque el contrato del puerto la exige para el alta.
+ * No la almacena, no la imprime y no la registra: cuando exista Cognito, se
+ * sustituye este adaptador sin tocar el dominio ni RegisterAccount.
  */
 export class FakeIdentityProvider implements IdentityProviderPort {
   private readonly byEmail = new Map<string, IdentitySubject>()
@@ -23,8 +20,12 @@ export class FakeIdentityProvider implements IdentityProviderPort {
     this.nextSubject = nextSubject
   }
 
-  register(email: string): Promise<IdentitySubject> {
-    const normalized = email.trim().toLowerCase()
+  register(input: IdentityRegistrationInput): Promise<IdentitySubject> {
+    if (input.password.length === 0) {
+      return Promise.reject(new IdentityProviderError('La contrasena es obligatoria.'))
+    }
+
+    const normalized = input.email.trim().toLowerCase()
 
     if (this.byEmail.has(normalized)) {
       return Promise.reject(

@@ -5,18 +5,10 @@ import { RolePolicy } from '../../src/domain/policies/RolePolicy'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
+import { PersonName } from '../../src/domain/value-objects/PersonName'
 import { DomainError } from '../../src/domain/errors/DomainError'
-
-const AT = new Date('2026-08-21T10:00:00.000Z')
-
-const buildAccount = (): Account =>
-  Account.register({
-    id: AccountId.create('acc-1'),
-    subject: 'sujeto-1',
-    email: EmailAddress.create('jugador@nexus.test'),
-    displayName: DisplayName.create('Ana Ramirez'),
-    occurredAt: AT,
-  })
+import { PasswordPolicy } from '../../src/domain/policies/PasswordPolicy'
+import { AT, buildAccount, defaultAvatarMetadata } from '../support/account-factory'
 
 const adminRoles = new Set<Role>([Role.Administrator])
 const playerRoles = new Set<Role>([Role.Player])
@@ -264,6 +256,10 @@ describe('Account', () => {
       subject: 'sujeto-9',
       email: EmailAddress.create('otro@nexus.test'),
       displayName: DisplayName.create('Otro Jugador'),
+      firstNames: PersonName.create('Otro', 'Los nombres'),
+      lastNames: PersonName.create('Jugador', 'Los apellidos'),
+      termsAccepted: true,
+      avatar: defaultAvatarMetadata('acc-9'),
       status: AccountStatus.Active,
       roles: [Role.Player, Role.Moderator],
     })
@@ -280,6 +276,10 @@ describe('Account', () => {
         subject: 'sujeto-9',
         email: EmailAddress.create('otro@nexus.test'),
         displayName: DisplayName.create('Otro Jugador'),
+        firstNames: PersonName.create('Otro', 'Los nombres'),
+        lastNames: PersonName.create('Jugador', 'Los apellidos'),
+        termsAccepted: true,
+        avatar: defaultAvatarMetadata('acc-9'),
         status: AccountStatus.Active,
         roles: [],
       }),
@@ -294,6 +294,13 @@ describe('Account', () => {
       subject: 'sujeto-1',
       email: 'jugador@nexus.test',
       displayName: 'Ana Ramirez',
+      firstNames: 'Ana',
+      lastNames: 'Ramirez',
+      termsAccepted: true,
+      avatarStorageKey: 'acc-1/a.png',
+      avatarMimeType: 'image/png',
+      avatarSizeBytes: 12,
+      avatarOriginalName: 'a.png',
       status: AccountStatus.PendingVerification,
       roles: [Role.Player],
     })
@@ -317,6 +324,10 @@ describe('Vinculo con el sujeto de identidad', () => {
         subject: '   ',
         email: EmailAddress.create('otro@nexus.test'),
         displayName: DisplayName.create('Otro Jugador'),
+        firstNames: PersonName.create('Otro', 'Los nombres'),
+        lastNames: PersonName.create('Jugador', 'Los apellidos'),
+        termsAccepted: true,
+        avatar: defaultAvatarMetadata('acc-2'),
         occurredAt: AT,
       }),
     ).toThrow(/sujeto de identidad/)
@@ -329,6 +340,10 @@ describe('Vinculo con el sujeto de identidad', () => {
         subject: '',
         email: EmailAddress.create('otro@nexus.test'),
         displayName: DisplayName.create('Otro Jugador'),
+        firstNames: PersonName.create('Otro', 'Los nombres'),
+        lastNames: PersonName.create('Jugador', 'Los apellidos'),
+        termsAccepted: true,
+        avatar: defaultAvatarMetadata('acc-2'),
         status: AccountStatus.Active,
         roles: [Role.Player],
       }),
@@ -346,5 +361,45 @@ describe('Vinculo con el sujeto de identidad', () => {
 
     expect(account.subject).toBe('sujeto-1')
     expect(account.currentEmail.value).toBe('nuevo@nexus.test')
+  })
+})
+
+describe('PersonName', () => {
+  it('rechaza nombres vacios', () => {
+    expect(() => PersonName.create('   ', 'Los nombres')).toThrow(/nombres no puede estar vacio/)
+    expect(() => PersonName.create('', 'Los apellidos')).toThrow(/apellidos no puede estar vacio/)
+  })
+
+  it('normaliza espacios', () => {
+    expect(PersonName.create('  Ana   Maria ', 'Los nombres').value).toBe('Ana Maria')
+  })
+})
+
+describe('PasswordPolicy', () => {
+  it('acepta una contrasena valida', () => {
+    expect(() => {
+      PasswordPolicy.assertValid('Abcdefg1!')
+    }).not.toThrow()
+  })
+
+  it('rechaza 8 caracteres o menos', () => {
+    expect(() => {
+      PasswordPolicy.assertValid('Abcde1!x')
+    }).toThrow(/mas de 8/)
+  })
+
+  it('rechaza la ausencia de mayuscula, minuscula, numero o simbolo', () => {
+    expect(() => {
+      PasswordPolicy.assertValid('abcdefg1!')
+    }).toThrow(/mayuscula/)
+    expect(() => {
+      PasswordPolicy.assertValid('ABCDEFG1!')
+    }).toThrow(/minuscula/)
+    expect(() => {
+      PasswordPolicy.assertValid('Abcdefgh!')
+    }).toThrow(/numero/)
+    expect(() => {
+      PasswordPolicy.assertValid('Abcdefg12')
+    }).toThrow(/simbolo/)
   })
 })

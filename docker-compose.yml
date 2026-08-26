@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: nexus
+      POSTGRES_DB: nexus_battle_account
+    ports:
+      - '5433:5432'
+    volumes:
+      - nexus-account-pg:/var/lib/postgresql/data
+
+volumes:
+  nexus-account-pg:

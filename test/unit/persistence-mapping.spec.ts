@@ -16,6 +16,13 @@ const ROW: AccountRow = {
   subject: 'sujeto-1',
   email: 'ana@nexus.test',
   display_name: 'Ana Ramirez',
+  first_names: 'Ana',
+  last_names: 'Ramirez',
+  terms_accepted: true,
+  avatar_storage_key: 'acc-1/a.png',
+  avatar_mime_type: 'image/png',
+  avatar_size_bytes: 12,
+  avatar_original_name: 'a.png',
   status: AccountStatus.Active,
 }
 
@@ -26,6 +33,13 @@ describe('Traduccion entre fila e instantanea', () => {
       subject: 'sujeto-1',
       email: 'ana@nexus.test',
       displayName: 'Ana Ramirez',
+      firstNames: 'Ana',
+      lastNames: 'Ramirez',
+      termsAccepted: true,
+      avatarStorageKey: 'acc-1/a.png',
+      avatarMimeType: 'image/png',
+      avatarSizeBytes: 12,
+      avatarOriginalName: 'a.png',
       status: AccountStatus.Active,
       roles: [Role.Player, Role.Moderator],
     })

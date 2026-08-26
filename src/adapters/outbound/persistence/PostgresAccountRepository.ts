@@ -1,21 +1,18 @@
-import type { Kysely } from 'kysely'
+import { sql, type Kysely, type Transaction } from 'kysely'
 
-import { Account } from '../../../domain/entities/Account'
-import { AccountId } from '../../../domain/value-objects/AccountId'
-import { DisplayName } from '../../../domain/value-objects/DisplayName'
-import { EmailAddress } from '../../../domain/value-objects/EmailAddress'
-import type { AccountRepositoryPort } from '../../../application/ports/AccountRepositoryPort'
+import type { Account } from '../../../domain/entities/Account'
+import type { AccountId } from '../../../domain/value-objects/AccountId'
+import type { DisplayName } from '../../../domain/value-objects/DisplayName'
+import type { EmailAddress } from '../../../domain/value-objects/EmailAddress'
+import type {
+  AccountRepositoryPort,
+  HashedSecurityAnswer,
+} from '../../../application/ports/AccountRepositoryPort'
 import type { AccountSnapshot } from '../../../domain/entities/Account'
 import type { Database } from './schema'
 import { toRow, toSnapshot } from './mapping'
+import { hydrateAccount } from './hydrate-account'
 
-/**
- * Repositorio del agregado Account sobre PostgreSQL, con Kysely.
- *
- * Cada consulta esta escrita a la vista. No hay carga perezosa que pueda
- * disparar consultas dentro de un bucle sin que aparezcan en el codigo, que es
- * la razon por la que ADR-012 eligio un constructor de consultas y no un ORM.
- */
 export class PostgresAccountRepository implements AccountRepositoryPort {
   private readonly db: Kysely<Database>
 
@@ -23,40 +20,36 @@ export class PostgresAccountRepository implements AccountRepositoryPort {
     this.db = db
   }
 
-  /**
-   * Guarda el agregado entero, cuenta y roles, en una sola transaccion.
-   *
-   * Los roles se reemplazan por completo en lugar de calcular diferencias: el
-   * agregado es la autoridad sobre su conjunto de roles, y un borrado seguido
-   * de una insercion expresa exactamente eso. Sin transaccion, un fallo entre
-   * ambas operaciones dejaria una cuenta SIN NINGUN ROL, que es un estado que
-   * el dominio no admite y que ni siquiera se podria volver a leer.
-   */
   async save(account: Account): Promise<void> {
-    const snapshot = account.toSnapshot()
-    const row = toRow(snapshot)
-
     await this.db.transaction().execute(async (trx) => {
-      await trx
-        .insertInto('accounts')
-        .values(row)
-        .onConflict((oc) =>
-          oc.column('id').doUpdateSet({
-            subject: row.subject,
-            email: row.email,
-            display_name: row.display_name,
-            status: row.status,
-            updated_at: new Date(),
-          }),
-        )
-        .execute()
+      await this.persistAccount(trx, account)
+    })
+  }
 
-      await trx.deleteFrom('account_roles').where('account_id', '=', snapshot.id).execute()
+  async saveRegistration(
+    account: Account,
+    answers: readonly HashedSecurityAnswer[],
+  ): Promise<void> {
+    await this.db.transaction().execute(async (trx) => {
+      await this.persistAccount(trx, account)
 
       await trx
-        .insertInto('account_roles')
-        .values(snapshot.roles.map((role) => ({ account_id: snapshot.id, role })))
+        .deleteFrom('account_security_answers')
+        .where('account_id', '=', account.id.value)
         .execute()
+
+      if (answers.length > 0) {
+        await trx
+          .insertInto('account_security_answers')
+          .values(
+            answers.map((answer) => ({
+              account_id: account.id.value,
+              question_id: answer.questionId,
+              answer_hash: answer.answerHash,
+            })),
+          )
+          .execute()
+      }
     })
   }
 
@@ -90,13 +83,6 @@ export class PostgresAccountRepository implements AccountRepositoryPort {
     return row === undefined ? null : await this.hydrate(row)
   }
 
-  /**
-   * Comprueba la existencia sin traerse la fila.
-   *
-   * `select 1` en lugar de `selectAll`: el caso de uso solo necesita saber si
-   * existe, y leer columnas que nadie va a mirar es trabajo que la base de datos
-   * hace para nada.
-   */
   async existsByEmail(email: EmailAddress): Promise<boolean> {
     const found = await this.db
       .selectFrom('accounts')
@@ -107,14 +93,49 @@ export class PostgresAccountRepository implements AccountRepositoryPort {
     return found !== undefined
   }
 
-  /**
-   * Reconstituye el agregado a partir de la fila y sus roles.
-   *
-   * Son dos consultas y no un `join` deliberadamente: un `join` devolveria la
-   * cuenta repetida una vez por rol, y habria que deduplicarla en memoria. Con
-   * un agregado que se lee de uno en uno, dos consultas simples son mas claras
-   * y no mas caras.
-   */
+  async existsByDisplayName(displayName: DisplayName): Promise<boolean> {
+    const found = await this.db
+      .selectFrom('accounts')
+      .select((eb) => eb.lit(1).as('uno'))
+      .where(sql`lower(display_name)`, '=', displayName.value.toLowerCase())
+      .executeTakeFirst()
+
+    return found !== undefined
+  }
+
+  private async persistAccount(trx: Transaction<Database>, account: Account): Promise<void> {
+    const snapshot = account.toSnapshot()
+    const row = toRow(snapshot)
+
+    await trx
+      .insertInto('accounts')
+      .values(row)
+      .onConflict((oc) =>
+        oc.column('id').doUpdateSet({
+          subject: row.subject,
+          email: row.email,
+          display_name: row.display_name,
+          first_names: row.first_names,
+          last_names: row.last_names,
+          terms_accepted: row.terms_accepted,
+          avatar_storage_key: row.avatar_storage_key,
+          avatar_mime_type: row.avatar_mime_type,
+          avatar_size_bytes: row.avatar_size_bytes,
+          avatar_original_name: row.avatar_original_name,
+          status: row.status,
+          updated_at: new Date(),
+        }),
+      )
+      .execute()
+
+    await trx.deleteFrom('account_roles').where('account_id', '=', snapshot.id).execute()
+
+    await trx
+      .insertInto('account_roles')
+      .values(snapshot.roles.map((role) => ({ account_id: snapshot.id, role })))
+      .execute()
+  }
+
   private async hydrate(row: AccountSnapshotRow): Promise<Account> {
     const roles = await this.db
       .selectFrom('account_roles')
@@ -127,14 +148,7 @@ export class PostgresAccountRepository implements AccountRepositoryPort {
       roles.map((entry) => entry.role),
     )
 
-    return Account.restore({
-      id: AccountId.create(snapshot.id),
-      subject: snapshot.subject,
-      email: EmailAddress.create(snapshot.email),
-      displayName: DisplayName.create(snapshot.displayName),
-      status: snapshot.status,
-      roles: snapshot.roles,
-    })
+    return hydrateAccount(snapshot)
   }
 }
 
@@ -143,5 +157,12 @@ interface AccountSnapshotRow {
   readonly subject: string
   readonly email: string
   readonly display_name: string
+  readonly first_names: string
+  readonly last_names: string
+  readonly terms_accepted: boolean
+  readonly avatar_storage_key: string
+  readonly avatar_mime_type: string
+  readonly avatar_size_bytes: number
+  readonly avatar_original_name: string
   readonly status: string
 }

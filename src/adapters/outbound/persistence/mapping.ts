@@ -22,6 +22,13 @@ export interface AccountRow {
   readonly subject: string
   readonly email: string
   readonly display_name: string
+  readonly first_names: string
+  readonly last_names: string
+  readonly terms_accepted: boolean
+  readonly avatar_storage_key: string
+  readonly avatar_mime_type: string
+  readonly avatar_size_bytes: number
+  readonly avatar_original_name: string
   readonly status: string
 }
 
@@ -54,9 +61,6 @@ export const toSnapshot = (row: AccountRow, roles: readonly string[]): AccountSn
   }
 
   if (known.length === 0) {
-    // El agregado exige al menos un rol y `restore` lo rechazaria. Fallar aqui
-    // senala el problema real —una fila sin roles— en lugar de un error del
-    // dominio sobre datos que el dominio no escribio.
     throw new PersistenceMappingError(`La cuenta ${row.id} no tiene ningun rol almacenado.`)
   }
 
@@ -65,6 +69,13 @@ export const toSnapshot = (row: AccountRow, roles: readonly string[]): AccountSn
     subject: row.subject,
     email: row.email,
     displayName: row.display_name,
+    firstNames: row.first_names,
+    lastNames: row.last_names,
+    termsAccepted: row.terms_accepted,
+    avatarStorageKey: row.avatar_storage_key,
+    avatarMimeType: row.avatar_mime_type,
+    avatarSizeBytes: row.avatar_size_bytes,
+    avatarOriginalName: row.avatar_original_name,
     status: row.status as AccountStatus,
     roles: known,
   }
@@ -76,5 +87,12 @@ export const toRow = (snapshot: AccountSnapshot): AccountRow => ({
   subject: snapshot.subject,
   email: snapshot.email,
   display_name: snapshot.displayName,
+  first_names: snapshot.firstNames,
+  last_names: snapshot.lastNames,
+  terms_accepted: snapshot.termsAccepted,
+  avatar_storage_key: snapshot.avatarStorageKey,
+  avatar_mime_type: snapshot.avatarMimeType,
+  avatar_size_bytes: snapshot.avatarSizeBytes,
+  avatar_original_name: snapshot.avatarOriginalName,
   status: snapshot.status,
 })

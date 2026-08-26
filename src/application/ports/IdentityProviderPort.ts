@@ -16,9 +16,19 @@ export interface IdentitySubject {
   readonly email: string
 }
 
+export interface IdentityRegistrationInput {
+  readonly email: string
+  /**
+   * Contrasena en claro. El adaptador la recibe para el alta en el proveedor
+   * y no debe persistirla ni registrarla. Cognito sustituira a Fake sin
+   * cambiar este contrato.
+   */
+  readonly password: string
+}
+
 export interface IdentityProviderPort {
   /** Da de alta el sujeto y devuelve su identificador en el proveedor. */
-  register(email: string): Promise<IdentitySubject>
+  register(input: IdentityRegistrationInput): Promise<IdentitySubject>
 
   /** Recupera el sujeto asociado a un correo, si existe. */
   findByEmail(email: string): Promise<IdentitySubject | null>

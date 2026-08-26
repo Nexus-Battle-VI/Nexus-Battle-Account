@@ -4,29 +4,18 @@ import { LoggingNotificationRequester } from '../../src/adapters/outbound/messag
 import { SystemClock } from '../../src/adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../src/adapters/outbound/system/UuidGenerator'
 import { IdentityProviderError } from '../../src/application/ports/IdentityProviderPort'
-import { Account } from '../../src/domain/entities/Account'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
-import { ConfigurationError, loadConfig } from '../../src/infrastructure/config/env'
+import { applyEnvFile, ConfigurationError, loadConfig } from '../../src/infrastructure/config/env'
 import { createLogger } from '../../src/infrastructure/observability/logger'
 import { buildLiveness, buildReadiness, buildVersion } from '../../src/infrastructure/health/health'
-
-const AT = new Date('2026-08-21T10:00:00.000Z')
-
-const buildAccount = (
-  id = 'acc-1',
-  email = 'jugador@nexus.test',
-  subject = `sujeto-${id}`,
-): Account =>
-  Account.register({
-    id: AccountId.create(id),
-    subject,
-    email: EmailAddress.create(email),
-    displayName: DisplayName.create('Ana Ramirez'),
-    occurredAt: AT,
-  })
+import { LocalAvatarStorage } from '../../src/adapters/outbound/storage/LocalAvatarStorage'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { AT, VALID_PASSWORD, buildAccount } from '../support/account-factory'
 
 describe('InMemoryAccountRepository', () => {
   it('guarda y recupera por identificador', async () => {
@@ -45,6 +34,15 @@ describe('InMemoryAccountRepository', () => {
 
     expect(await repository.findById(AccountId.create('acc-x'))).toBeNull()
     expect(await repository.findByEmail(EmailAddress.create('nadie@nexus.test'))).toBeNull()
+  })
+
+  it('responde a la unicidad del apodo sin distinguir mayusculas', async () => {
+    const repository = new InMemoryAccountRepository()
+    await repository.save(buildAccount())
+
+    expect(await repository.existsByDisplayName(DisplayName.create('Ana Ramirez'))).toBe(true)
+    expect(await repository.existsByDisplayName(DisplayName.create('ANA RAMIREZ'))).toBe(true)
+    expect(await repository.existsByDisplayName(DisplayName.create('Otro Apodo'))).toBe(false)
   })
 
   it('recupera por correo y responde a la comprobacion de existencia', async () => {
@@ -107,10 +105,21 @@ describe('FakeIdentityProvider', () => {
     }
   }
 
+  it('no retiene la contrasena en memoria', async () => {
+    const provider = new FakeIdentityProvider(nextSubject())
+
+    await provider.register({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+    expect(JSON.stringify(provider)).not.toContain(VALID_PASSWORD)
+  })
+
   it('da de alta un sujeto y lo recupera por correo', async () => {
     const provider = new FakeIdentityProvider(nextSubject())
 
-    const subject = await provider.register('  Jugador@Nexus.Test ')
+    const subject = await provider.register({
+      email: '  Jugador@Nexus.Test ',
+      password: VALID_PASSWORD,
+    })
 
     expect(subject).toEqual({ subject: 'sub-1', email: 'jugador@nexus.test' })
     expect(await provider.findByEmail('JUGADOR@NEXUS.TEST')).toEqual(subject)
@@ -119,11 +128,11 @@ describe('FakeIdentityProvider', () => {
 
   it('rechaza registrar dos veces el mismo correo', async () => {
     const provider = new FakeIdentityProvider(nextSubject())
-    await provider.register('jugador@nexus.test')
+    await provider.register({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
 
-    await expect(provider.register('jugador@nexus.test')).rejects.toBeInstanceOf(
-      IdentityProviderError,
-    )
+    await expect(
+      provider.register({ email: 'jugador@nexus.test', password: VALID_PASSWORD }),
+    ).rejects.toBeInstanceOf(IdentityProviderError)
   })
 
   it('devuelve null para un correo desconocido', async () => {
@@ -134,7 +143,10 @@ describe('FakeIdentityProvider', () => {
 
   it('retira un sujeto existente y tolera uno inexistente', async () => {
     const provider = new FakeIdentityProvider(nextSubject())
-    const subject = await provider.register('jugador@nexus.test')
+    const subject = await provider.register({
+      email: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+    })
 
     await provider.revoke(subject.subject)
     expect(provider.size).toBe(0)
@@ -191,6 +203,24 @@ describe('LoggingNotificationRequester', () => {
   })
 })
 
+describe('LocalAvatarStorage', () => {
+  it('escribe y elimina el archivo bajo la ruta configurada', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'avatars-'))
+    const storage = new LocalAvatarStorage(dir)
+
+    const stored = await storage.store({
+      accountId: 'acc-1',
+      mimeType: 'image/png',
+      originalName: 'foto.png',
+      bytes: Buffer.from('abc'),
+    })
+
+    expect(await readFile(path.join(dir, stored.storageKey), 'utf8')).toBe('abc')
+
+    await storage.remove(stored.storageKey)
+  })
+})
+
 describe('SystemClock y UuidGenerator', () => {
   it('el reloj devuelve un instante no anterior al actual', () => {
     const before = Date.now()
@@ -221,6 +251,8 @@ describe('loadConfig', () => {
       databaseUrl: null,
       authMode: 'disabled',
       cognito: null,
+      avatarStoragePath: './data/avatars',
+      corsOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'],
     })
   })
 
@@ -233,6 +265,14 @@ describe('loadConfig', () => {
     COGNITO_USER_POOL_ID: 'us-east-1_abc',
     COGNITO_CLIENT_ID: 'cliente',
   } as const
+
+  it('en produccion no abre CORS salvo lista explicita, y rechaza *', () => {
+    expect(loadConfig(PRODUCTION_ENV).corsOrigins).toEqual([])
+    expect(
+      loadConfig({ ...PRODUCTION_ENV, CORS_ORIGINS: 'https://app.nexus.test' }).corsOrigins,
+    ).toEqual(['https://app.nexus.test'])
+    expect(() => loadConfig({ ...PRODUCTION_ENV, CORS_ORIGINS: '*' })).toThrow(/CORS_ORIGINS/)
+  })
 
   it('deshabilita la documentacion interactiva en produccion por defecto', () => {
     expect(loadConfig(PRODUCTION_ENV).swaggerEnabled).toBe(false)
@@ -267,6 +307,33 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ PERSISTENCE_DRIVER: 'postgres' })).toThrow(
       /DATABASE_URL es obligatorio/,
     )
+  })
+
+  it('applyEnvFile no falla si el archivo no existe', () => {
+    expect(() => {
+      applyEnvFile(path.join(tmpdir(), 'nexus-sin-env'))
+    }).not.toThrow()
+  })
+
+  it('applyEnvFile carga claves nuevas y no pisa las ya definidas', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'nexus-env-'))
+
+    process.env.NEXUS_ACCOUNT_ENV_EXISTING = 'previo'
+    delete process.env.NEXUS_ACCOUNT_ENV_FRESH
+
+    await writeFile(
+      path.join(dir, '.env'),
+      'NEXUS_ACCOUNT_ENV_EXISTING=desde-archivo\nNEXUS_ACCOUNT_ENV_FRESH=desde-archivo\n',
+    )
+
+    try {
+      applyEnvFile(dir)
+      expect(process.env.NEXUS_ACCOUNT_ENV_EXISTING).toBe('previo')
+      expect(process.env.NEXUS_ACCOUNT_ENV_FRESH).toBe('desde-archivo')
+    } finally {
+      delete process.env.NEXUS_ACCOUNT_ENV_EXISTING
+      delete process.env.NEXUS_ACCOUNT_ENV_FRESH
+    }
   })
 
   it.each([
