@@ -86,8 +86,10 @@ export class SessionsController {
         return {
           status: 'AUTHENTICATED',
           accessToken: outcome.accessToken,
+          expiresIn: outcome.expiresIn,
           account: {
             id: outcome.account.id,
+            subject: outcome.subject,
             email: outcome.account.email,
             displayName: outcome.account.displayName,
             roles: outcome.account.roles,

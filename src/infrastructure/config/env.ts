@@ -49,6 +49,19 @@ export interface CognitoConfig {
   readonly clientId: string
 }
 
+export const AuthenticationDriver = {
+  /**
+   * `FakeAuthenticationProvider`. Real y probado, sin credenciales de verdad.
+   * Es el valor por defecto porque es lo unico que test y desarrollo local sin
+   * red pueden usar sin depender de un pool de Cognito real.
+   */
+  Fake: 'fake',
+  /** `CognitoAuthenticationProvider`. Verifica contrasena contra el pool real. */
+  Cognito: 'cognito',
+} as const
+
+export type AuthenticationDriver = (typeof AuthenticationDriver)[keyof typeof AuthenticationDriver]
+
 export const PersistenceDriver = {
   Memory: 'memory',
   Postgres: 'postgres',
@@ -67,6 +80,7 @@ export interface AppConfig {
   readonly persistenceDriver: PersistenceDriver
   readonly databaseUrl: string | null
   readonly authMode: AuthMode
+  readonly authenticationDriver: AuthenticationDriver
   readonly cognito: CognitoConfig | null
   readonly avatarStoragePath: string
   readonly corsOrigins: readonly string[]
@@ -204,12 +218,33 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     )
   }
 
+  const authenticationDriver = readEnum(
+    env,
+    'AUTHENTICATION_DRIVER',
+    [AuthenticationDriver.Fake, AuthenticationDriver.Cognito],
+    AuthenticationDriver.Fake,
+  )
+
+  // Un binario de produccion no puede autenticar contra un proveedor falso:
+  // aceptaria CUALQUIER cuenta sembrada en memoria como si fuera real. Mismo
+  // razonamiento que el BLOCKER de AUTH_MODE, aplicado a la verificacion de
+  // contrasena en lugar de a la verificacion del testimonio.
+  if (nodeEnv === 'production' && authenticationDriver === AuthenticationDriver.Fake) {
+    throw new ConfigurationError(
+      'AUTHENTICATION_DRIVER no puede ser "fake" con NODE_ENV=production. El login debe ' +
+        'verificarse contra el proveedor real. Vease ADR-004.',
+    )
+  }
+
   const userPoolId = readString(env, 'COGNITO_USER_POOL_ID', '')
   const clientId = readString(env, 'COGNITO_CLIENT_ID', '')
+  const needsCognito =
+    authMode === AuthMode.Jwt || authenticationDriver === AuthenticationDriver.Cognito
 
-  if (authMode === AuthMode.Jwt && (userPoolId === '' || clientId === '')) {
+  if (needsCognito && (userPoolId === '' || clientId === '')) {
     throw new ConfigurationError(
-      'COGNITO_USER_POOL_ID y COGNITO_CLIENT_ID son obligatorios cuando AUTH_MODE es "jwt".',
+      'COGNITO_USER_POOL_ID y COGNITO_CLIENT_ID son obligatorios cuando AUTH_MODE es "jwt" o ' +
+        'AUTHENTICATION_DRIVER es "cognito".',
     )
   }
 
@@ -237,7 +272,8 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     persistenceDriver,
     databaseUrl: databaseUrl === '' ? null : databaseUrl,
     authMode,
-    cognito: authMode === AuthMode.Jwt ? { userPoolId, clientId } : null,
+    authenticationDriver,
+    cognito: needsCognito ? { userPoolId, clientId } : null,
     avatarStoragePath: readString(env, 'AVATAR_STORAGE_PATH', './data/avatars'),
     corsOrigins: readCorsOrigins(env, nodeEnv),
   }

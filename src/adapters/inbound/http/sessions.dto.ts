@@ -45,9 +45,21 @@ export class SecondFactorRequest {
   code!: string
 }
 
+/**
+ * `id` es el identificador de Account; `subject` es el `sub` real del
+ * proveedor de identidad. Son valores DISTINTOS y nunca se mapea uno sobre el
+ * otro. `AccountDto` (usado por `GET /accounts/:id` y `/me`) sigue sin llevar
+ * `subject` -esas rutas no deben exponer el sujeto de una cuenta ajena-; aqui
+ * es distinto: es la propia sesion recien creada, y `subject` ya viaja dentro
+ * de `accessToken` como claim estandar del JWT, asi que no hay nada nuevo que
+ * filtrar al declararlo tambien de forma explicita.
+ */
 export class AccountSummaryResponse {
   @ApiProperty({ example: '0b1d5b0e-3f6a-4a1e-9a1a-4a5c6f2b8e10' })
   readonly id!: string
+
+  @ApiProperty({ example: 'us-east-1:3f2a8b1c-...' })
+  readonly subject!: string
 
   @ApiProperty({ example: 'jugador@nexus.test' })
   readonly email!: string
@@ -74,6 +86,12 @@ export class SessionResponse {
     description: 'Testimonio firmado por el proveedor de identidad.',
   })
   readonly accessToken?: string
+
+  @ApiProperty({
+    required: false,
+    description: 'Vigencia de `accessToken` en segundos. Presente solo junto con `accessToken`.',
+  })
+  readonly expiresIn?: number
 
   @ApiProperty({ required: false, type: AccountSummaryResponse })
   readonly account?: AccountSummaryResponse

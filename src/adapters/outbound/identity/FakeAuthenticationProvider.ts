@@ -26,6 +26,9 @@ interface PendingChallenge {
   readonly code: string
 }
 
+/** Vigencia arbitraria del token de prueba: una hora, como un access token tipico de Cognito. */
+const FAKE_EXPIRES_IN_SECONDS = 3600
+
 /**
  * Proveedor de autenticacion para desarrollo y pruebas (HU-02).
  *
@@ -73,7 +76,11 @@ export class FakeAuthenticationProvider implements AuthenticationProviderPort {
       return Promise.resolve({ kind: 'challengeRequired', challengeToken })
     }
 
-    return Promise.resolve({ kind: 'authenticated', accessToken: this.issueAccessToken() })
+    return Promise.resolve({
+      kind: 'authenticated',
+      accessToken: this.issueAccessToken(),
+      expiresIn: FAKE_EXPIRES_IN_SECONDS,
+    })
   }
 
   verifySecondFactor(input: SecondFactorVerification): Promise<SecondFactorOutcome> {
@@ -90,7 +97,11 @@ export class FakeAuthenticationProvider implements AuthenticationProviderPort {
 
     this.pendingChallenges.delete(input.challengeToken)
 
-    return Promise.resolve({ kind: 'verified', accessToken: this.issueAccessToken() })
+    return Promise.resolve({
+      kind: 'verified',
+      accessToken: this.issueAccessToken(),
+      expiresIn: FAKE_EXPIRES_IN_SECONDS,
+    })
   }
 
   private issueAccessToken(): string {

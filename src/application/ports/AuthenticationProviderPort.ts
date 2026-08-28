@@ -45,7 +45,7 @@ export interface AuthenticationCredentials {
  * ninguno de los dos: solo transporta el reto tal como el proveedor lo emite.
  */
 export type AuthenticationOutcome =
-  | { readonly kind: 'authenticated'; readonly accessToken: string }
+  | { readonly kind: 'authenticated'; readonly accessToken: string; readonly expiresIn: number }
   | { readonly kind: 'challengeRequired'; readonly challengeToken: string }
   | { readonly kind: 'invalidCredentials' }
 
@@ -56,7 +56,7 @@ export interface SecondFactorVerification {
 }
 
 export type SecondFactorOutcome =
-  | { readonly kind: 'verified'; readonly accessToken: string }
+  | { readonly kind: 'verified'; readonly accessToken: string; readonly expiresIn: number }
   | { readonly kind: 'invalidCode' }
   | { readonly kind: 'challengeExpired' }
 

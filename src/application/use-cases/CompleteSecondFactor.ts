@@ -65,7 +65,9 @@ export class CompleteSecondFactor {
     return {
       kind: 'authenticated',
       account: toAccountDto(account.toSnapshot()),
+      subject: account.subject,
       accessToken: outcome.accessToken,
+      expiresIn: outcome.expiresIn,
     }
   }
 }

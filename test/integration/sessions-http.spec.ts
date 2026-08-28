@@ -165,6 +165,26 @@ describe('API de sesiones (HU-02)', () => {
     expect(typeof response.body.accessToken).toBe('string')
   })
 
+  /**
+   * `account.id` (identificador de Account) y `account.subject` (sub real del
+   * proveedor) deben viajar como dos campos DISTINTOS: `givenActivePlayer`
+   * registra con el testimonio `token-registro-<email>`, cuyo sujeto fijo
+   * (`sujeto-<email>`) es literalmente otro valor que el UUID que
+   * `RegisterAccount` genera para `id`.
+   */
+  it('el subject real viaja explicito y nunca se confunde con account.id', async () => {
+    await givenActivePlayer('subject-real@nexus.test', 'JugadorSujetoReal')
+
+    const response = await request(app.getHttpServer())
+      .post('/api/sessions')
+      .send({ identifier: 'subject-real@nexus.test', password: VALID_PASSWORD })
+
+    expect(response.status).toBe(200)
+    expect(response.body.account.subject).toBe('sujeto-subject-real@nexus.test')
+    expect(response.body.account.id).not.toBe(response.body.account.subject)
+    expect(typeof response.body.account.id).toBe('string')
+  })
+
   it('CA-02: apodo + contrasena correctos autentica sin que el cliente conozca el correo', async () => {
     await givenActivePlayer('ca02@nexus.test', 'ApodoJugadorDos')
 

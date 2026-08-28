@@ -40,7 +40,7 @@ El equipo propietario acusa recibo y coordina la corrección junto con los Scrum
 - No se incorporan secretos, credenciales, tokens ni claves al repositorio.
 - La configuración sensible se entrega por variables de entorno. `.env` está ignorado por Git; `.env.example` documenta las variables sin valores reales.
 - La imagen de contenedor no incluye archivos de entorno ni credenciales.
-- No se utilizan claves de acceso de larga duración de AWS. Cuando se habilite el despliegue, la autenticación usará OIDC con credenciales de corta duración.
+- No se utilizan claves de acceso de larga duración de AWS. Cuando se habilite el despliegue, la autenticación usará OIDC con credenciales de corta duración. `CognitoAuthenticationProvider` (HU-02) tampoco las necesita: `InitiateAuth` y `RespondToAuthChallenge` son operaciones sin firma en el modelo del SDK, igual que las usa un cliente público sin secreto desde un navegador.
 - La evidencia enlazada desde las Issues no debe contener secretos.
 
 ## Consideraciones específicas del servicio

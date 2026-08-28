@@ -210,15 +210,52 @@ administrativa se autentica sin que el proveedor emita ningun reto: eso
 significa que el segundo factor no se esta aplicando para esa cuenta, no que
 el login tuvo exito.
 
-**Estado real de la integracion:** igual que `IdentityProviderPort` para el
-alta (HU-01), el adaptador Cognito de `AuthenticationProviderPort` sigue
-pendiente. Opera `FakeAuthenticationProvider`, una implementacion real y
-probada del puerto sobre almacenamiento en memoria, sembrada explicitamente en
-las pruebas. El mecanismo de segundo factor aprobado por el cliente es correo
-electronico, pero el user pool de Cognito ya aprovisionado tiene TOTP, no
-correo, porque el correo exige SES y esa decision sigue pendiente (vease
-ADR-004 en Nexus-Battle-Infrastructure). Este puerto no asume ninguno de los
-dos: transporta el reto tal como el proveedor lo emita.
+**Estado real de la integracion:** `AUTHENTICATION_DRIVER` elige el
+adaptador, igual que `PERSISTENCE_DRIVER` elige el repositorio.
+
+| Valor                | Adaptador                       | Uso                                                         |
+| -------------------- | ------------------------------- | ----------------------------------------------------------- |
+| `fake` (por defecto) | `FakeAuthenticationProvider`    | Test y desarrollo local sin red. No verifica nada real      |
+| `cognito`            | `CognitoAuthenticationProvider` | `InitiateAuth`/`RespondToAuthChallenge` contra el pool real |
+
+Con `NODE_ENV=production`, `AUTHENTICATION_DRIVER=fake` **impide arrancar**
+el servicio, igual que `AUTH_MODE=disabled`: un binario de produccion no
+puede aceptar cualquier cuenta sembrada en memoria como si fuera real.
+
+El mecanismo de segundo factor aprobado por el cliente es correo electronico,
+pero el user pool de Cognito ya aprovisionado tiene TOTP, no correo, porque el
+correo exige SES y esa decision sigue pendiente (vease ADR-004 en
+Nexus-Battle-Infrastructure). El puerto no asume ninguno de los dos:
+transporta el reto tal como el proveedor lo emita.
+
+**Por que `Admin*` y no el flujo publico.** El cliente de app de Cognito
+(ADR-004) es el mismo cliente PUBLICO que usa Web por _authorization code
+grant_ + PKCE. Si `CognitoAuthenticationProvider` usara el `InitiateAuth`
+publico, habilitar `ALLOW_USER_PASSWORD_AUTH` en ese cliente dejaria a
+CUALQUIER cliente que conozca el Client ID -no es secreto, viaja en la URL de
+login- autenticar directo contra Cognito, saltandose `LoginAccount` y con el
+la regla de que `ADMINISTRATOR`/`SUPER_ADMINISTRATOR` no obtienen acceso solo
+con contrasena. Por eso usa `AdminInitiateAuth`/`AdminRespondToAuthChallenge`
+(`AuthFlow: ADMIN_USER_PASSWORD_AUTH`): exige un flag de `ExplicitAuthFlows`
+DISTINTO (`ALLOW_ADMIN_USER_PASSWORD_AUTH`) y credenciales de AWS firmadas
+(IAM) que un navegador no tiene, forzando el camino Web -> Account -> Cognito.
+
+**Blocker de Infrastructure sin confirmar:** las operaciones `Admin*` exigen
+un permiso IAM (`cognito-idp:AdminInitiateAuth` /
+`cognito-idp:AdminRespondToAuthChallenge`, acotado al ARN del user pool) sobre
+el rol de ejecucion del runtime de Account, y que el cliente de Terraform
+tenga `ALLOW_ADMIN_USER_PASSWORD_AUTH` en `ExplicitAuthFlows`. Ninguno de los
+dos esta confirmado en ADR-004. Si falta cualquiera, el login real falla con
+`AuthenticationProviderError` (503), no con credenciales invalidas.
+Resolverlo es una decision de Infrastructure; el adaptador no usa claves de
+AWS de larga duracion en ningun caso -se apoya en la cadena de credenciales
+por defecto del SDK.
+
+**Registro y Cognito ya son consistentes.** `RegisterAccount` usa el `subject`
+del testimonio verificado cuando llega uno (`AUTH_MODE=jwt` con una identidad
+real); `IdentityProviderPort.register` (`FakeIdentityProvider`) solo actua
+como respaldo cuando la autenticacion esta desactivada. No hay dos procesos de
+alta de identidad en conflicto entre HU-01 y HU-02.
 
 ## Estructura
 
@@ -259,7 +296,8 @@ La imagen es multi-etapa, se ejecuta con el usuario sin privilegios `node`, incl
 
 - **La persistencia por defecto es en memoria y se pierde al reiniciar.** Con `PERSISTENCE_DRIVER=postgres` opera el adaptador real sobre PostgreSQL con Kysely, probado contra un motor en contenedor. El repositorio en memoria no es un resto del andamiaje: es lo que permite probar el dominio y los casos de uso **sin Docker**.
 - **El alta de identidad sigue simulada.** `FakeIdentityProvider` implementa `IdentityProviderPort` (email + contraseña, sin persistir la contraseña). Cognito sustituye ese adaptador sin tocar el dominio. Ver ADR-004.
-- **La autenticación (HU-02) también sigue simulada, por la misma razón.** `FakeAuthenticationProvider` implementa `AuthenticationProviderPort`. Mientras el registro cree el sujeto con `FakeIdentityProvider` en lugar de un usuario real del pool, no hay ningún usuario real contra el que autenticar: los dos adaptadores Cognito pendientes están acoplados.
+- **La autenticación (HU-02) tiene adaptador Cognito real (`CognitoAuthenticationProvider`), pero `AUTHENTICATION_DRIVER=fake` sigue siendo el valor por defecto** fuera de producción, donde `fake` está prohibido. Requiere que el registro haya creado el sujeto con un usuario real del pool (`AUTH_MODE=jwt` con un testimonio verdadero), no con `FakeIdentityProvider`.
+- **Sin confirmar: permiso IAM y `ExplicitAuthFlows` para el flujo `Admin*`.** `CognitoAuthenticationProvider` usa `AdminInitiateAuth`/`AdminRespondToAuthChallenge` (no el flujo público, para no exponer `USER_PASSWORD_AUTH` en el cliente público de Web). Necesita `cognito-idp:AdminInitiateAuth`/`AdminRespondToAuthChallenge` en el rol IAM del runtime y `ALLOW_ADMIN_USER_PASSWORD_AUTH` en el cliente de Terraform; ninguno de los dos está confirmado en ADR-004. Si falta cualquiera, el login real falla con `AuthenticationProviderError`, no con credenciales inválidas.
 - **El mecanismo de segundo factor aprobado (correo) no coincide con lo aprovisionado (TOTP).** El pool de Cognito exige SES para MFA por correo, todavía no decidido. Ver ADR-004 en Nexus-Battle-Infrastructure.
 - **El avatar se guarda en disco local.** `LocalAvatarStorage` escribe bajo `AVATAR_STORAGE_PATH`. Un adaptador AWS sustituye ese puerto sin tocar `RegisterAccount`.
 - **Las solicitudes de notificación no se publican en una cola.** Se registran con la forma exacta del mensaje que consumirá Notifications; la publicación real depende de ADR-006.

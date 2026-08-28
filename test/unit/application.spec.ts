@@ -447,6 +447,37 @@ describe('LoginAccount', () => {
     expect(outcome).toMatchObject({ kind: 'authenticated' })
   })
 
+  /**
+   * `account.id` es el identificador de Account; `subject` es el `sub` real
+   * del proveedor. Son valores DISTINTOS a proposito en este fixture
+   * (`buildActiveAccount` los genera por separado): esta prueba falla si
+   * algun dia alguien confunde uno con el otro.
+   */
+  it('entrega el subject real, distinto de account.id', async () => {
+    const harness = buildLoginHarness()
+    await harness.accounts.save(
+      buildActiveAccount({
+        id: 'acc-42',
+        subject: 'sujeto-cognito-real',
+        email: 'jugador@nexus.test',
+      }),
+    )
+    harness.authProvider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+    const outcome = await harness.loginAccount.execute({
+      identifier: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    if (outcome.kind !== 'authenticated') {
+      throw new Error('se esperaba autenticacion completada')
+    }
+
+    expect(outcome.subject).toBe('sujeto-cognito-real')
+    expect(outcome.account.id).toBe('acc-42')
+    expect(outcome.subject).not.toBe(outcome.account.id)
+  })
+
   it('identifica la cuenta por apodo, sin que quien llama sepa su correo', async () => {
     const harness = buildLoginHarness()
     await harness.accounts.save(

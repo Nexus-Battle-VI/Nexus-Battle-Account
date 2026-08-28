@@ -23,7 +23,23 @@ import type { AccountDto } from './AccountDto'
  * es la brecha de aprovisionamiento de Cognito descrita en ADR-004.
  */
 export type LoginOutcome =
-  | { readonly kind: 'authenticated'; readonly account: AccountDto; readonly accessToken: string }
+  | {
+      readonly kind: 'authenticated'
+      readonly account: AccountDto
+      /**
+       * El `sub` real del proveedor de identidad. `account.id` es el
+       * identificador de Account, un valor DISTINTO que nunca debe usarse en
+       * su lugar (vease `AccountSummaryResponse`). `AccountDto` sigue sin
+       * llevarlo -GET /accounts/:id y /me no deben exponer el sujeto de una
+       * cuenta ajena-, pero aqui no hay nada nuevo que filtrar: `accessToken`
+       * ya es el JWT de Cognito y `sub` ya viaja dentro de el como claim
+       * estandar, visible para quien decodifique su propio token.
+       */
+      readonly subject: string
+      readonly accessToken: string
+      /** Vigencia del `accessToken` en segundos, informada por el proveedor. */
+      readonly expiresIn: number
+    }
   | { readonly kind: 'secondFactorRequired'; readonly challengeToken: string }
   | { readonly kind: 'secondFactorInvalid' }
   | { readonly kind: 'invalidCredentials' }

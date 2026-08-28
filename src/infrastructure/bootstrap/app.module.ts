@@ -58,12 +58,19 @@ import type { Database } from '../../adapters/outbound/persistence/schema'
 import type { Kysely } from 'kysely'
 import { FakeIdentityProvider } from '../../adapters/outbound/identity/FakeIdentityProvider'
 import { FakeAuthenticationProvider } from '../../adapters/outbound/identity/FakeAuthenticationProvider'
+import { CognitoAuthenticationProvider } from '../../adapters/outbound/identity/CognitoAuthenticationProvider'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
 
 import { createLogger, type Logger } from '../observability/logger'
-import { AuthMode, loadConfig, PersistenceDriver, type AppConfig } from '../config/env'
+import {
+  AuthenticationDriver,
+  AuthMode,
+  loadConfig,
+  PersistenceDriver,
+  type AppConfig,
+} from '../config/env'
 import type { ReadinessCheck, VersionReport } from '../health/health'
 
 export const APP_CONFIG = Symbol('AppConfig')
@@ -153,17 +160,39 @@ export const DATABASE = Symbol('Database')
       inject: [ID_GENERATOR],
     },
     {
-      // El adaptador Cognito de este puerto (HU-02) sigue pendiente, igual que
-      // el de IDENTITY_PROVIDER para el registro: ninguno de los dos puede
-      // completarse mientras el alta de HU-01 siga creando el sujeto con
-      // FakeIdentityProvider en lugar de un usuario real del pool. Ver el
-      // reporte de HU-02 para el detalle del blocker. Sin sembrar (`seed`),
-      // este Fake no autentica a nadie: es la raiz de composicion, no el
-      // arnes de pruebas, y aqui no hay credenciales de prueba que sembrar.
+      // `AUTHENTICATION_DRIVER` decide el adaptador, igual que
+      // `PERSISTENCE_DRIVER` decide el repositorio. `loadConfig` ya impide
+      // "fake" con NODE_ENV=production: un binario de produccion no puede
+      // aceptar cualquier cuenta sembrada en memoria como si fuera real.
+      //
+      // Con "fake", sin sembrar (`seed`), no autentica a nadie: es la raiz de
+      // composicion, no el arnes de pruebas, y aqui no hay credenciales de
+      // prueba que sembrar.
       provide: AUTHENTICATION_PROVIDER,
-      useFactory: (ids: IdGeneratorPort): AuthenticationProviderPort =>
-        new FakeAuthenticationProvider(() => ids.generate()),
-      inject: [ID_GENERATOR],
+      useFactory: (
+        config: AppConfig,
+        logger: Logger,
+        ids: IdGeneratorPort,
+      ): AuthenticationProviderPort => {
+        if (config.authenticationDriver === AuthenticationDriver.Cognito) {
+          if (config.cognito === null) {
+            throw new Error('AUTHENTICATION_DRIVER=cognito exige COGNITO_USER_POOL_ID/CLIENT_ID.')
+          }
+
+          logger.info('authentication_provider', { driver: 'cognito' })
+
+          return new CognitoAuthenticationProvider(config.cognito)
+        }
+
+        logger.warn('authentication_provider', {
+          driver: 'fake',
+          detail:
+            'AUTHENTICATION_DRIVER=fake: ninguna contrasena se verifica contra un proveedor real.',
+        })
+
+        return new FakeAuthenticationProvider(() => ids.generate())
+      },
+      inject: [APP_CONFIG, LOGGER, ID_GENERATOR],
     },
     {
       provide: TOKEN_VERIFIER,

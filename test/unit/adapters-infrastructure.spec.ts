@@ -420,6 +420,7 @@ describe('loadConfig', () => {
   const PRODUCTION_ENV = {
     NODE_ENV: 'production',
     AUTH_MODE: 'jwt',
+    AUTHENTICATION_DRIVER: 'cognito',
     COGNITO_USER_POOL_ID: 'us-east-1_abc',
     COGNITO_CLIENT_ID: 'cliente',
   } as const
