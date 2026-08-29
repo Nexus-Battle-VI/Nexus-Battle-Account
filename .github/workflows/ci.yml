@@ -133,6 +133,32 @@ jobs:
             exit 1
           fi
 
+      # Esta comprobacion existe porque su ausencia costo un defecto real: el
+      # proceso corre como `node` (uid 1000), `/app` pertenece a root, y el
+      # valor por defecto de la configuracion era relativo a `/app`. `mkdir`
+      # fallaba con `Permission denied` y TODO registro respondia 500.
+      #
+      # Ninguna prueba unitaria puede ver esto: la ruta es escribible en el
+      # portatil de quien programa y en el contenedor de pruebas, y solo deja de
+      # serlo en la imagen de produccion, que es la unica que declara `USER`.
+      # Por eso se comprueba aqui, contra la imagen construida y como el usuario
+      # que de verdad la ejecuta.
+      - name: Verificar que el proceso puede escribir los avatares
+        run: |
+          RUTA=$(docker run --rm --entrypoint sh nexus-battle-account:ci -c 'printf %s "$AVATAR_STORAGE_PATH"')
+
+          if [ -z "$RUTA" ]; then
+            echo "FALLO: la imagen no declara AVATAR_STORAGE_PATH, asi que el destino depende de quien la despliegue."
+            exit 1
+          fi
+
+          if docker run --rm --entrypoint sh nexus-battle-account:ci -c "touch '$RUTA/.prueba' && rm -f '$RUTA/.prueba'"; then
+            echo "Correcto: $RUTA es escribible por el usuario de ejecucion."
+          else
+            echo "FALLO: el proceso no puede escribir en $RUTA; ningun registro podria completarse."
+            exit 1
+          fi
+
       - name: Verificar arranque del contenedor
         run: |
           docker run -d --name account-ci -p 3000:3000             -e AUTH_MODE=jwt             -e AUTHENTICATION_DRIVER=cognito             -e COGNITO_USER_POOL_ID=us-east-1_ci             -e COGNITO_CLIENT_ID=cliente-ci             nexus-battle-account:ci
