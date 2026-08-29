@@ -10,6 +10,8 @@ import {
   NotFoundException,
   Param,
   Post,
+  ServiceUnavailableException,
+  UnauthorizedException,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common'
@@ -23,8 +25,10 @@ import {
   AccountAlreadyExistsError,
   AccountNotFoundError,
   DisplayNameAlreadyTakenError,
+  IdentityRequiredError,
   NicknameBlacklistedError,
 } from '../../../application/errors/ApplicationError'
+import { RoleDirectoryError } from '../../../application/ports/RoleDirectoryPort'
 import type { RegisterSecurityAnswer } from '../../../application/dto/RegisterAccountCommand'
 import { RegisterAccount } from '../../../application/use-cases/RegisterAccount'
 import { GetAccount } from '../../../application/use-cases/GetAccount'
@@ -68,6 +72,11 @@ export class AccountsController {
   @ApiResponse({ status: 400, description: 'Datos invalidos' })
   @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
   @ApiResponse({ status: 409, description: 'El correo o el apodo ya estan registrados' })
+  @ApiResponse({
+    status: 503,
+    description:
+      'El proveedor de identidad no respondio. La cuenta NO se creo: sin reflejar el rol en el proveedor, el testimonio no lo llevaria.',
+  })
   async register(
     @Body() body: RegisterAccountRequest,
     @UploadedFile() avatar: UploadedAvatar | undefined,
@@ -167,6 +176,33 @@ export class AccountsController {
 
     if (error instanceof AccountNotFoundError) {
       return new NotFoundException(error.message)
+    }
+
+    /**
+     * El testimonio es valido pero no identifica a nadie.
+     *
+     * El verificador ya rechaza un `sub` ausente o vacio, asi que esto solo se
+     * alcanza con un `sub` de puros espacios: valido para el verificador,
+     * inservible como identidad. Es un fallo de autenticacion y debe decirlo;
+     * como 500 acusaria al servicio de un defecto que no tiene.
+     */
+    if (error instanceof IdentityRequiredError) {
+      return new UnauthorizedException(error.message)
+    }
+
+    /**
+     * El proveedor de identidad no respondio.
+     *
+     * NO es 500. Un 500 dice "este servicio tiene un defecto" y ademas no
+     * sugiere reintentar; esto es lo contrario en ambas cosas: el servicio
+     * funciona, la dependencia no, y el intento tiene sentido mas tarde. El
+     * registro **falla cerrado** a proposito -no se guarda una cuenta cuyo rol
+     * no viajaria en el testimonio- y quien llama merece saber por que.
+     */
+    if (error instanceof RoleDirectoryError) {
+      return new ServiceUnavailableException(
+        'El proveedor de identidad no esta disponible. Intentelo de nuevo mas tarde.',
+      )
     }
 
     if (error instanceof DomainError) {
