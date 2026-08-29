@@ -13,6 +13,8 @@ import {
   type TokenVerifierPort,
   type VerifiedIdentity,
 } from '../../src/application/ports/TokenVerifierPort'
+import { ROLE_DIRECTORY } from '../../src/application/ports/RoleDirectoryPort'
+import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
 
 /**
  * Integracion con la autenticacion ACTIVA.
@@ -77,6 +79,12 @@ describe('API de cuentas con autenticacion activa', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(TOKEN_VERIFIER)
       .useValue(stubVerifier)
+      // Con `AUTH_MODE=jwt` la raiz de composicion elige el directorio real, que
+      // hablaria con un pool que aqui no existe. Que estas pruebas fallaran sin
+      // esta sustitucion es la prueba de que el registro **falla cerrado**
+      // cuando el rol no se puede reflejar: es el comportamiento buscado.
+      .overrideProvider(ROLE_DIRECTORY)
+      .useValue(new InMemoryRoleDirectory())
       .compile()
 
     app = moduleRef.createNestApplication()

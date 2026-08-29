@@ -22,6 +22,7 @@ import { LoginAccount } from '../../application/use-cases/LoginAccount'
 import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecondFactor'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
+import { ROLE_DIRECTORY, type RoleDirectoryPort } from '../../application/ports/RoleDirectoryPort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
 import { CLOCK } from '../../application/ports/ClockPort'
 import { ID_GENERATOR } from '../../application/ports/IdGeneratorPort'
@@ -56,6 +57,8 @@ import type { Database } from '../../adapters/outbound/persistence/schema'
 import type { Kysely } from 'kysely'
 import { FakeAuthenticationProvider } from '../../adapters/outbound/identity/FakeAuthenticationProvider'
 import { CognitoAuthenticationProvider } from '../../adapters/outbound/identity/CognitoAuthenticationProvider'
+import { CognitoRoleDirectory } from '../../adapters/outbound/identity/CognitoRoleDirectory'
+import { InMemoryRoleDirectory } from '../../adapters/outbound/identity/InMemoryRoleDirectory'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
@@ -244,6 +247,28 @@ export const DATABASE = Symbol('Database')
       useFactory: (): ClockPort => new SystemClock(),
     },
     {
+      // El pool refleja lo que Account decide, nunca al reves. Sin proveedor
+      // configurado no hay donde reflejar -ni testimonios que puedan divergir-
+      // asi que el doble en memoria es la respuesta correcta, no un parche.
+      provide: ROLE_DIRECTORY,
+      useFactory: (config: AppConfig, logger: Logger): RoleDirectoryPort => {
+        if (config.cognito === null) {
+          logger.warn('role_directory', {
+            driver: 'memoria',
+            detail:
+              'Sin proveedor de identidad: el rol no viaja en ningun testimonio porque no hay testimonios.',
+          })
+
+          return new InMemoryRoleDirectory()
+        }
+
+        logger.info('role_directory', { driver: 'cognito' })
+
+        return new CognitoRoleDirectory({ userPoolId: config.cognito.userPoolId })
+      },
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
       provide: REGISTER_ACCOUNT,
       useFactory: (
         accounts: AccountRepositoryPort,
@@ -253,6 +278,7 @@ export const DATABASE = Symbol('Database')
         avatars: AvatarStoragePort,
         blacklist: NicknameBlacklistPort,
         questions: SecurityQuestionCatalogPort,
+        roleDirectory: RoleDirectoryPort,
       ): RegisterAccount =>
         new RegisterAccount({
           accounts,
@@ -262,6 +288,7 @@ export const DATABASE = Symbol('Database')
           avatars,
           blacklist,
           questions,
+          roleDirectory,
         }),
       inject: [
         ACCOUNT_REPOSITORY,
@@ -271,6 +298,7 @@ export const DATABASE = Symbol('Database')
         AVATAR_STORAGE,
         NICKNAME_BLACKLIST,
         SECURITY_QUESTION_CATALOG,
+        ROLE_DIRECTORY,
       ],
     },
     {

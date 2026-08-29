@@ -12,6 +12,7 @@ import type { ClockPort } from '../ports/ClockPort'
 import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
 import type { NicknameBlacklistPort } from '../ports/NicknameBlacklistPort'
 import type { NotificationRequestPort } from '../ports/NotificationRequestPort'
+import type { RoleDirectoryPort } from '../ports/RoleDirectoryPort'
 import type { SecurityQuestionCatalogPort } from '../ports/SecurityQuestionCatalogPort'
 import {
   AccountAlreadyExistsError,
@@ -31,15 +32,16 @@ export interface RegisterAccountDependencies {
   readonly avatars: AvatarStoragePort
   readonly blacklist: NicknameBlacklistPort
   readonly questions: SecurityQuestionCatalogPort
+  readonly roleDirectory: RoleDirectoryPort
 }
 
 /**
  * Registra una cuenta de jugador (HU-01).
  *
- * Coordina colaboradores fuera de PostgreSQL (identidad y avatar) y persiste
- * cuenta, roles y respuestas en un unico paso del repositorio. Si la
- * persistencia falla despues del alta, se compensan solo el avatar y el sujeto
- * creados en esta peticion.
+ * Coordina colaboradores fuera de PostgreSQL (avatar y directorio de roles) y
+ * persiste cuenta, roles y respuestas en un unico paso del repositorio. Si la
+ * persistencia falla, se compensa el avatar guardado en esta peticion. El
+ * sujeto ya no se compensa porque este caso de uso ya no lo crea.
  */
 export class RegisterAccount {
   private readonly deps: RegisterAccountDependencies
@@ -122,6 +124,19 @@ export class RegisterAccount {
         }),
         occurredAt: this.deps.clock.now(),
       })
+
+      // El reflejo va ANTES de persistir, y el orden es la decision.
+      //
+      // Al reves, un fallo aqui dejaria una cuenta guardada cuyo rol no viaja
+      // en el testimonio: la divergencia silenciosa que este puerto existe para
+      // impedir, y ademas irreparable por reintento, porque el segundo intento
+      // chocaria con el correo ya registrado.
+      //
+      // En este orden, lo peor que puede pasar es que el sujeto quede en el
+      // grupo `PLAYER` sin cuenta. Eso no concede nada -toda ruta protegida
+      // resuelve la cuenta a partir del sujeto y no la encontraria- y el
+      // reintento lo absorbe, porque `reflect` es idempotente.
+      await this.deps.roleDirectory.reflect(subject, account.currentRoles)
 
       await this.deps.accounts.saveRegistration(account, hashedAnswers)
     } catch (error: unknown) {
