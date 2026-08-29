@@ -48,6 +48,31 @@ COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json ./
 
+# ---------------------------------------------------------------------------
+# Un lugar donde el proceso pueda escribir de verdad.
+#
+# `/app` pertenece a root en modo 755 y el proceso corre como `node` (uid 1000),
+# asi que el valor por defecto de la configuracion -`./data/avatars`, relativo a
+# `/app`- **no se podia crear**: `mkdir` fallaba con `Permission denied` y todo
+# registro respondia 500. El avatar se guarda antes que cualquier otra cosa, de
+# modo que ese fallo tapaba el resto del caso de uso.
+#
+# Rebajar los permisos de `/app` habria sido la solucion equivocada: el codigo y
+# las dependencias deben seguir siendo de solo lectura para el proceso. Lo que
+# hacia falta era un directorio aparte, para datos mutables y nada mas.
+#
+# Se declara tambien en `ENV` para que la imagen sea correcta **por si sola**,
+# sin depender de que quien la despliegue recuerde configurar la variable. La
+# configuracion mantiene `./data/avatars` como valor por defecto porque en
+# desarrollo local escribir en `/var/lib` no es razonable.
+#
+# Conviene montar aqui un volumen: sin el, los avatares viven dentro de la capa
+# de escritura del contenedor y desaparecen en cada despliegue.
+# ---------------------------------------------------------------------------
+RUN mkdir -p /var/lib/nexus/avatars && chown -R node:node /var/lib/nexus
+
+ENV AVATAR_STORAGE_PATH=/var/lib/nexus/avatars
+
 USER node
 
 EXPOSE 3000
