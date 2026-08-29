@@ -42,3 +42,19 @@ export class AccountNotFoundError extends Error {
     this.reference = reference
   }
 }
+
+/**
+ * El registro llego sin sujeto verificado.
+ *
+ * No deberia ocurrir: la ruta exige testimonio y el guard lo comprueba antes de
+ * llegar al caso de uso. Existe porque una precondicion que solo vive en la capa
+ * HTTP deja de cumplirse en cuanto alguien invoca el caso de uso desde otro
+ * sitio, y entonces el fallo seria una cuenta con un sujeto inventado en vez de
+ * un error.
+ */
+export class IdentityRequiredError extends Error {
+  constructor() {
+    super('El registro exige una identidad ya verificada.')
+    this.name = 'IdentityRequiredError'
+  }
+}

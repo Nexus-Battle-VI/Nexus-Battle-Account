@@ -88,6 +88,10 @@ export const validCommand = (
 ): RegisterAccountCommand => ({
   email: 'jugador@nexus.test',
   password: VALID_PASSWORD,
+  // Toda peticion de registro llega con un sujeto YA verificado: el alta ocurre
+  // en la pantalla del proveedor y la ruta exige testimonio. Un comando sin el
+  // no representa nada que el sistema pueda recibir.
+  subject: 'sujeto-verificado-de-prueba',
   displayName: 'Ana Ramirez',
   firstNames: 'Ana',
   lastNames: 'Ramirez',

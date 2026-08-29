@@ -4,12 +4,10 @@ import {
   NICKNAME_BLACKLIST_SEED,
   buildBlacklistSeed,
 } from '../../src/adapters/outbound/persistence/nickname-blacklist-seed'
-import { FakeIdentityProvider } from '../../src/adapters/outbound/identity/FakeIdentityProvider'
 import { FakeAuthenticationProvider } from '../../src/adapters/outbound/identity/FakeAuthenticationProvider'
 import { LoggingNotificationRequester } from '../../src/adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../src/adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../src/adapters/outbound/system/UuidGenerator'
-import { IdentityProviderError } from '../../src/application/ports/IdentityProviderPort'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
@@ -116,67 +114,6 @@ describe('InMemoryAccountRepository', () => {
     await repository.save(buildAccount())
 
     expect(await repository.findByDisplayName(DisplayName.create('Nadie Aqui'))).toBeNull()
-  })
-})
-
-describe('FakeIdentityProvider', () => {
-  const nextSubject = (): (() => string) => {
-    let counter = 0
-
-    return (): string => {
-      counter += 1
-
-      return `sub-${String(counter)}`
-    }
-  }
-
-  it('no retiene la contrasena en memoria', async () => {
-    const provider = new FakeIdentityProvider(nextSubject())
-
-    await provider.register({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
-
-    expect(JSON.stringify(provider)).not.toContain(VALID_PASSWORD)
-  })
-
-  it('da de alta un sujeto y lo recupera por correo', async () => {
-    const provider = new FakeIdentityProvider(nextSubject())
-
-    const subject = await provider.register({
-      email: '  Jugador@Nexus.Test ',
-      password: VALID_PASSWORD,
-    })
-
-    expect(subject).toEqual({ subject: 'sub-1', email: 'jugador@nexus.test' })
-    expect(await provider.findByEmail('JUGADOR@NEXUS.TEST')).toEqual(subject)
-    expect(provider.size).toBe(1)
-  })
-
-  it('rechaza registrar dos veces el mismo correo', async () => {
-    const provider = new FakeIdentityProvider(nextSubject())
-    await provider.register({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
-
-    await expect(
-      provider.register({ email: 'jugador@nexus.test', password: VALID_PASSWORD }),
-    ).rejects.toBeInstanceOf(IdentityProviderError)
-  })
-
-  it('devuelve null para un correo desconocido', async () => {
-    const provider = new FakeIdentityProvider(nextSubject())
-
-    expect(await provider.findByEmail('nadie@nexus.test')).toBeNull()
-  })
-
-  it('retira un sujeto existente y tolera uno inexistente', async () => {
-    const provider = new FakeIdentityProvider(nextSubject())
-    const subject = await provider.register({
-      email: 'jugador@nexus.test',
-      password: VALID_PASSWORD,
-    })
-
-    await provider.revoke(subject.subject)
-    expect(provider.size).toBe(0)
-
-    await expect(provider.revoke('sub-inexistente')).resolves.toBeUndefined()
   })
 })
 

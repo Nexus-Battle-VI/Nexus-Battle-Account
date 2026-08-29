@@ -32,7 +32,6 @@ import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../../application/use-cases/VerifyAccount'
 import { Role } from '../../../domain/entities/Role'
 import { CurrentIdentity, Roles } from './auth/decorators'
-import { ANONYMOUS_IDENTITY } from './auth/anonymous.guard'
 import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
 import { REGISTER_ACCOUNT, GET_ACCOUNT, GET_OWN_ACCOUNT, VERIFY_ACCOUNT } from './tokens'
 import { AccountResponse, RegisterAccountRequest } from './accounts.dto'
@@ -75,7 +74,14 @@ export class AccountsController {
     @CurrentIdentity() identity: VerifiedIdentity,
   ): Promise<AccountResponse> {
     try {
-      const subject = identity.subject === ANONYMOUS_IDENTITY.subject ? undefined : identity.subject
+      // El sujeto se pasa TAL CUAL, tambien cuando es `anonymous`.
+      //
+      // Antes se convertia a `undefined` para que el caso de uso creara una
+      // identidad. Ya no crea ninguna: la identidad existe antes que la cuenta.
+      // Con `AUTH_MODE=disabled` el sujeto queda literalmente `anonymous`, que
+      // es lo que ADR-004 describe: los datos dicen que nadie fue verificado en
+      // vez de aparentar personas concretas.
+      const subject = identity.subject
 
       return await this.registerAccount.execute({
         email: body.email,
@@ -95,7 +101,7 @@ export class AccountsController {
                 bytes: avatar.buffer,
               },
             }),
-        ...(subject === undefined ? {} : { subject }),
+        subject,
       })
     } catch (error: unknown) {
       throw AccountsController.translate(error)

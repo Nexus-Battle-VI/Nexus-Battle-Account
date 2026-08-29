@@ -34,7 +34,8 @@ export interface AccountSnapshot {
  *
  * Modela el ciclo de vida de una cuenta y sus roles. No almacena contrasenas
  * ni secretos de autenticacion: la verificacion de credenciales pertenece al
- * proveedor de identidad externo, detras de IdentityProviderPort.
+ * proveedor de identidad externo. La identidad existe ANTES que la cuenta:
+ * Account no la crea, la recibe ya verificada.
  */
 export class Account {
   readonly id: AccountId
