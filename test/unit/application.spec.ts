@@ -9,6 +9,7 @@ import {
   AccountNotFoundError,
   DisplayNameAlreadyTakenError,
   NicknameBlacklistedError,
+  IdentityRequiredError,
 } from '../../src/application/errors/ApplicationError'
 import type { NotificationRequest } from '../../src/application/ports/NotificationRequestPort'
 import type { NotificationRequestPort } from '../../src/application/ports/NotificationRequestPort'
@@ -16,7 +17,6 @@ import type { AccountRepositoryPort } from '../../src/application/ports/AccountR
 import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
 import { InMemoryNicknameBlacklist } from '../../src/adapters/outbound/persistence/InMemoryNicknameBlacklist'
 import { InMemorySecurityQuestionCatalog } from '../../src/adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
-import { FakeIdentityProvider } from '../../src/adapters/outbound/identity/FakeIdentityProvider'
 import { FakeAuthenticationProvider } from '../../src/adapters/outbound/identity/FakeAuthenticationProvider'
 import { AuthenticationProviderError } from '../../src/application/ports/AuthenticationProviderPort'
 import { InMemoryAvatarStorage } from '../../src/adapters/outbound/storage/InMemoryAvatarStorage'
@@ -50,7 +50,6 @@ interface Harness {
   getAccount: GetAccount
   verifyAccount: VerifyAccount
   accounts: InMemoryAccountRepository
-  identity: FakeIdentityProvider
   notifier: RecordingNotifier
   avatars: InMemoryAvatarStorage
   blacklist: InMemoryNicknameBlacklist
@@ -58,7 +57,6 @@ interface Harness {
 
 const buildHarness = (overrides: { accounts?: AccountRepositoryPort } = {}): Harness => {
   const accounts = new InMemoryAccountRepository()
-  const identity = new FakeIdentityProvider(sequence('sub'))
   const notifier = new RecordingNotifier()
   const avatars = new InMemoryAvatarStorage()
   const blacklist = new InMemoryNicknameBlacklist()
@@ -68,13 +66,11 @@ const buildHarness = (overrides: { accounts?: AccountRepositoryPort } = {}): Har
 
   return {
     accounts,
-    identity,
     notifier,
     avatars,
     blacklist,
     registerAccount: new RegisterAccount({
       accounts: repository,
-      identityProvider: identity,
       notifications: notifier,
       clock,
       ids,
@@ -115,7 +111,6 @@ describe('RegisterAccount', () => {
       roles: [Role.Player],
     })
     expect(harness.accounts.size).toBe(1)
-    expect(harness.identity.size).toBe(1)
     expect(harness.avatars.size).toBe(1)
     expect(harness.notifier.requested).toEqual([
       {
@@ -171,7 +166,6 @@ describe('RegisterAccount', () => {
     await expect(harness.registerAccount.execute(command)).rejects.toBeInstanceOf(
       AccountAlreadyExistsError,
     )
-    expect(harness.identity.size).toBe(1)
     expect(harness.accounts.size).toBe(1)
   })
 
@@ -193,7 +187,21 @@ describe('RegisterAccount', () => {
     await expect(harness.registerAccount.execute(command)).rejects.toBeInstanceOf(
       NicknameBlacklistedError,
     )
-    expect(harness.identity.size).toBe(0)
+  })
+
+  /**
+   * La identidad existe ANTES que la cuenta (ADR-004). Sin sujeto verificado no
+   * hay a quien vincular la cuenta, y el caso de uso NO inventa uno: eso
+   * significaria que Account decide quien existe.
+   */
+  it('rechaza registrar sin una identidad ya verificada', async () => {
+    const harness = buildHarness()
+    const sinSujeto = { ...validCommand(), subject: '   ' }
+
+    await expect(harness.registerAccount.execute(sinSujeto)).rejects.toBeInstanceOf(
+      IdentityRequiredError,
+    )
+    expect(harness.accounts.size).toBe(0)
   })
 
   it('rechaza un apodo que contiene un termino de la semilla vigente', async () => {
@@ -202,7 +210,6 @@ describe('RegisterAccount', () => {
     await expect(
       harness.registerAccount.execute(validCommand({ displayName: 'GonorreaKing' })),
     ).rejects.toBeInstanceOf(NicknameBlacklistedError)
-    expect(harness.identity.size).toBe(0)
   })
 
   it('un termino inactivo no bloquea el apodo', async () => {
@@ -229,7 +236,6 @@ describe('RegisterAccount', () => {
     await expect(
       harness.registerAccount.execute(validCommand({ lastNames: '' })),
     ).rejects.toBeInstanceOf(DomainError)
-    expect(harness.identity.size).toBe(0)
   })
 
   it('rechaza contrasenas que no cumplen la politica', async () => {
@@ -324,8 +330,6 @@ describe('RegisterAccount', () => {
 
     await expect(harness.registerAccount.execute(command)).rejects.toThrow('almacen no disponible')
 
-    expect(harness.identity.size).toBe(0)
-    expect(await harness.identity.findByEmail(command.email)).toBeNull()
     expect(harness.avatars.size).toBe(0)
   })
 })

@@ -21,7 +21,6 @@ import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
 import { LoginAccount } from '../../application/use-cases/LoginAccount'
 import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecondFactor'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
-import { IDENTITY_PROVIDER } from '../../application/ports/IdentityProviderPort'
 import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
 import { CLOCK } from '../../application/ports/ClockPort'
@@ -30,7 +29,6 @@ import { AVATAR_STORAGE } from '../../application/ports/AvatarStoragePort'
 import { NICKNAME_BLACKLIST } from '../../application/ports/NicknameBlacklistPort'
 import { SECURITY_QUESTION_CATALOG } from '../../application/ports/SecurityQuestionCatalogPort'
 import type { AccountRepositoryPort } from '../../application/ports/AccountRepositoryPort'
-import type { IdentityProviderPort } from '../../application/ports/IdentityProviderPort'
 import type { AuthenticationProviderPort } from '../../application/ports/AuthenticationProviderPort'
 import type { NotificationRequestPort } from '../../application/ports/NotificationRequestPort'
 import type { ClockPort } from '../../application/ports/ClockPort'
@@ -56,8 +54,6 @@ import { LocalAvatarStorage } from '../../adapters/outbound/storage/LocalAvatarS
 import { createDatabase } from '../persistence/database'
 import type { Database } from '../../adapters/outbound/persistence/schema'
 import type { Kysely } from 'kysely'
-import { CognitoIdentityProvider } from '../../adapters/outbound/identity/CognitoIdentityProvider'
-import { FakeIdentityProvider } from '../../adapters/outbound/identity/FakeIdentityProvider'
 import { FakeAuthenticationProvider } from '../../adapters/outbound/identity/FakeAuthenticationProvider'
 import { CognitoAuthenticationProvider } from '../../adapters/outbound/identity/CognitoAuthenticationProvider'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
@@ -153,42 +149,6 @@ export const DATABASE = Symbol('Database')
     {
       provide: ID_GENERATOR,
       useFactory: (): IdGeneratorPort => new UuidGenerator(),
-    },
-    {
-      // Lo decide `AUTHENTICATION_DRIVER`, el MISMO interruptor que elige contra
-      // que se verifican las contrasenas. No son dos decisiones independientes:
-      // registrar en memoria y autenticar contra Cognito produce cuentas que
-      // existen en PostgreSQL y no existen en el pool, es decir cuentas que
-      // nunca pueden iniciar sesion.
-      provide: IDENTITY_PROVIDER,
-      useFactory: (
-        config: AppConfig,
-        logger: Logger,
-        ids: IdGeneratorPort,
-      ): IdentityProviderPort => {
-        if (config.authenticationDriver === AuthenticationDriver.Cognito) {
-          if (config.cognito === null) {
-            throw new Error('AUTHENTICATION_DRIVER=cognito exige COGNITO_USER_POOL_ID/CLIENT_ID.')
-          }
-
-          logger.info('identity_provider', { driver: 'cognito' })
-
-          return new CognitoIdentityProvider({
-            userPoolId: config.cognito.userPoolId,
-            // Los otros servicios leen el rol de `cognito:groups`. Sin grupo, un
-            // jugador recien registrado obtiene un testimonio sin roles.
-            defaultGroup: 'PLAYER',
-          })
-        }
-
-        logger.warn('identity_provider', {
-          driver: 'fake',
-          detail: 'AUTHENTICATION_DRIVER=fake: el registro no crea ninguna identidad real.',
-        })
-
-        return new FakeIdentityProvider(() => ids.generate())
-      },
-      inject: [APP_CONFIG, LOGGER, ID_GENERATOR],
     },
     {
       // `AUTHENTICATION_DRIVER` decide el adaptador, igual que
@@ -287,7 +247,6 @@ export const DATABASE = Symbol('Database')
       provide: REGISTER_ACCOUNT,
       useFactory: (
         accounts: AccountRepositoryPort,
-        identityProvider: IdentityProviderPort,
         notifications: NotificationRequestPort,
         clock: ClockPort,
         ids: IdGeneratorPort,
@@ -297,7 +256,6 @@ export const DATABASE = Symbol('Database')
       ): RegisterAccount =>
         new RegisterAccount({
           accounts,
-          identityProvider,
           notifications,
           clock,
           ids,
@@ -307,7 +265,6 @@ export const DATABASE = Symbol('Database')
         }),
       inject: [
         ACCOUNT_REPOSITORY,
-        IDENTITY_PROVIDER,
         NOTIFICATION_REQUEST,
         CLOCK,
         ID_GENERATOR,

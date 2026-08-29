@@ -10,13 +10,13 @@ import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
 import type { AvatarStoragePort } from '../ports/AvatarStoragePort'
 import type { ClockPort } from '../ports/ClockPort'
 import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
-import type { IdentityProviderPort } from '../ports/IdentityProviderPort'
 import type { NicknameBlacklistPort } from '../ports/NicknameBlacklistPort'
 import type { NotificationRequestPort } from '../ports/NotificationRequestPort'
 import type { SecurityQuestionCatalogPort } from '../ports/SecurityQuestionCatalogPort'
 import {
   AccountAlreadyExistsError,
   DisplayNameAlreadyTakenError,
+  IdentityRequiredError,
   NicknameBlacklistedError,
 } from '../errors/ApplicationError'
 import type { RegisterAccountCommand } from '../dto/RegisterAccountCommand'
@@ -25,7 +25,6 @@ import { hashSecurityAnswer } from '../security/hashSecurityAnswer'
 
 export interface RegisterAccountDependencies {
   readonly accounts: AccountRepositoryPort
-  readonly identityProvider: IdentityProviderPort
   readonly notifications: NotificationRequestPort
   readonly clock: ClockPort
   readonly ids: IdGeneratorPort
@@ -82,17 +81,17 @@ export class RegisterAccount {
 
     assertAvatarUpload(avatarUpload)
 
-    const provided = command.subject?.trim() ?? ''
-    const createdSubject =
-      provided.length > 0
-        ? null
-        : (
-            await this.deps.identityProvider.register({
-              email: email.value,
-              password: command.password,
-            })
-          ).subject
-    const subject = createdSubject ?? provided
+    // La identidad existe ANTES que la cuenta.
+    //
+    // El alta ocurre en la pantalla del proveedor, de modo que al llegar aqui
+    // ya hay un sujeto verificado y lo que falta es la cuenta del producto. Este
+    // caso de uso NO crea identidades: hacerlo significaria que Account decide
+    // quien existe, que es justo lo que ADR-004 saco de Account.
+    const subject = command.subject?.trim() ?? ''
+
+    if (subject.length === 0) {
+      throw new IdentityRequiredError()
+    }
 
     const accountId = AccountId.create(this.deps.ids.generate())
     let storedKey: string | null = null
@@ -128,10 +127,6 @@ export class RegisterAccount {
     } catch (error: unknown) {
       if (storedKey !== null) {
         await this.deps.avatars.remove(storedKey)
-      }
-
-      if (createdSubject !== null) {
-        await this.deps.identityProvider.revoke(createdSubject)
       }
 
       throw error
