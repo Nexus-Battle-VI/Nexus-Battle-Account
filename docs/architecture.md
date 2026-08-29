@@ -29,9 +29,13 @@ Account **no posee credenciales**. No almacena contraseñas, hashes, sales, toke
 |                          EmailAddress, DisplayName, eventos  |
 +-------------------------------------------------------------+
 |  adapters/outbound       InMemoryAccountRepository,          |
-|                          FakeIdentityProvider,                |
 |                          FakeAuthenticationProvider,           |
+|                          CognitoAuthenticationProvider,        |
+|                          CognitoTokenVerifier,                 |
+|                          InMemoryRoleDirectory,                |
+|                          CognitoRoleDirectory,                 |
 |                          LoggingNotificationRequester,        |
+|                          LocalAvatarStorage,                   |
 |                          SystemClock, UuidGenerator          |
 +-------------------------------------------------------------+
 |  infrastructure          config, observability, health,      |
@@ -43,17 +47,17 @@ Las dependencias apuntan siempre hacia el dominio. El dominio no conoce ninguna 
 
 ## Puertos
 
-| Puerto                        | Responsabilidad                                                                                                                | Implementación actual                                                                               |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `AccountRepositoryPort`       | Persistir y recuperar el agregado, incluida la busqueda por apodo (HU-02)                                                      | `InMemoryAccountRepository` / `PostgresAccountRepository`                                           |
-| `IdentityProviderPort`        | Alta, consulta y baja del sujeto de identidad                                                                                  | `FakeIdentityProvider` (Cognito sustituye el adaptador)                                             |
-| `AuthenticationProviderPort`  | Verificacion de contrasena y segundo factor (HU-02). Separado de `IdentityProviderPort` a proposito: ver el archivo del puerto | `FakeAuthenticationProvider` / `CognitoAuthenticationProvider`, elegido por `AUTHENTICATION_DRIVER` |
-| `AvatarStoragePort`           | Guardar y borrar bytes de avatar                                                                                               | `LocalAvatarStorage` (AWS sustituye el adaptador)                                                   |
-| `NicknameBlacklistPort`       | Consultar la lista negra vigente de apodos                                                                                     | `InMemoryNicknameBlacklist` / `PostgresNicknameBlacklist`                                           |
-| `SecurityQuestionCatalogPort` | Catálogo activo de preguntas de seguridad                                                                                      | En memoria / `PostgresSecurityQuestionCatalog`                                                      |
-| `NotificationRequestPort`     | Solicitar una notificación al contexto Notifications                                                                           | `LoggingNotificationRequester`                                                                      |
-| `ClockPort`                   | Proveer el instante actual                                                                                                     | `SystemClock`                                                                                       |
-| `IdGeneratorPort`             | Generar identificadores                                                                                                        | `UuidGenerator`                                                                                     |
+| Puerto                        | Responsabilidad                                                                                          | Implementación actual                                                                               |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `AccountRepositoryPort`       | Persistir y recuperar el agregado, incluida la busqueda por apodo (HU-02)                                | `InMemoryAccountRepository` / `PostgresAccountRepository`                                           |
+| `AuthenticationProviderPort`  | Verificacion de contrasena y segundo factor (HU-02)                                                      | `FakeAuthenticationProvider` / `CognitoAuthenticationProvider`, elegido por `AUTHENTICATION_DRIVER` |
+| `RoleDirectoryPort`           | Refleja en el proveedor el rol que este servicio decide. Direccion unica: Account decide, el pool recoge | `InMemoryRoleDirectory` / `CognitoRoleDirectory`, segun haya proveedor configurado                  |
+| `AvatarStoragePort`           | Guardar y borrar bytes de avatar                                                                         | `LocalAvatarStorage` (AWS sustituye el adaptador)                                                   |
+| `NicknameBlacklistPort`       | Consultar la lista negra vigente de apodos                                                               | `InMemoryNicknameBlacklist` / `PostgresNicknameBlacklist`                                           |
+| `SecurityQuestionCatalogPort` | Catálogo activo de preguntas de seguridad                                                                | En memoria / `PostgresSecurityQuestionCatalog`                                                      |
+| `NotificationRequestPort`     | Solicitar una notificación al contexto Notifications                                                     | `LoggingNotificationRequester`                                                                      |
+| `ClockPort`                   | Proveer el instante actual                                                                               | `SystemClock`                                                                                       |
+| `IdGeneratorPort`             | Generar identificadores                                                                                  | `UuidGenerator`                                                                                     |
 
 `ClockPort` e `IdGeneratorPort` existen para que el dominio sea determinista: ninguna entidad lee el reloj ni se genera a sí misma un identificador aleatorio, de modo que las pruebas comparan valores exactos en lugar de aproximaciones.
 
@@ -148,8 +152,8 @@ el `challengeToken` opaco que emitió el proveedor.
 El `accessToken` que devuelve una sesión completada es el testimonio firmado
 por el proveedor de identidad (Cognito), no un JWT propio: se verifica después
 con el mismo `TokenVerifierPort` que ya protege el resto de rutas. Ver
-`AuthenticationProviderPort` para la justificación de por qué es un puerto
-separado de `IdentityProviderPort`.
+`AuthenticationProviderPort` para la justificación de por qué comprobar una
+contraseña es un puerto distinto de verificar un testimonio ya emitido.
 
 `AUTHENTICATION_DRIVER` elige el adaptador (`fake`/`cognito`), igual que
 `PERSISTENCE_DRIVER` elige el repositorio; `NODE_ENV=production` prohíbe
@@ -220,7 +224,7 @@ El correo electrónico es un dato personal: la observabilidad registra el **domi
 
 ## Limitaciones conocidas del alcance actual
 
-- El alta de identidad (HU-01) sigue simulada en local (`FakeIdentityProvider`); el adaptador Cognito de ese puerto sigue pendiente. Sin un usuario real creado ahí, `CognitoAuthenticationProvider` (HU-02, real) no tiene contra quién autenticar.
+- ~~El alta de identidad (HU-01) sigue simulada en local.~~ **Superado el 2026-08-29**: este servicio no da de alta identidades y `IdentityProviderPort` se eliminó. El alta ocurre en la pantalla del proveedor, de modo que quien llega a `POST /api/accounts` ya tiene con qué autenticarse.
 - `CognitoAuthenticationProvider` no está confirmado contra la configuración real: usa `AdminInitiateAuth`/`AdminRespondToAuthChallenge` (`ADMIN_USER_PASSWORD_AUTH`), que exige permiso IAM en el rol de ejecución del runtime y `ALLOW_ADMIN_USER_PASSWORD_AUTH` en `ExplicitAuthFlows`. ADR-004 no confirma ninguno de los dos. Si faltan, el login real falla (no las pruebas, que usan `FakeAuthenticationProvider`).
 - El segundo factor administrativo (HU-02) usa el reto que el proveedor emita, pero el mecanismo aprobado por el cliente (correo) no coincide con el aprovisionado en el pool (TOTP): el correo exige SES, decisión todavía pendiente. Ver ADR-004 en Nexus-Battle-Infrastructure.
 - Los bytes del avatar viven fuera de PostgreSQL (`AvatarStoragePort`). En local se usa disco; AWS sustituye el adaptador.
