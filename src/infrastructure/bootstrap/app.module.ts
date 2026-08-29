@@ -56,6 +56,7 @@ import { LocalAvatarStorage } from '../../adapters/outbound/storage/LocalAvatarS
 import { createDatabase } from '../persistence/database'
 import type { Database } from '../../adapters/outbound/persistence/schema'
 import type { Kysely } from 'kysely'
+import { CognitoIdentityProvider } from '../../adapters/outbound/identity/CognitoIdentityProvider'
 import { FakeIdentityProvider } from '../../adapters/outbound/identity/FakeIdentityProvider'
 import { FakeAuthenticationProvider } from '../../adapters/outbound/identity/FakeAuthenticationProvider'
 import { CognitoAuthenticationProvider } from '../../adapters/outbound/identity/CognitoAuthenticationProvider'
@@ -154,10 +155,40 @@ export const DATABASE = Symbol('Database')
       useFactory: (): IdGeneratorPort => new UuidGenerator(),
     },
     {
+      // Lo decide `AUTHENTICATION_DRIVER`, el MISMO interruptor que elige contra
+      // que se verifican las contrasenas. No son dos decisiones independientes:
+      // registrar en memoria y autenticar contra Cognito produce cuentas que
+      // existen en PostgreSQL y no existen en el pool, es decir cuentas que
+      // nunca pueden iniciar sesion.
       provide: IDENTITY_PROVIDER,
-      useFactory: (ids: IdGeneratorPort): IdentityProviderPort =>
-        new FakeIdentityProvider(() => ids.generate()),
-      inject: [ID_GENERATOR],
+      useFactory: (
+        config: AppConfig,
+        logger: Logger,
+        ids: IdGeneratorPort,
+      ): IdentityProviderPort => {
+        if (config.authenticationDriver === AuthenticationDriver.Cognito) {
+          if (config.cognito === null) {
+            throw new Error('AUTHENTICATION_DRIVER=cognito exige COGNITO_USER_POOL_ID/CLIENT_ID.')
+          }
+
+          logger.info('identity_provider', { driver: 'cognito' })
+
+          return new CognitoIdentityProvider({
+            userPoolId: config.cognito.userPoolId,
+            // Los otros servicios leen el rol de `cognito:groups`. Sin grupo, un
+            // jugador recien registrado obtiene un testimonio sin roles.
+            defaultGroup: 'PLAYER',
+          })
+        }
+
+        logger.warn('identity_provider', {
+          driver: 'fake',
+          detail: 'AUTHENTICATION_DRIVER=fake: el registro no crea ninguna identidad real.',
+        })
+
+        return new FakeIdentityProvider(() => ids.generate())
+      },
+      inject: [APP_CONFIG, LOGGER, ID_GENERATOR],
     },
     {
       // `AUTHENTICATION_DRIVER` decide el adaptador, igual que
