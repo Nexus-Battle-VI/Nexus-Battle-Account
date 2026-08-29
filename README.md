@@ -11,9 +11,17 @@ Este repositorio contiene código y Pull Requests. No contiene Issues ni Product
 
 ## Este servicio no almacena contraseñas
 
-El agregado `Account` modela la cuenta y sus roles, no las credenciales. El registro y la verificación de credenciales pertenecen a un proveedor de identidad externo, detrás de `IdentityProviderPort`.
+El agregado `Account` modela la cuenta y sus roles, no las credenciales.
 
-El proveedor está decidido: **Amazon Cognito, plan Essentials** (ADR-004, `Accepted` el 2026-08-25). El alta del sujeto sigue operando con `FakeIdentityProvider`, que implementa el contrato completo del puerto sobre almacenamiento en memoria y sin credenciales.
+**Este servicio tampoco crea identidades.** El alta ocurre en la pantalla del proveedor —**Amazon Cognito**, `us-east-1_HrEiSzzKW`, aprovisionado y en uso—, de modo que cuando se llega a `POST /api/accounts` la persona ya existe y lo que falta es su cuenta en el producto. Sin un sujeto verificado, el registro responde 401 en lugar de inventar uno.
+
+El puerto que modelaba ese alta, `IdentityProviderPort`, **se eliminó** el 2026-08-29 al quedarse sin consumidores. La frontera con el proveedor son hoy tres contratos estrechos:
+
+| Puerto                       | Responsabilidad                                          |
+| ---------------------------- | -------------------------------------------------------- |
+| `TokenVerifierPort`          | Verificar un testimonio ya emitido                       |
+| `AuthenticationProviderPort` | Comprobar contraseña y segundo factor (HU-02)            |
+| `RoleDirectoryPort`          | Reflejar en el proveedor el rol que este servicio decide |
 
 ## Verificación de identidad en las peticiones
 
@@ -35,7 +43,9 @@ La comprobación de firma la hace [`aws-jwt-verify`](https://github.com/awslabs/
 
 Con un proveedor real, el alta de la identidad ocurre en **su propia pantalla de registro**. Cuando se llega a `POST /api/accounts`, la persona ya existe en el proveedor y lo que falta es su cuenta en el producto.
 
-Por eso el caso de uso acepta un `subject` ya existente: darlo de alta otra vez produciría **dos identidades para la misma persona**. Y la compensación ante un fallo de persistencia alcanza **únicamente al sujeto que este caso de uso creó** — revocar uno ajeno dejaría sin identidad a alguien que la tenía antes de la petición.
+Por eso el caso de uso **exige** un `subject` ya verificado, y lo toma del testimonio, nunca del cuerpo de la petición: el cliente no puede reclamar un sujeto. Darlo de alta aquí produciría **dos identidades para la misma persona**.
+
+Como ya no crea ninguna, tampoco hay identidad que compensar: ante un fallo de persistencia solo se retira el avatar guardado en esta petición.
 
 **La protección es el comportamiento por defecto.** El guard se registra de forma global y hay que excluir explícitamente lo que deba ser público con `@Public()`. Al revés —proteger ruta por ruta— cualquier endpoint nuevo nacería desprotegido, y ese olvido no falla ninguna prueba.
 
@@ -96,7 +106,9 @@ npm run migrate:dev
 npm run dev
 ```
 
-`POST /api/accounts` recibe `multipart/form-data` (el avatar es archivo, no Base64). El apodo viaja como `nickname` y se persiste en `display_name`. La contraseña no se guarda en PostgreSQL: entra por `IdentityProviderPort` (`FakeIdentityProvider` en local; Cognito sustituye el adaptador).
+`POST /api/accounts` recibe `multipart/form-data` (el avatar es archivo, no Base64). El apodo viaja como `nickname` y se persiste en `display_name`. **La contraseña no se guarda en PostgreSQL y este servicio tampoco la envía a ningún sitio al registrar**: la credencial ya está en el proveedor, donde la persona la creó.
+
+El avatar se escribe en `AVATAR_STORAGE_PATH`. La imagen lo define en `/var/lib/nexus/avatars` y crea ese directorio con el dueño correcto: el proceso corre sin privilegios y `/app` pertenece a root, así que el valor por defecto de la configuración —relativo a `/app`— **no se podía crear**, y todo registro respondía 500. Hay una comprobación en CI que lo verifica contra la imagen construida.
 
 Tras `migrate:dev`, el registro rechaza apodos que contengan un término activo de la lista negra. La semilla y el volcado están en [docs/nickname-blacklist.md](docs/nickname-blacklist.md) y [docs/nickname-blacklist.txt](docs/nickname-blacklist.txt).
 
@@ -151,7 +163,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Con la configuración por defecto el servicio arranca con el repositorio en memoria y el proveedor de identidad simulado: no requiere base de datos ni servicios externos. Para HU-01 en local, usa PostgreSQL según la sección de persistencia.
+Con la configuración por defecto el servicio arranca con el repositorio en memoria, el proveedor de autenticación simulado y el directorio de roles en memoria: no requiere base de datos ni servicios externos. Para HU-01 en local, usa PostgreSQL según la sección de persistencia.
 
 Documentación interactiva de la API en `http://localhost:3000/api/docs`.
 
@@ -192,8 +204,9 @@ Documentación interactiva de la API en `http://localhost:3000/api/docs`.
 `POST /api/sessions` recibe `identifier` (correo o apodo) y `password`. El
 servicio resuelve el identificador internamente -Web nunca traduce un apodo a
 un correo- y delega la verificacion de la contrasena en
-`AuthenticationProviderPort`, un puerto separado de `IdentityProviderPort`
-(vease la justificacion en el propio archivo de puertos). El contrato NO
+`AuthenticationProviderPort`, deliberadamente separado de la verificacion de
+testimonios y del reflejo del rol (vease la justificacion en el propio archivo
+de puertos). El contrato NO
 acepta un campo `role`: el rol siempre se lee de la cuenta ya persistida.
 
 Roles reconocidos: `PLAYER`, `MODERATOR`, `ADMINISTRATOR` y
@@ -213,10 +226,10 @@ el login tuvo exito.
 **Estado real de la integracion:** `AUTHENTICATION_DRIVER` elige el
 adaptador, igual que `PERSISTENCE_DRIVER` elige el repositorio.
 
-| Valor                | Adaptador                       | Uso                                                         |
-| -------------------- | ------------------------------- | ----------------------------------------------------------- |
-| `fake` (por defecto) | `FakeAuthenticationProvider`    | Test y desarrollo local sin red. No verifica nada real      |
-| `cognito`            | `CognitoAuthenticationProvider` | `InitiateAuth`/`RespondToAuthChallenge` contra el pool real |
+| Valor                | Adaptador                       | Uso                                                                                                                                                     |
+| -------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fake` (por defecto) | `FakeAuthenticationProvider`    | Test y desarrollo local sin red. No verifica nada real                                                                                                  |
+| `cognito`            | `CognitoAuthenticationProvider` | `AdminInitiateAuth`/`AdminRespondToAuthChallenge` contra el pool real. La variante **Admin** exige credenciales de AWS firmadas, no solo el `client_id` |
 
 Con `NODE_ENV=production`, `AUTHENTICATION_DRIVER=fake` **impide arrancar**
 el servicio, igual que `AUTH_MODE=disabled`: un binario de produccion no
@@ -251,11 +264,18 @@ Resolverlo es una decision de Infrastructure; el adaptador no usa claves de
 AWS de larga duracion en ningun caso -se apoya en la cadena de credenciales
 por defecto del SDK.
 
-**Registro y Cognito ya son consistentes.** `RegisterAccount` usa el `subject`
-del testimonio verificado cuando llega uno (`AUTH_MODE=jwt` con una identidad
-real); `IdentityProviderPort.register` (`FakeIdentityProvider`) solo actua
-como respaldo cuando la autenticacion esta desactivada. No hay dos procesos de
-alta de identidad en conflicto entre HU-01 y HU-02.
+**Registro y Cognito son consistentes porque solo hay un alta de identidad, y no
+la hace este servicio.** `RegisterAccount` toma el `subject` del testimonio
+verificado y falla sin el. No existe respaldo ni segundo camino: no hay dos
+procesos de alta que puedan entrar en conflicto entre HU-01 y HU-02.
+
+**El rol se refleja en el proveedor.** La fuente de verdad sigue siendo
+`account_roles`, en PostgreSQL, pero `RoleDirectoryPort` lo refleja en los grupos
+del pool para que viaje en `cognito:groups`, que es lo que leen los otros cuatro
+servicios. El reflejo ocurre **antes** de persistir: al reves, un fallo dejaria
+una cuenta cuyo rol no viaja en el testimonio, e irreparable por reintento porque
+el segundo intento chocaria con el correo ya registrado. Si el proveedor no
+responde, el registro falla cerrado con **503** y la cuenta no se crea.
 
 ## Estructura
 
@@ -295,11 +315,11 @@ La imagen es multi-etapa, se ejecuta con el usuario sin privilegios `node`, incl
 ## Limitaciones conocidas del alcance actual
 
 - **La persistencia por defecto es en memoria y se pierde al reiniciar.** Con `PERSISTENCE_DRIVER=postgres` opera el adaptador real sobre PostgreSQL con Kysely, probado contra un motor en contenedor. El repositorio en memoria no es un resto del andamiaje: es lo que permite probar el dominio y los casos de uso **sin Docker**.
-- **El alta de identidad sigue simulada.** `FakeIdentityProvider` implementa `IdentityProviderPort` (email + contraseña, sin persistir la contraseña). Cognito sustituye ese adaptador sin tocar el dominio. Ver ADR-004.
-- **La autenticación (HU-02) tiene adaptador Cognito real (`CognitoAuthenticationProvider`), pero `AUTHENTICATION_DRIVER=fake` sigue siendo el valor por defecto** fuera de producción, donde `fake` está prohibido. Requiere que el registro haya creado el sujeto con un usuario real del pool (`AUTH_MODE=jwt` con un testimonio verdadero), no con `FakeIdentityProvider`.
-- **Sin confirmar: permiso IAM y `ExplicitAuthFlows` para el flujo `Admin*`.** `CognitoAuthenticationProvider` usa `AdminInitiateAuth`/`AdminRespondToAuthChallenge` (no el flujo público, para no exponer `USER_PASSWORD_AUTH` en el cliente público de Web). Necesita `cognito-idp:AdminInitiateAuth`/`AdminRespondToAuthChallenge` en el rol IAM del runtime y `ALLOW_ADMIN_USER_PASSWORD_AUTH` en el cliente de Terraform; ninguno de los dos está confirmado en ADR-004. Si falta cualquiera, el login real falla con `AuthenticationProviderError`, no con credenciales inválidas.
+- ~~**El alta de identidad sigue simulada.**~~ **Superado.** Este servicio ya no da de alta identidades y el puerto que lo modelaba se eliminó; el alta ocurre en la pantalla del proveedor.
+- **`AUTHENTICATION_DRIVER=fake` sigue siendo el valor por defecto** fuera de producción, donde `fake` está prohibido y el servicio ni siquiera arranca con él. El despliegue corre con `cognito`.
+- ~~**Sin confirmar: permiso IAM y `ExplicitAuthFlows` para el flujo `Admin*`.**~~ **Confirmados ambos.** El cliente declara `ALLOW_ADMIN_USER_PASSWORD_AUTH`, y el rol de instancia tiene `AdminInitiateAuth`/`AdminRespondToAuthChallenge` más las tres acciones del reflejo del rol, acotadas a este pool. Verificado con `iam simulate-principal-policy`, incluidos controles negativos: `AdminCreateUser` y `AdminDeleteUser` responden `implicitDeny`, a propósito.
 - **El mecanismo de segundo factor aprobado (correo) no coincide con lo aprovisionado (TOTP).** El pool de Cognito exige SES para MFA por correo, todavía no decidido. Ver ADR-004 en Nexus-Battle-Infrastructure.
-- **El avatar se guarda en disco local.** `LocalAvatarStorage` escribe bajo `AVATAR_STORAGE_PATH`. Un adaptador AWS sustituye ese puerto sin tocar `RegisterAccount`.
+- **El avatar se guarda en disco local.** `LocalAvatarStorage` escribe bajo `AVATAR_STORAGE_PATH`, que la imagen define en `/var/lib/nexus/avatars`. En el despliegue hay un volumen montado ahí; sin él los avatares vivirían en la capa de escritura del contenedor y desaparecerían en cada despliegue. Si la instancia se reemplaza, se pierden: sacarlos de la máquina exigiría S3, que el alcance actual no autoriza. Un adaptador AWS sustituye ese puerto sin tocar `RegisterAccount`.
 - **Las solicitudes de notificación no se publican en una cola.** Se registran con la forma exacta del mensaje que consumirá Notifications; la publicación real depende de ADR-006.
 - La asignación y modificación de roles (`HU-39`) no forma parte de este alcance: HU-02 solo lee el rol vigente de la cuenta.
 
