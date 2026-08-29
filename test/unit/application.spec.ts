@@ -18,6 +18,11 @@ import { InMemoryAccountRepository } from '../../src/adapters/outbound/persisten
 import { InMemoryNicknameBlacklist } from '../../src/adapters/outbound/persistence/InMemoryNicknameBlacklist'
 import { InMemorySecurityQuestionCatalog } from '../../src/adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
 import { FakeAuthenticationProvider } from '../../src/adapters/outbound/identity/FakeAuthenticationProvider'
+import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
+import {
+  RoleDirectoryError,
+  type RoleDirectoryPort,
+} from '../../src/application/ports/RoleDirectoryPort'
 import { AuthenticationProviderError } from '../../src/application/ports/AuthenticationProviderPort'
 import { InMemoryAvatarStorage } from '../../src/adapters/outbound/storage/InMemoryAvatarStorage'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
@@ -53,13 +58,17 @@ interface Harness {
   notifier: RecordingNotifier
   avatars: InMemoryAvatarStorage
   blacklist: InMemoryNicknameBlacklist
+  roleDirectory: InMemoryRoleDirectory
 }
 
-const buildHarness = (overrides: { accounts?: AccountRepositoryPort } = {}): Harness => {
+const buildHarness = (
+  overrides: { accounts?: AccountRepositoryPort; roleDirectory?: RoleDirectoryPort } = {},
+): Harness => {
   const accounts = new InMemoryAccountRepository()
   const notifier = new RecordingNotifier()
   const avatars = new InMemoryAvatarStorage()
   const blacklist = new InMemoryNicknameBlacklist()
+  const roleDirectory = new InMemoryRoleDirectory()
   const clock = { now: (): Date => AT }
   const ids = { generate: sequence('acc') }
   const repository = overrides.accounts ?? accounts
@@ -69,6 +78,7 @@ const buildHarness = (overrides: { accounts?: AccountRepositoryPort } = {}): Har
     notifier,
     avatars,
     blacklist,
+    roleDirectory,
     registerAccount: new RegisterAccount({
       accounts: repository,
       notifications: notifier,
@@ -77,6 +87,7 @@ const buildHarness = (overrides: { accounts?: AccountRepositoryPort } = {}): Har
       avatars,
       blacklist,
       questions: new InMemorySecurityQuestionCatalog(),
+      roleDirectory: overrides.roleDirectory ?? roleDirectory,
     }),
     getAccount: new GetAccount(repository),
     verifyAccount: new VerifyAccount({ accounts: repository, clock }),
@@ -96,7 +107,7 @@ function sequence(prefix: string): () => string {
 const command = validCommand()
 
 describe('RegisterAccount', () => {
-  it('registra la cuenta, da de alta la identidad y solicita el correo', async () => {
+  it('registra la cuenta, refleja el rol y solicita el correo', async () => {
     const harness = buildHarness()
 
     const result = await harness.registerAccount.execute(command)
@@ -322,7 +333,7 @@ describe('RegisterAccount', () => {
     })
   })
 
-  it('compensa identidad y avatar si falla la persistencia', async () => {
+  it('compensa el avatar si falla la persistencia', async () => {
     const failing = new InMemoryAccountRepository()
     jest.spyOn(failing, 'saveRegistration').mockRejectedValue(new Error('almacen no disponible'))
 
@@ -331,6 +342,61 @@ describe('RegisterAccount', () => {
     await expect(harness.registerAccount.execute(command)).rejects.toThrow('almacen no disponible')
 
     expect(harness.avatars.size).toBe(0)
+  })
+
+  it('refleja el rol base en el directorio, no solo en la cuenta', async () => {
+    const harness = buildHarness()
+
+    const created = await harness.registerAccount.execute(command)
+
+    expect(created.roles).toEqual([Role.Player])
+    // Lo que se comprueba no es que la cuenta tenga el rol -eso ya lo cubre la
+    // prueba de arriba- sino que el rol tambien esta donde el testimonio lo
+    // recoge. Sin esto, los otros servicios ven a esta persona sin ningun rol.
+    expect(harness.roleDirectory.rolesOf(command.subject!)).toEqual([Role.Player])
+  })
+
+  /**
+   * El orden es la decision de diseno, y esta es la prueba que lo fija.
+   *
+   * Si el reflejo ocurriera despues de persistir, un fallo aqui dejaria una
+   * cuenta guardada cuyo rol no viaja en el testimonio, e irreparable por
+   * reintento: el segundo intento chocaria con el correo ya registrado.
+   */
+  it('no guarda la cuenta si el rol no se pudo reflejar', async () => {
+    const directorioCaido: RoleDirectoryPort = {
+      reflect: () => Promise.reject(new RoleDirectoryError('el proveedor no responde')),
+    }
+
+    const harness = buildHarness({ roleDirectory: directorioCaido })
+
+    await expect(harness.registerAccount.execute(command)).rejects.toBeInstanceOf(
+      RoleDirectoryError,
+    )
+
+    expect(harness.accounts.size).toBe(0)
+    expect(harness.avatars.size).toBe(0)
+    expect(harness.notifier.requested).toEqual([])
+  })
+
+  it('reflejar dos veces deja el mismo resultado que reflejar una', async () => {
+    const directorio = new InMemoryRoleDirectory()
+
+    await directorio.reflect('sujeto-ana', [Role.Player])
+    await directorio.reflect('sujeto-ana', [Role.Player])
+
+    expect(directorio.rolesOf('sujeto-ana')).toEqual([Role.Player])
+  })
+
+  it('el reflejo sustituye la pertenencia, no la acumula', async () => {
+    const directorio = new InMemoryRoleDirectory()
+
+    await directorio.reflect('sujeto-ana', [Role.Player, Role.Moderator])
+    await directorio.reflect('sujeto-ana', [Role.Player])
+
+    // Un reflejo que solo suma no es un reflejo: retirar un rol en Account
+    // nunca llegaria al testimonio y este seguiria concediendolo.
+    expect(directorio.rolesOf('sujeto-ana')).toEqual([Role.Player])
   })
 })
 
