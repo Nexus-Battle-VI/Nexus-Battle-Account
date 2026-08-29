@@ -13,7 +13,7 @@ import {
   type TokenVerifierPort,
   type VerifiedIdentity,
 } from '../../src/application/ports/TokenVerifierPort'
-import { ROLE_DIRECTORY } from '../../src/application/ports/RoleDirectoryPort'
+import { ROLE_DIRECTORY, RoleDirectoryError } from '../../src/application/ports/RoleDirectoryPort'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
 
 /**
@@ -45,6 +45,22 @@ const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
     subject: 'sujeto-administrador',
     email: 'admin@nexus.test',
     roles: new Set([Role.Player, Role.Administrator]),
+  },
+  // Identidad verificada que todavia NO tiene cuenta: el estado exacto de quien
+  // acaba de darse de alta en el proveedor y llega aqui a crear la suya.
+  'token-sin-cuenta': {
+    subject: 'sujeto-sin-cuenta',
+    email: 'sin-proveedor@nexus.test',
+    roles: new Set([Role.Player]),
+  },
+  // Firma valida, `sub` inservible. El verificador solo rechaza el `sub`
+  // AUSENTE o vacio, asi que uno de puros espacios lo atraviesa y llega al caso
+  // de uso, que si lo rechaza. Es el unico camino por el que
+  // `IdentityRequiredError` se alcanza de verdad.
+  'token-sujeto-en-blanco': {
+    subject: '   ',
+    email: 'en-blanco@nexus.test',
+    roles: new Set([Role.Player]),
   },
 }
 
@@ -149,6 +165,45 @@ describe('API de cuentas con autenticacion activa', () => {
 
       expect(propia.status).toBe(200)
       expect(propia.body).toMatchObject({ email: 'moderador@nexus.test' })
+    })
+
+    /**
+     * El registro falla cerrado cuando el rol no se puede reflejar, y eso es
+     * deliberado: guardar una cuenta cuyo rol no viajaria en el testimonio es
+     * justo la divergencia que el reflejo existe para impedir.
+     *
+     * Lo que esta prueba fija es COMO se cuenta ese fallo. Un 500 diria "este
+     * servicio tiene un defecto" y no invita a reintentar; aqui el servicio
+     * funciona, la dependencia no, y volver a intentarlo mas tarde tiene
+     * sentido.
+     */
+    it('responde 503, y no 500, cuando el proveedor de identidad no responde', async () => {
+      const directorio = app.get<{ reflect: () => Promise<void> }>(ROLE_DIRECTORY)
+      const original = directorio.reflect
+      directorio.reflect = () => Promise.reject(new RoleDirectoryError('el proveedor no responde'))
+
+      try {
+        const response = await registerAccountRequest(app, {
+          email: 'sin-proveedor@nexus.test',
+          nickname: 'Cuenta Sin Proveedor',
+        }).set('Authorization', bearer('token-sin-cuenta'))
+
+        expect(response.status).toBe(503)
+        expect(response.body.message).not.toMatch(/internal/i)
+      } finally {
+        directorio.reflect = original
+      }
+    })
+
+    it('responde 401, y no 500, si el testimonio no identifica a nadie', async () => {
+      const response = await registerAccountRequest(app, {
+        email: 'en-blanco@nexus.test',
+        nickname: 'Cuenta En Blanco',
+      }).set('Authorization', bearer('token-sujeto-en-blanco'))
+
+      // Un fallo de autenticacion tiene que decir que lo es. Como 500 acusaria
+      // al servicio de un defecto que no tiene.
+      expect(response.status).toBe(401)
     })
 
     it.each(['/api/health/live', '/api/health/ready'])(
