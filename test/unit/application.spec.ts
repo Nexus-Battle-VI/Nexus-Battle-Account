@@ -2,6 +2,8 @@ import { RegisterAccount } from '../../src/application/use-cases/RegisterAccount
 import { GetAccount } from '../../src/application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../src/application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../src/application/use-cases/VerifyAccount'
+import { LoginAccount } from '../../src/application/use-cases/LoginAccount'
+import { CompleteSecondFactor } from '../../src/application/use-cases/CompleteSecondFactor'
 import {
   AccountAlreadyExistsError,
   AccountNotFoundError,
@@ -15,6 +17,8 @@ import { InMemoryAccountRepository } from '../../src/adapters/outbound/persisten
 import { InMemoryNicknameBlacklist } from '../../src/adapters/outbound/persistence/InMemoryNicknameBlacklist'
 import { InMemorySecurityQuestionCatalog } from '../../src/adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
 import { FakeIdentityProvider } from '../../src/adapters/outbound/identity/FakeIdentityProvider'
+import { FakeAuthenticationProvider } from '../../src/adapters/outbound/identity/FakeAuthenticationProvider'
+import { AuthenticationProviderError } from '../../src/application/ports/AuthenticationProviderPort'
 import { InMemoryAvatarStorage } from '../../src/adapters/outbound/storage/InMemoryAvatarStorage'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { Role } from '../../src/domain/entities/Role'
@@ -22,7 +26,14 @@ import { DomainError } from '../../src/domain/errors/DomainError'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
 import { AVATAR_MAX_BYTES } from '../../src/domain/value-objects/AvatarMetadata'
 import { hashSecurityAnswer } from '../../src/application/security/hashSecurityAnswer'
-import { AT, FOUR_ANSWERS, validCommand } from '../support/account-factory'
+import {
+  AT,
+  FOUR_ANSWERS,
+  VALID_PASSWORD,
+  buildAccount,
+  buildActiveAccount,
+  validCommand,
+} from '../support/account-factory'
 
 class RecordingNotifier implements NotificationRequestPort {
   readonly requested: NotificationRequest[] = []
@@ -394,5 +405,316 @@ describe('GetOwnAccount', () => {
     const useCase = new GetOwnAccount(harness.accounts)
 
     expect(await useCase.execute('sub-propio')).toEqual(created)
+  })
+})
+
+interface LoginHarness {
+  accounts: InMemoryAccountRepository
+  authProvider: FakeAuthenticationProvider
+  loginAccount: LoginAccount
+  completeSecondFactor: CompleteSecondFactor
+}
+
+const buildLoginHarness = (): LoginHarness => {
+  const accounts = new InMemoryAccountRepository()
+  const authProvider = new FakeAuthenticationProvider(sequence('token'))
+  const deps = { accounts, authenticationProvider: authProvider }
+
+  return {
+    accounts,
+    authProvider,
+    loginAccount: new LoginAccount(deps),
+    completeSecondFactor: new CompleteSecondFactor(deps),
+  }
+}
+
+/**
+ * Cubre HU-02 (Nexus-Battle-Management#11) y su task HU-02.1 (#90): la lista
+ * de "Pruebas y evidencia esperada" de la task se corresponde con los `it` de
+ * este bloque uno a uno.
+ */
+describe('LoginAccount', () => {
+  it('identifica la cuenta por correo', async () => {
+    const harness = buildLoginHarness()
+    await harness.accounts.save(buildActiveAccount({ email: 'jugador@nexus.test' }))
+    harness.authProvider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+    const outcome = await harness.loginAccount.execute({
+      identifier: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    expect(outcome).toMatchObject({ kind: 'authenticated' })
+  })
+
+  /**
+   * `account.id` es el identificador de Account; `subject` es el `sub` real
+   * del proveedor. Son valores DISTINTOS a proposito en este fixture
+   * (`buildActiveAccount` los genera por separado): esta prueba falla si
+   * algun dia alguien confunde uno con el otro.
+   */
+  it('entrega el subject real, distinto de account.id', async () => {
+    const harness = buildLoginHarness()
+    await harness.accounts.save(
+      buildActiveAccount({
+        id: 'acc-42',
+        subject: 'sujeto-cognito-real',
+        email: 'jugador@nexus.test',
+      }),
+    )
+    harness.authProvider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+    const outcome = await harness.loginAccount.execute({
+      identifier: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    if (outcome.kind !== 'authenticated') {
+      throw new Error('se esperaba autenticacion completada')
+    }
+
+    expect(outcome.subject).toBe('sujeto-cognito-real')
+    expect(outcome.account.id).toBe('acc-42')
+    expect(outcome.subject).not.toBe(outcome.account.id)
+  })
+
+  it('identifica la cuenta por apodo, sin que quien llama sepa su correo', async () => {
+    const harness = buildLoginHarness()
+    await harness.accounts.save(
+      buildActiveAccount({ email: 'jugador@nexus.test', displayName: 'Ana Ramirez' }),
+    )
+    harness.authProvider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+    const outcome = await harness.loginAccount.execute({
+      identifier: 'Ana Ramirez',
+      password: VALID_PASSWORD,
+    })
+
+    expect(outcome).toMatchObject({ kind: 'authenticated' })
+  })
+
+  it('rechaza un identificador que no corresponde a ninguna cuenta', async () => {
+    const harness = buildLoginHarness()
+
+    await expect(
+      harness.loginAccount.execute({ identifier: 'nadie@nexus.test', password: 'lo-que-sea' }),
+    ).resolves.toEqual({ kind: 'invalidCredentials' })
+  })
+
+  it('rechaza una contrasena incorrecta', async () => {
+    const harness = buildLoginHarness()
+    await harness.accounts.save(buildActiveAccount())
+    harness.authProvider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+    await expect(
+      harness.loginAccount.execute({ identifier: 'jugador@nexus.test', password: 'Incorrecta1!' }),
+    ).resolves.toEqual({ kind: 'invalidCredentials' })
+  })
+
+  it('rechaza una cuenta pendiente de verificacion, con el mismo resultado que credenciales invalidas', async () => {
+    const harness = buildLoginHarness()
+    await harness.accounts.saveRegistration(buildAccount(), []) // nace PENDING_VERIFICATION
+    harness.authProvider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+    await expect(
+      harness.loginAccount.execute({ identifier: 'jugador@nexus.test', password: VALID_PASSWORD }),
+    ).resolves.toEqual({ kind: 'invalidCredentials' })
+  })
+
+  /**
+   * Este es el requisito de no-enumeracion en forma de prueba: "correo
+   * inexistente" y "contrasena incorrecta" no deben distinguirse en la salida.
+   */
+  it('no filtra si el identificador existe: mismo resultado exacto en ambos casos', async () => {
+    const harness = buildLoginHarness()
+    await harness.accounts.save(buildActiveAccount())
+    harness.authProvider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+    const correoInexistente = await harness.loginAccount.execute({
+      identifier: 'nadie@nexus.test',
+      password: VALID_PASSWORD,
+    })
+    const contrasenaIncorrecta = await harness.loginAccount.execute({
+      identifier: 'jugador@nexus.test',
+      password: 'Incorrecta1!',
+    })
+
+    expect(correoInexistente).toEqual(contrasenaIncorrecta)
+  })
+
+  it('propaga un fallo inesperado del proveedor como error temporal, no como credenciales invalidas', async () => {
+    const harness = buildLoginHarness()
+    await harness.accounts.save(buildActiveAccount())
+    jest
+      .spyOn(harness.authProvider, 'authenticate')
+      .mockRejectedValue(new AuthenticationProviderError('el proveedor no responde'))
+
+    await expect(
+      harness.loginAccount.execute({ identifier: 'jugador@nexus.test', password: VALID_PASSWORD }),
+    ).resolves.toEqual({ kind: 'providerUnavailable' })
+  })
+
+  it.each([Role.Player, Role.Moderator])(
+    'completa el login sin segundo factor para el rol %s',
+    async (role) => {
+      const harness = buildLoginHarness()
+      await harness.accounts.save(buildActiveAccount({ roles: [Role.Player, role] }))
+      harness.authProvider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+      const outcome = await harness.loginAccount.execute({
+        identifier: 'jugador@nexus.test',
+        password: VALID_PASSWORD,
+      })
+
+      expect(outcome).toMatchObject({ kind: 'authenticated' })
+      if (outcome.kind === 'authenticated') {
+        expect(outcome.account.roles).toEqual(expect.arrayContaining([role]))
+      }
+    },
+  )
+
+  it.each([Role.Administrator, Role.SuperAdministrator])(
+    'exige segundo factor para el rol %s y no entra al flujo administrativo con solo la contrasena',
+    async (role) => {
+      const harness = buildLoginHarness()
+      await harness.accounts.save(buildActiveAccount({ roles: [Role.Player, role] }))
+      harness.authProvider.seed({
+        email: 'jugador@nexus.test',
+        password: VALID_PASSWORD,
+        requiresSecondFactor: true,
+        secondFactorCode: '123456',
+      })
+
+      const outcome = await harness.loginAccount.execute({
+        identifier: 'jugador@nexus.test',
+        password: VALID_PASSWORD,
+      })
+
+      expect(outcome).toMatchObject({ kind: 'secondFactorRequired' })
+    },
+  )
+
+  /**
+   * CA-06 en su forma mas estricta: el proveedor SI acepto la contrasena y NO
+   * emitio ningun reto para una cuenta administrativa. Esto no es un exito: es
+   * la brecha de aprovisionamiento descrita en el reporte de HU-02
+   * (ADR-004 -MFA de Cognito no confirmado por rol-), y el caso de uso debe
+   * fallar cerrado en lugar de conceder la sesion.
+   */
+  it.each([Role.Administrator, Role.SuperAdministrator])(
+    'no concede sesion a %s si el proveedor autentica sin retar el segundo factor',
+    async (role) => {
+      const harness = buildLoginHarness()
+      await harness.accounts.save(buildActiveAccount({ roles: [Role.Player, role] }))
+      // Sembrado SIN requiresSecondFactor: el proveedor autentica directo.
+      harness.authProvider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+      const outcome = await harness.loginAccount.execute({
+        identifier: 'jugador@nexus.test',
+        password: VALID_PASSWORD,
+      })
+
+      expect(outcome).toEqual({ kind: 'providerUnavailable' })
+    },
+  )
+})
+
+describe('CompleteSecondFactor', () => {
+  const seedAdmin = async (
+    harness: LoginHarness,
+    role: typeof Role.Administrator | typeof Role.SuperAdministrator = Role.Administrator,
+  ): Promise<void> => {
+    await harness.accounts.save(buildActiveAccount({ roles: [Role.Player, role] }))
+    harness.authProvider.seed({
+      email: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+      requiresSecondFactor: true,
+      secondFactorCode: '123456',
+    })
+  }
+
+  it('completa la autenticacion administrativa con el codigo correcto (CA-07)', async () => {
+    const harness = buildLoginHarness()
+    await seedAdmin(harness)
+
+    const challenge = await harness.loginAccount.execute({
+      identifier: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    if (challenge.kind !== 'secondFactorRequired') {
+      throw new Error('se esperaba un reto de segundo factor')
+    }
+
+    const outcome = await harness.completeSecondFactor.execute({
+      identifier: 'jugador@nexus.test',
+      challengeToken: challenge.challengeToken,
+      code: '123456',
+    })
+
+    expect(outcome).toMatchObject({ kind: 'authenticated' })
+  })
+
+  it('no completa la sesion administrativa con un codigo incorrecto (CA-08)', async () => {
+    const harness = buildLoginHarness()
+    await seedAdmin(harness)
+
+    const challenge = await harness.loginAccount.execute({
+      identifier: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    if (challenge.kind !== 'secondFactorRequired') {
+      throw new Error('se esperaba un reto de segundo factor')
+    }
+
+    await expect(
+      harness.completeSecondFactor.execute({
+        identifier: 'jugador@nexus.test',
+        challengeToken: challenge.challengeToken,
+        code: '000000',
+      }),
+    ).resolves.toEqual({ kind: 'secondFactorInvalid' })
+  })
+
+  it('no completa la sesion administrativa cuando el segundo factor no se completa (CA-08)', async () => {
+    const harness = buildLoginHarness()
+    await seedAdmin(harness)
+
+    await expect(
+      harness.completeSecondFactor.execute({
+        identifier: 'jugador@nexus.test',
+        challengeToken: 'challenge-nunca-emitido',
+        code: '123456',
+      }),
+    ).resolves.toEqual({ kind: 'secondFactorInvalid' })
+  })
+
+  it('rechaza un identificador que no corresponde a ninguna cuenta', async () => {
+    const harness = buildLoginHarness()
+
+    await expect(
+      harness.completeSecondFactor.execute({
+        identifier: 'nadie@nexus.test',
+        challengeToken: 'x',
+        code: '123456',
+      }),
+    ).resolves.toEqual({ kind: 'invalidCredentials' })
+  })
+
+  it('propaga un fallo inesperado del proveedor como error temporal', async () => {
+    const harness = buildLoginHarness()
+    await seedAdmin(harness)
+    jest
+      .spyOn(harness.authProvider, 'verifySecondFactor')
+      .mockRejectedValue(new AuthenticationProviderError('el proveedor no responde'))
+
+    await expect(
+      harness.completeSecondFactor.execute({
+        identifier: 'jugador@nexus.test',
+        challengeToken: 'cualquiera',
+        code: '123456',
+      }),
+    ).resolves.toEqual({ kind: 'providerUnavailable' })
   })
 })

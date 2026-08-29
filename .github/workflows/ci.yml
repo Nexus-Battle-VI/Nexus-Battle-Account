@@ -114,8 +114,16 @@ jobs:
       # relleno, y basta con que existan porque el JWKS solo se descarga en la
       # primera peticion protegida y las sondas de salud son publicas.
       #
-      # No se rebaja la regla para que la prueba pase: se configura la prueba
-      # como habria que configurar un despliegue real.
+      # HU-02 anade una segunda regla del mismo tipo: `AUTHENTICATION_DRIVER`
+      # no puede quedarse en `fake` con `NODE_ENV=production`, porque un
+      # proveedor falso aceptaria cualquier cuenta sembrada en memoria como si
+      # fuera real. La prueba tambien la respeta, y por eso pasa `cognito`: el
+      # cliente de AWS resuelve credenciales en la PRIMERA llamada, no al
+      # construirse, asi que el contenedor arranca sin credenciales y las sondas
+      # de salud responden.
+      #
+      # No se rebaja ninguna de las dos reglas para que la prueba pase: se
+      # configura la prueba como habria que configurar un despliegue real.
       - name: Verificar que la imagen se NIEGA a arrancar sin autenticacion
         run: |
           if docker run --rm nexus-battle-account:ci 2>&1 | grep -q 'AUTH_MODE'; then
@@ -127,7 +135,7 @@ jobs:
 
       - name: Verificar arranque del contenedor
         run: |
-          docker run -d --name account-ci -p 3000:3000             -e AUTH_MODE=jwt             -e COGNITO_USER_POOL_ID=us-east-1_ci             -e COGNITO_CLIENT_ID=cliente-ci             nexus-battle-account:ci
+          docker run -d --name account-ci -p 3000:3000             -e AUTH_MODE=jwt             -e AUTHENTICATION_DRIVER=cognito             -e COGNITO_USER_POOL_ID=us-east-1_ci             -e COGNITO_CLIENT_ID=cliente-ci             nexus-battle-account:ci
           for attempt in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:3000/api/health/ready > /dev/null; then
               echo "readiness correcta en el intento ${attempt}"

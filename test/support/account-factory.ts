@@ -1,4 +1,6 @@
 import { Account } from '../../src/domain/entities/Account'
+import { AccountStatus } from '../../src/domain/entities/AccountStatus'
+import { Role } from '../../src/domain/entities/Role'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { AvatarMetadata } from '../../src/domain/value-objects/AvatarMetadata'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
@@ -44,6 +46,40 @@ export const buildAccount = (
     termsAccepted: true,
     avatar: defaultAvatarMetadata(id),
     occurredAt: AT,
+  })
+}
+
+/**
+ * Cuenta ACTIVA reconstituida directamente (`Account.restore`), sin pasar por
+ * `RegisterAccount` ni por ningun endpoint publico. Existe para HU-02: el
+ * login exige una cuenta que ya supero la verificacion, y los roles
+ * `MODERATOR`, `ADMINISTRATOR` y `SUPER_ADMINISTRATOR` no se obtienen a
+ * traves de HU-01 (que solo concede `PLAYER`). Un Super Administrador de
+ * prueba se construye asi a proposito: no existe una API publica que lo cree
+ * (HU-02, tratamiento de HU-10 en el reporte).
+ */
+export const buildActiveAccount = (
+  overrides: {
+    id?: string
+    email?: string
+    subject?: string
+    displayName?: string
+    roles?: readonly Role[]
+  } = {},
+): Account => {
+  const id = overrides.id ?? 'acc-1'
+
+  return Account.restore({
+    id: AccountId.create(id),
+    subject: overrides.subject ?? `sujeto-${id}`,
+    email: EmailAddress.create(overrides.email ?? 'jugador@nexus.test'),
+    displayName: DisplayName.create(overrides.displayName ?? 'Ana Ramirez'),
+    firstNames: PersonName.create('Ana', 'Los nombres'),
+    lastNames: PersonName.create('Ramirez', 'Los apellidos'),
+    termsAccepted: true,
+    avatar: defaultAvatarMetadata(id),
+    status: AccountStatus.Active,
+    roles: overrides.roles ?? [Role.Player],
   })
 }
 

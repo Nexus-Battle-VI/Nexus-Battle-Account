@@ -2,10 +2,13 @@ import { Module, type CanActivate } from '@nestjs/common'
 import { APP_GUARD, Reflector } from '@nestjs/core'
 
 import { AccountsController } from '../../adapters/inbound/http/accounts.controller'
+import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
 import { HealthController } from '../../adapters/inbound/http/health.controller'
 import {
+  COMPLETE_SECOND_FACTOR,
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
+  LOGIN_ACCOUNT,
   REGISTER_ACCOUNT,
   VERIFY_ACCOUNT,
 } from '../../adapters/inbound/http/tokens'
@@ -15,8 +18,11 @@ import { RegisterAccount } from '../../application/use-cases/RegisterAccount'
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
+import { LoginAccount } from '../../application/use-cases/LoginAccount'
+import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecondFactor'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import { IDENTITY_PROVIDER } from '../../application/ports/IdentityProviderPort'
+import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
 import { CLOCK } from '../../application/ports/ClockPort'
 import { ID_GENERATOR } from '../../application/ports/IdGeneratorPort'
@@ -25,6 +31,7 @@ import { NICKNAME_BLACKLIST } from '../../application/ports/NicknameBlacklistPor
 import { SECURITY_QUESTION_CATALOG } from '../../application/ports/SecurityQuestionCatalogPort'
 import type { AccountRepositoryPort } from '../../application/ports/AccountRepositoryPort'
 import type { IdentityProviderPort } from '../../application/ports/IdentityProviderPort'
+import type { AuthenticationProviderPort } from '../../application/ports/AuthenticationProviderPort'
 import type { NotificationRequestPort } from '../../application/ports/NotificationRequestPort'
 import type { ClockPort } from '../../application/ports/ClockPort'
 import type { IdGeneratorPort } from '../../application/ports/IdGeneratorPort'
@@ -50,12 +57,20 @@ import { createDatabase } from '../persistence/database'
 import type { Database } from '../../adapters/outbound/persistence/schema'
 import type { Kysely } from 'kysely'
 import { FakeIdentityProvider } from '../../adapters/outbound/identity/FakeIdentityProvider'
+import { FakeAuthenticationProvider } from '../../adapters/outbound/identity/FakeAuthenticationProvider'
+import { CognitoAuthenticationProvider } from '../../adapters/outbound/identity/CognitoAuthenticationProvider'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
 
 import { createLogger, type Logger } from '../observability/logger'
-import { AuthMode, loadConfig, PersistenceDriver, type AppConfig } from '../config/env'
+import {
+  AuthenticationDriver,
+  AuthMode,
+  loadConfig,
+  PersistenceDriver,
+  type AppConfig,
+} from '../config/env'
 import type { ReadinessCheck, VersionReport } from '../health/health'
 
 export const APP_CONFIG = Symbol('AppConfig')
@@ -71,7 +86,7 @@ export const DATABASE = Symbol('Database')
  * framework y podria ejecutarse fuera de el sin cambios.
  */
 @Module({
-  controllers: [AccountsController, HealthController],
+  controllers: [AccountsController, SessionsController, HealthController],
   providers: [
     {
       provide: APP_CONFIG,
@@ -143,6 +158,41 @@ export const DATABASE = Symbol('Database')
       useFactory: (ids: IdGeneratorPort): IdentityProviderPort =>
         new FakeIdentityProvider(() => ids.generate()),
       inject: [ID_GENERATOR],
+    },
+    {
+      // `AUTHENTICATION_DRIVER` decide el adaptador, igual que
+      // `PERSISTENCE_DRIVER` decide el repositorio. `loadConfig` ya impide
+      // "fake" con NODE_ENV=production: un binario de produccion no puede
+      // aceptar cualquier cuenta sembrada en memoria como si fuera real.
+      //
+      // Con "fake", sin sembrar (`seed`), no autentica a nadie: es la raiz de
+      // composicion, no el arnes de pruebas, y aqui no hay credenciales de
+      // prueba que sembrar.
+      provide: AUTHENTICATION_PROVIDER,
+      useFactory: (
+        config: AppConfig,
+        logger: Logger,
+        ids: IdGeneratorPort,
+      ): AuthenticationProviderPort => {
+        if (config.authenticationDriver === AuthenticationDriver.Cognito) {
+          if (config.cognito === null) {
+            throw new Error('AUTHENTICATION_DRIVER=cognito exige COGNITO_USER_POOL_ID/CLIENT_ID.')
+          }
+
+          logger.info('authentication_provider', { driver: 'cognito' })
+
+          return new CognitoAuthenticationProvider(config.cognito)
+        }
+
+        logger.warn('authentication_provider', {
+          driver: 'fake',
+          detail:
+            'AUTHENTICATION_DRIVER=fake: ninguna contrasena se verifica contra un proveedor real.',
+        })
+
+        return new FakeAuthenticationProvider(() => ids.generate())
+      },
+      inject: [APP_CONFIG, LOGGER, ID_GENERATOR],
     },
     {
       provide: TOKEN_VERIFIER,
@@ -250,6 +300,22 @@ export const DATABASE = Symbol('Database')
       useFactory: (accounts: AccountRepositoryPort, clock: ClockPort): VerifyAccount =>
         new VerifyAccount({ accounts, clock }),
       inject: [ACCOUNT_REPOSITORY, CLOCK],
+    },
+    {
+      provide: LOGIN_ACCOUNT,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        authenticationProvider: AuthenticationProviderPort,
+      ): LoginAccount => new LoginAccount({ accounts, authenticationProvider }),
+      inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
+    },
+    {
+      provide: COMPLETE_SECOND_FACTOR,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        authenticationProvider: AuthenticationProviderPort,
+      ): CompleteSecondFactor => new CompleteSecondFactor({ accounts, authenticationProvider }),
+      inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
     },
     {
       provide: READINESS_CHECKS,

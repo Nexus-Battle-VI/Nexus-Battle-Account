@@ -18,17 +18,20 @@ Account **no posee credenciales**. No almacena contraseñas, hashes, sales, toke
 
 ```text
 +-------------------------------------------------------------+
-|  adapters/inbound/http   AccountsController, HealthController|
+|  adapters/inbound/http   AccountsController, SessionsController,|
+|                          HealthController                    |
 +-------------------------------------------------------------+
 |  application             RegisterAccount, GetAccount,        |
-|                          VerifyAccount, ports/               |
+|                          VerifyAccount, LoginAccount,         |
+|                          CompleteSecondFactor, ports/         |
 +-------------------------------------------------------------+
 |  domain                  Account, Role, RolePolicy,          |
 |                          EmailAddress, DisplayName, eventos  |
 +-------------------------------------------------------------+
 |  adapters/outbound       InMemoryAccountRepository,          |
-|                          FakeIdentityProvider,               |
-|                          LoggingNotificationRequester,       |
+|                          FakeIdentityProvider,                |
+|                          FakeAuthenticationProvider,           |
+|                          LoggingNotificationRequester,        |
 |                          SystemClock, UuidGenerator          |
 +-------------------------------------------------------------+
 |  infrastructure          config, observability, health,      |
@@ -40,16 +43,17 @@ Las dependencias apuntan siempre hacia el dominio. El dominio no conoce ninguna 
 
 ## Puertos
 
-| Puerto                        | Responsabilidad                                      | Implementación actual                                     |
-| ----------------------------- | ---------------------------------------------------- | --------------------------------------------------------- |
-| `AccountRepositoryPort`       | Persistir y recuperar el agregado                    | `InMemoryAccountRepository` / `PostgresAccountRepository` |
-| `IdentityProviderPort`        | Alta, consulta y baja del sujeto de identidad        | `FakeIdentityProvider` (Cognito sustituye el adaptador)   |
-| `AvatarStoragePort`           | Guardar y borrar bytes de avatar                     | `LocalAvatarStorage` (AWS sustituye el adaptador)         |
-| `NicknameBlacklistPort`       | Consultar la lista negra vigente de apodos           | `InMemoryNicknameBlacklist` / `PostgresNicknameBlacklist` |
-| `SecurityQuestionCatalogPort` | Catálogo activo de preguntas de seguridad            | En memoria / `PostgresSecurityQuestionCatalog`            |
-| `NotificationRequestPort`     | Solicitar una notificación al contexto Notifications | `LoggingNotificationRequester`                            |
-| `ClockPort`                   | Proveer el instante actual                           | `SystemClock`                                             |
-| `IdGeneratorPort`             | Generar identificadores                              | `UuidGenerator`                                           |
+| Puerto                        | Responsabilidad                                                                                                                | Implementación actual                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `AccountRepositoryPort`       | Persistir y recuperar el agregado, incluida la busqueda por apodo (HU-02)                                                      | `InMemoryAccountRepository` / `PostgresAccountRepository`                                           |
+| `IdentityProviderPort`        | Alta, consulta y baja del sujeto de identidad                                                                                  | `FakeIdentityProvider` (Cognito sustituye el adaptador)                                             |
+| `AuthenticationProviderPort`  | Verificacion de contrasena y segundo factor (HU-02). Separado de `IdentityProviderPort` a proposito: ver el archivo del puerto | `FakeAuthenticationProvider` / `CognitoAuthenticationProvider`, elegido por `AUTHENTICATION_DRIVER` |
+| `AvatarStoragePort`           | Guardar y borrar bytes de avatar                                                                                               | `LocalAvatarStorage` (AWS sustituye el adaptador)                                                   |
+| `NicknameBlacklistPort`       | Consultar la lista negra vigente de apodos                                                                                     | `InMemoryNicknameBlacklist` / `PostgresNicknameBlacklist`                                           |
+| `SecurityQuestionCatalogPort` | Catálogo activo de preguntas de seguridad                                                                                      | En memoria / `PostgresSecurityQuestionCatalog`                                                      |
+| `NotificationRequestPort`     | Solicitar una notificación al contexto Notifications                                                                           | `LoggingNotificationRequester`                                                                      |
+| `ClockPort`                   | Proveer el instante actual                                                                                                     | `SystemClock`                                                                                       |
+| `IdGeneratorPort`             | Generar identificadores                                                                                                        | `UuidGenerator`                                                                                     |
 
 `ClockPort` e `IdGeneratorPort` existen para que el dominio sea determinista: ninguna entidad lee el reloj ni se genera a sí misma un identificador aleatorio, de modo que las pruebas comparan valores exactos en lugar de aproximaciones.
 
@@ -105,11 +109,92 @@ El paso 7 no participa de la compensación de forma deliberada. Si la solicitud 
 
 Una cuenta solo puede autenticarse en estado `ACTIVE`. Cambiar el correo devuelve la cuenta a `PENDING_VERIFICATION`, porque la nueva dirección todavía no ha demostrado pertenecer a la persona titular.
 
+## Inicio de sesión (HU-02)
+
+`LoginAccount` y `CompleteSecondFactor` resuelven el identificador de login
+(correo o apodo) reutilizando `EmailAddress`/`DisplayName` para detectar el
+formato -sin inventar una segunda normalización de apodo-, y delegan la
+verificación de contraseña en `AuthenticationProviderPort`. El resultado se
+modela como una unión discriminada (`LoginOutcome`), no como excepciones: a
+diferencia del resto de casos de uso de este servicio, fallar un login es una
+situación rutinaria, no excepcional, y la unión hace visible en un único
+`switch` que "correo inexistente", "contraseña incorrecta" y "cuenta no
+activa" producen la misma rama externa.
+
+```text
+identifier + password
+        |
+        v
+resolver cuenta (correo o apodo) -> inexistente o no ACTIVE => invalidCredentials
+        |
+        v
+AuthenticationProviderPort.authenticate
+        |
+        +-- invalidCredentials -----------------------------> invalidCredentials
+        +-- challengeRequired ------------------------------> secondFactorRequired
+        +-- authenticated, rol PLAYER/MODERATOR -------------> authenticated
+        +-- authenticated, rol ADMINISTRATOR/SUPER_ADMIN ----> providerUnavailable
+                                                                (falla cerrado: ver mas abajo)
+```
+
+Para `ADMINISTRATOR`/`SUPER_ADMINISTRATOR`, una contraseña correcta nunca
+basta (CA-06). Si el proveedor entrega un token sin haber retado el segundo
+factor para una cuenta de ese nivel, el caso de uso NO lo trata como éxito: es
+la señal de que el segundo factor no se está aplicando para esa cuenta, y
+responde `providerUnavailable` en lugar de conceder la sesión. `CompleteSecondFactor`
+recibe de nuevo el identificador -no un correo que Web tendría que resolver- y
+el `challengeToken` opaco que emitió el proveedor.
+
+El `accessToken` que devuelve una sesión completada es el testimonio firmado
+por el proveedor de identidad (Cognito), no un JWT propio: se verifica después
+con el mismo `TokenVerifierPort` que ya protege el resto de rutas. Ver
+`AuthenticationProviderPort` para la justificación de por qué es un puerto
+separado de `IdentityProviderPort`.
+
+`AUTHENTICATION_DRIVER` elige el adaptador (`fake`/`cognito`), igual que
+`PERSISTENCE_DRIVER` elige el repositorio; `NODE_ENV=production` prohíbe
+`fake`. `CognitoAuthenticationProvider` usa `AdminInitiateAuth`/
+`AdminRespondToAuthChallenge` con `AuthFlow: ADMIN_USER_PASSWORD_AUTH` -no las
+variantes públicas, y no SRP, por el mismo motivo que `CognitoTokenVerifier`
+no reimplementa la verificación de firma a mano.
+
+El cliente de app de Cognito (ADR-004) es el mismo cliente PÚBLICO que usa Web
+por _authorization code grant_ + PKCE. Usar el flujo público
+(`InitiateAuth`/`USER_PASSWORD_AUTH`) habría exigido habilitarlo en ese mismo
+cliente, y con el Client ID -que viaja en la URL de login, no es secreto-
+cualquiera podría autenticar directo contra Cognito saltándose `LoginAccount`
+y, con él, la regla de que `ADMINISTRATOR`/`SUPER_ADMINISTRATOR` no obtienen
+sesión solo con contraseña. Las operaciones `Admin*` no tienen ese problema:
+exigen un flag distinto (`ALLOW_ADMIN_USER_PASSWORD_AUTH`) y SigV4 real (a
+diferencia de las públicas, que no llevan firma en el modelo del SDK), así que
+solo el runtime de Account -con permiso IAM explícito- puede invocarlas.
+Ningún caso usa credenciales de AWS de larga duración: el cliente se apoya en
+la cadena de credenciales por defecto del SDK.
+
+`authenticate()` también clasifica el `ChallengeName` antes de convertirlo en
+`challengeRequired`: solo los retos que HU-02 sabe resolver con un único
+código (`SOFTWARE_TOKEN_MFA`, `SMS_MFA`, `EMAIL_OTP`) llegan a Web como
+segundo factor. Cualquier otro -`NEW_PASSWORD_REQUIRED`, `MFA_SETUP`,
+`SELECT_MFA_TYPE`- falla cerrado como `AuthenticationProviderError`: fingir
+que un formulario de código los resuelve inventaría un flujo no aprobado.
+
+Pendiente de confirmar con Infrastructure: el permiso IAM
+(`cognito-idp:AdminInitiateAuth`/`AdminRespondToAuthChallenge`, acotado al
+ARN del pool) sobre el rol de ejecución del runtime, que
+`ALLOW_ADMIN_USER_PASSWORD_AUTH` esté en `ExplicitAuthFlows` del cliente de
+Terraform, y el desajuste entre el segundo factor aprobado (correo) y el
+aprovisionado (TOTP). Ver el reporte de la task de integración de Cognito
+para el detalle de los tres blockers.
+
 ## Roles
 
-Toda cuenta nace con el rol `PLAYER`, que no puede retirarse: garantiza que ninguna cuenta quede sin permisos básicos por una operación de gestión. Los roles `MODERATOR` y `ADMINISTRATOR` se acumulan sobre él y solo un administrador puede concederlos o retirarlos.
+Toda cuenta nace con el rol `PLAYER`, que no puede retirarse: garantiza que ninguna cuenta quede sin permisos básicos por una operación de gestión. Los roles `MODERATOR`, `ADMINISTRATOR` y `SUPER_ADMINISTRATOR` (HU-02) se acumulan sobre él.
 
-Los roles nunca se aceptan desde la petición de registro. El contrato HTTP rechaza campos no declarados, de modo que un cliente no puede autoconcederse privilegios.
+Los roles nunca se aceptan desde la petición de registro ni desde la de login. El contrato HTTP rechaza campos no declarados, de modo que un cliente no puede autoconcederse privilegios; el rol que decide la autorización se lee siempre de la cuenta ya persistida.
+
+**HU-02 solo LEE el rol vigente; no lo asigna.** La asignación y modificación de roles es HU-39 (`Nexus-Battle-Management#27`), todavía no implementada. `SUPER_ADMINISTRATOR` es una cuenta raíz única: no se crea mediante HU-01, no se recupera mediante HU-04 y no existe una operación pública que la genere.
+
+`RolePolicy.canManageRoles` sigue concediendo la gestión de roles a `ADMINISTRATOR`, lo que la HU-39 vigente contradice (solo `SUPER_ADMINISTRATOR` debería poder hacerlo). `grantRole`/`revokeRole` no los invoca ningún caso de uso hoy, así que no hay una vulnerabilidad activa; la inconsistencia queda documentada en el propio archivo de `RolePolicy` y corresponde corregirla a HU-39, no a HU-02.
 
 ## Contrato HTTP
 
@@ -135,9 +220,11 @@ El correo electrónico es un dato personal: la observabilidad registra el **domi
 
 ## Limitaciones conocidas del alcance actual
 
-- El proveedor de identidad es simulado en local (`FakeIdentityProvider`). Cognito sustituye el adaptador sin reescribir el dominio. Es un blocker declarado del proyecto, no un olvido.
+- El alta de identidad (HU-01) sigue simulada en local (`FakeIdentityProvider`); el adaptador Cognito de ese puerto sigue pendiente. Sin un usuario real creado ahí, `CognitoAuthenticationProvider` (HU-02, real) no tiene contra quién autenticar.
+- `CognitoAuthenticationProvider` no está confirmado contra la configuración real: usa `AdminInitiateAuth`/`AdminRespondToAuthChallenge` (`ADMIN_USER_PASSWORD_AUTH`), que exige permiso IAM en el rol de ejecución del runtime y `ALLOW_ADMIN_USER_PASSWORD_AUTH` en `ExplicitAuthFlows`. ADR-004 no confirma ninguno de los dos. Si faltan, el login real falla (no las pruebas, que usan `FakeAuthenticationProvider`).
+- El segundo factor administrativo (HU-02) usa el reto que el proveedor emita, pero el mecanismo aprobado por el cliente (correo) no coincide con el aprovisionado en el pool (TOTP): el correo exige SES, decisión todavía pendiente. Ver ADR-004 en Nexus-Battle-Infrastructure.
 - Los bytes del avatar viven fuera de PostgreSQL (`AvatarStoragePort`). En local se usa disco; AWS sustituye el adaptador.
 - Las solicitudes de notificación se registran en la observabilidad con la forma exacta del mensaje, pero no se publican en una cola. Depende de ADR-006.
-- La emisión de JWT, la sesión y el segundo factor por correo no forman parte de este alcance.
+- La asignación y modificación de roles (`HU-39`) no forma parte de este alcance: HU-02 solo lee el rol vigente.
 
 Estas limitaciones están declaradas de forma explícita para que la arquitectura de demo no se confunda con la arquitectura objetivo, documentada en `docs/architecture/target-scale-deployment.md` de Nexus-Battle-Infrastructure.

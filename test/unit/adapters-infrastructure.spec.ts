@@ -5,6 +5,7 @@ import {
   buildBlacklistSeed,
 } from '../../src/adapters/outbound/persistence/nickname-blacklist-seed'
 import { FakeIdentityProvider } from '../../src/adapters/outbound/identity/FakeIdentityProvider'
+import { FakeAuthenticationProvider } from '../../src/adapters/outbound/identity/FakeAuthenticationProvider'
 import { LoggingNotificationRequester } from '../../src/adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../src/adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../src/adapters/outbound/system/UuidGenerator'
@@ -97,6 +98,25 @@ describe('InMemoryAccountRepository', () => {
 
     expect(repository.size).toBe(0)
   })
+
+  it('recupera por apodo sin distinguir mayusculas (HU-02)', async () => {
+    const repository = new InMemoryAccountRepository()
+    await repository.save(buildAccount())
+
+    expect((await repository.findByDisplayName(DisplayName.create('Ana Ramirez')))?.id.value).toBe(
+      'acc-1',
+    )
+    expect((await repository.findByDisplayName(DisplayName.create('ANA RAMIREZ')))?.id.value).toBe(
+      'acc-1',
+    )
+  })
+
+  it('devuelve null para un apodo que no corresponde a ninguna cuenta', async () => {
+    const repository = new InMemoryAccountRepository()
+    await repository.save(buildAccount())
+
+    expect(await repository.findByDisplayName(DisplayName.create('Nadie Aqui'))).toBeNull()
+  })
 })
 
 describe('FakeIdentityProvider', () => {
@@ -157,6 +177,139 @@ describe('FakeIdentityProvider', () => {
     expect(provider.size).toBe(0)
 
     await expect(provider.revoke('sub-inexistente')).resolves.toBeUndefined()
+  })
+})
+
+describe('FakeAuthenticationProvider', () => {
+  const nextToken = (): (() => string) => {
+    let counter = 0
+
+    return (): string => {
+      counter += 1
+
+      return `t-${String(counter)}`
+    }
+  }
+
+  it('rechaza un correo que no fue sembrado', async () => {
+    const provider = new FakeAuthenticationProvider(nextToken())
+
+    await expect(
+      provider.authenticate({ email: 'nadie@nexus.test', password: 'lo-que-sea' }),
+    ).resolves.toEqual({ kind: 'invalidCredentials' })
+  })
+
+  it('rechaza una contrasena que no corresponde al correo sembrado', async () => {
+    const provider = new FakeAuthenticationProvider(nextToken())
+    provider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+    await expect(
+      provider.authenticate({ email: 'jugador@nexus.test', password: 'Otra-Clave1!' }),
+    ).resolves.toEqual({ kind: 'invalidCredentials' })
+  })
+
+  it('autentica sin segundo factor cuando no fue sembrado como administrativo', async () => {
+    const provider = new FakeAuthenticationProvider(nextToken())
+    provider.seed({ email: 'jugador@nexus.test', password: VALID_PASSWORD })
+
+    const outcome = await provider.authenticate({
+      email: 'JUGADOR@Nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    expect(outcome.kind).toBe('authenticated')
+  })
+
+  it('exige segundo factor cuando el correo fue sembrado como administrativo', async () => {
+    const provider = new FakeAuthenticationProvider(nextToken())
+    provider.seed({
+      email: 'admin@nexus.test',
+      password: VALID_PASSWORD,
+      requiresSecondFactor: true,
+      secondFactorCode: '123456',
+    })
+
+    const outcome = await provider.authenticate({
+      email: 'admin@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    expect(outcome).toMatchObject({ kind: 'challengeRequired' })
+  })
+
+  it('verifica el segundo factor con el codigo correcto y lo invalida tras usarlo', async () => {
+    const provider = new FakeAuthenticationProvider(nextToken())
+    provider.seed({
+      email: 'admin@nexus.test',
+      password: VALID_PASSWORD,
+      requiresSecondFactor: true,
+      secondFactorCode: '123456',
+    })
+
+    const challenge = await provider.authenticate({
+      email: 'admin@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    if (challenge.kind !== 'challengeRequired') {
+      throw new Error('se esperaba un reto de segundo factor')
+    }
+
+    const verified = await provider.verifySecondFactor({
+      email: 'admin@nexus.test',
+      challengeToken: challenge.challengeToken,
+      code: '123456',
+    })
+
+    expect(verified.kind).toBe('verified')
+
+    // El mismo reto no puede reutilizarse una vez consumido.
+    await expect(
+      provider.verifySecondFactor({
+        email: 'admin@nexus.test',
+        challengeToken: challenge.challengeToken,
+        code: '123456',
+      }),
+    ).resolves.toEqual({ kind: 'challengeExpired' })
+  })
+
+  it('rechaza un codigo de segundo factor incorrecto', async () => {
+    const provider = new FakeAuthenticationProvider(nextToken())
+    provider.seed({
+      email: 'admin@nexus.test',
+      password: VALID_PASSWORD,
+      requiresSecondFactor: true,
+      secondFactorCode: '123456',
+    })
+
+    const challenge = await provider.authenticate({
+      email: 'admin@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    if (challenge.kind !== 'challengeRequired') {
+      throw new Error('se esperaba un reto de segundo factor')
+    }
+
+    await expect(
+      provider.verifySecondFactor({
+        email: 'admin@nexus.test',
+        challengeToken: challenge.challengeToken,
+        code: '000000',
+      }),
+    ).resolves.toEqual({ kind: 'invalidCode' })
+  })
+
+  it('rechaza un token de reto desconocido', async () => {
+    const provider = new FakeAuthenticationProvider(nextToken())
+
+    await expect(
+      provider.verifySecondFactor({
+        email: 'admin@nexus.test',
+        challengeToken: 'challenge-inventado',
+        code: '123456',
+      }),
+    ).resolves.toEqual({ kind: 'challengeExpired' })
   })
 })
 
@@ -267,6 +420,7 @@ describe('loadConfig', () => {
   const PRODUCTION_ENV = {
     NODE_ENV: 'production',
     AUTH_MODE: 'jwt',
+    AUTHENTICATION_DRIVER: 'cognito',
     COGNITO_USER_POOL_ID: 'us-east-1_abc',
     COGNITO_CLIENT_ID: 'cliente',
   } as const

@@ -271,10 +271,54 @@ describe('Configuracion de autenticacion', () => {
     const config = loadConfig({
       NODE_ENV: 'production',
       AUTH_MODE: 'jwt',
+      AUTHENTICATION_DRIVER: 'cognito',
       COGNITO_USER_POOL_ID: 'us-east-1_abc',
       COGNITO_CLIENT_ID: 'cliente',
     })
 
     expect(config.cognito).toEqual({ userPoolId: 'us-east-1_abc', clientId: 'cliente' })
+    expect(config.authenticationDriver).toBe('cognito')
+  })
+
+  /**
+   * El mismo razonamiento que el BLOCKER de `AUTH_MODE`, aplicado al login:
+   * un binario de produccion no puede aceptar cualquier cuenta sembrada en
+   * memoria como si fuera real.
+   */
+  it('impide arrancar en produccion con el proveedor de autenticacion falso', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        AUTH_MODE: 'jwt',
+        COGNITO_USER_POOL_ID: 'us-east-1_abc',
+        COGNITO_CLIENT_ID: 'cliente',
+      }),
+    ).toThrow(ConfigurationError)
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        AUTH_MODE: 'jwt',
+        AUTHENTICATION_DRIVER: 'fake',
+        COGNITO_USER_POOL_ID: 'us-east-1_abc',
+        COGNITO_CLIENT_ID: 'cliente',
+      }),
+    ).toThrow(ConfigurationError)
+  })
+
+  it('exige el pool y el cliente cuando AUTHENTICATION_DRIVER es cognito, incluso sin AUTH_MODE=jwt', () => {
+    expect(() => loadConfig({ AUTHENTICATION_DRIVER: 'cognito' })).toThrow(ConfigurationError)
+
+    const config = loadConfig({
+      AUTHENTICATION_DRIVER: 'cognito',
+      COGNITO_USER_POOL_ID: 'us-east-1_abc',
+      COGNITO_CLIENT_ID: 'cliente',
+    })
+
+    expect(config.cognito).toEqual({ userPoolId: 'us-east-1_abc', clientId: 'cliente' })
+  })
+
+  it('AUTHENTICATION_DRIVER es fake por defecto', () => {
+    expect(loadConfig({}).authenticationDriver).toBe('fake')
   })
 })

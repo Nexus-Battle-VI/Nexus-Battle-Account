@@ -83,6 +83,16 @@ export class PostgresAccountRepository implements AccountRepositoryPort {
     return row === undefined ? null : await this.hydrate(row)
   }
 
+  async findByDisplayName(displayName: DisplayName): Promise<Account | null> {
+    const row = await this.db
+      .selectFrom('accounts')
+      .selectAll()
+      .where(sql`lower(display_name)`, '=', displayName.value.toLowerCase())
+      .executeTakeFirst()
+
+    return row === undefined ? null : await this.hydrate(row)
+  }
+
   async existsByEmail(email: EmailAddress): Promise<boolean> {
     const found = await this.db
       .selectFrom('accounts')
