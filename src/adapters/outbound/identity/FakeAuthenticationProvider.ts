@@ -1,3 +1,4 @@
+import { SecondFactorMethod } from '../../../application/ports/AuthenticationProviderPort'
 import type {
   AuthenticationCredentials,
   AuthenticationOutcome,
@@ -46,8 +47,16 @@ export class FakeAuthenticationProvider implements AuthenticationProviderPort {
   private readonly pendingChallenges = new Map<string, PendingChallenge>()
   private readonly nextToken: () => string
 
-  constructor(nextToken: () => string) {
+  /**
+   * Metodo que este doble anuncia al retar. Por defecto la aplicacion
+   * autenticadora, que es lo que el pool tiene aprovisionado; se puede cambiar
+   * para ejercitar los otros sin tocar el adaptador real.
+   */
+  readonly secondFactorMethod: SecondFactorMethod
+
+  constructor(nextToken: () => string, secondFactorMethod?: SecondFactorMethod) {
     this.nextToken = nextToken
+    this.secondFactorMethod = secondFactorMethod ?? SecondFactorMethod.AuthenticatorApp
   }
 
   seed(credential: SeededCredential): void {
@@ -73,7 +82,13 @@ export class FakeAuthenticationProvider implements AuthenticationProviderPort {
         code: stored.secondFactorCode,
       })
 
-      return Promise.resolve({ kind: 'challengeRequired', challengeToken })
+      // El doble declara el metodo igual que el adaptador real: si no, una
+      // prueba podria pasar con un contrato que produccion no cumple.
+      return Promise.resolve({
+        kind: 'challengeRequired',
+        challengeToken,
+        method: this.secondFactorMethod,
+      })
     }
 
     return Promise.resolve({

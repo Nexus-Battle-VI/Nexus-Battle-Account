@@ -39,14 +39,33 @@ export interface AuthenticationCredentials {
  * Resultado de la primera etapa (usuario + contrasena).
  *
  * `challengeRequired` modela el segundo factor de forma agnostica al
- * transporte: el proveedor decide si reta o no, y con que mecanismo. HU-02
- * pide correo; el ADR-004 vigente en Infrastructure tiene aprovisionado TOTP
- * porque el correo exige SES, todavia no decidido. Este puerto no asume
- * ninguno de los dos: solo transporta el reto tal como el proveedor lo emite.
+ * transporte: el proveedor decide si reta o no, y con que mecanismo. Este
+ * puerto no asume ninguno: transporta el reto tal como el proveedor lo emite.
+ *
+ * `method` existe porque quien tiene que responder necesita saber DONDE mirar.
+ * Sin el, la interfaz solo podia adivinar, y adivinaba mal: anunciaba "te
+ * enviamos un codigo por correo" mientras el pool retaba con la aplicacion
+ * autenticadora y no se enviaba ningun correo. Un mensaje que manda a alguien a
+ * revisar un buzon vacio es peor que no decir nada.
+ *
+ * El `challengeToken` sigue siendo OPACO: el metodo se declara aparte
+ * precisamente para que nadie tenga que destriparlo para saberlo.
  */
+export const SecondFactorMethod = {
+  AuthenticatorApp: 'AUTHENTICATOR_APP',
+  Email: 'EMAIL',
+  Sms: 'SMS',
+} as const
+
+export type SecondFactorMethod = (typeof SecondFactorMethod)[keyof typeof SecondFactorMethod]
+
 export type AuthenticationOutcome =
   | { readonly kind: 'authenticated'; readonly accessToken: string; readonly expiresIn: number }
-  | { readonly kind: 'challengeRequired'; readonly challengeToken: string }
+  | {
+      readonly kind: 'challengeRequired'
+      readonly challengeToken: string
+      readonly method: SecondFactorMethod
+    }
   | { readonly kind: 'invalidCredentials' }
 
 export interface SecondFactorVerification {

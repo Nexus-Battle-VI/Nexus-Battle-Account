@@ -76,7 +76,11 @@ export class LoginAccount {
     }
 
     if (outcome.kind === 'challengeRequired') {
-      return { kind: 'secondFactorRequired', challengeToken: outcome.challengeToken }
+      return {
+        kind: 'secondFactorRequired',
+        challengeToken: outcome.challengeToken,
+        method: outcome.method,
+      }
     }
 
     if (isAdministrativeRole(account.currentRoles)) {

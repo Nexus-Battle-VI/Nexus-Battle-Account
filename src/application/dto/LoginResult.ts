@@ -1,3 +1,5 @@
+import type { SecondFactorMethod } from '../ports/AuthenticationProviderPort'
+
 import type { AccountDto } from './AccountDto'
 
 /**
@@ -40,7 +42,11 @@ export type LoginOutcome =
       /** Vigencia del `accessToken` en segundos, informada por el proveedor. */
       readonly expiresIn: number
     }
-  | { readonly kind: 'secondFactorRequired'; readonly challengeToken: string }
+  | {
+      readonly kind: 'secondFactorRequired'
+      readonly challengeToken: string
+      readonly method: SecondFactorMethod
+    }
   | { readonly kind: 'secondFactorInvalid' }
   | { readonly kind: 'invalidCredentials' }
   | { readonly kind: 'providerUnavailable' }
