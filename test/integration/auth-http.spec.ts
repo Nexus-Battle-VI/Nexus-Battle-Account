@@ -17,6 +17,13 @@ import { IDENTITY_SIGN_UP } from '../../src/application/ports/IdentitySignUpPort
 import { ROLE_DIRECTORY, RoleDirectoryError } from '../../src/application/ports/RoleDirectoryPort'
 import { InMemoryIdentitySignUp } from '../../src/adapters/outbound/identity/InMemoryIdentitySignUp'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
+import { MFA_STATUS } from '../../src/application/ports/MfaStatusPort'
+import { SESSION_REVOCATION } from '../../src/application/ports/SessionRevocationPort'
+import { ACCOUNT_REPOSITORY } from '../../src/application/ports/AccountRepositoryPort'
+import type { AccountRepositoryPort } from '../../src/application/ports/AccountRepositoryPort'
+import { InMemoryMfaStatus } from '../../src/adapters/outbound/identity/InMemoryMfaStatus'
+import { InMemorySessionRevocation } from '../../src/adapters/outbound/identity/InMemorySessionRevocation'
+import { buildActiveAccount } from '../support/account-factory'
 
 /**
  * Integracion con la autenticacion ACTIVA.
@@ -46,6 +53,10 @@ const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
   'token-administrador': {
     subject: 'sujeto-administrador',
     roles: new Set([Role.Player, Role.Administrator]),
+  },
+  'token-super-administrador': {
+    subject: 'sujeto-super-administrador',
+    roles: new Set([Role.Player, Role.SuperAdministrator]),
   },
 }
 
@@ -90,6 +101,10 @@ describe('API de cuentas con autenticacion activa', () => {
       // que es el mismo sujeto que llevan los tokens de este arnes.
       .overrideProvider(IDENTITY_SIGN_UP)
       .useValue(new InMemoryIdentitySignUp())
+      .overrideProvider(MFA_STATUS)
+      .useValue(new InMemoryMfaStatus())
+      .overrideProvider(SESSION_REVOCATION)
+      .useValue(new InMemorySessionRevocation())
       .compile()
 
     app = moduleRef.createNestApplication()
@@ -99,6 +114,16 @@ describe('API de cuentas con autenticacion activa', () => {
     )
 
     await app.init()
+
+    await app.get<AccountRepositoryPort>(ACCOUNT_REPOSITORY).save(
+      buildActiveAccount({
+        id: 'super-administrador',
+        subject: 'sujeto-super-administrador',
+        email: 'super@nexus.test',
+        displayName: 'Super Root',
+        roles: [Role.Player, Role.SuperAdministrator],
+      }),
+    )
 
     // El alta es PUBLICA: no lleva testimonio. La identidad la crea el propio
     // endpoint en el proveedor (el doble deriva `sub:ana@nexus.test`).
@@ -241,6 +266,84 @@ describe('API de cuentas con autenticacion activa', () => {
 
       expect(response.status).toBe(200)
       expect(response.body).toMatchObject({ email: 'ana@nexus.test' })
+    })
+
+    it('un SUPER_ADMINISTRATOR puro satisface una ruta ADMINISTRATOR', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/accounts/${accountId}`)
+        .set('Authorization', bearer('token-super-administrador'))
+
+      expect(response.status).toBe(200)
+    })
+  })
+
+  describe('Gestion de roles HU-39', () => {
+    const search = () => `/api/accounts/search?email=${encodeURIComponent('ana@nexus.test')}`
+
+    it('protege la busqueda con SUPER_ADMINISTRATOR en un solo sentido', async () => {
+      expect((await request(app.getHttpServer()).get(search())).status).toBe(401)
+
+      for (const token of ['token-jugador', 'token-moderador', 'token-administrador']) {
+        const response = await request(app.getHttpServer())
+          .get(search())
+          .set('Authorization', bearer(token))
+
+        expect(response.status).toBe(403)
+      }
+    })
+
+    it('resuelve search antes que :id y devuelve el estado TOTP', async () => {
+      const response = await request(app.getHttpServer())
+        .get(search())
+        .set('Authorization', bearer('token-super-administrador'))
+
+      expect(response.status).toBe(200)
+      expect(response.body).toMatchObject({
+        id: accountId,
+        email: 'ana@nexus.test',
+        mfaEnrolled: false,
+      })
+    })
+
+    it('solo el Super Administrador concede MODERATOR', async () => {
+      const denied = await request(app.getHttpServer())
+        .post(`/api/accounts/${accountId}/roles`)
+        .set('Authorization', bearer('token-administrador'))
+        .send({ role: Role.Moderator })
+      expect(denied.status).toBe(403)
+
+      const allowed = await request(app.getHttpServer())
+        .post(`/api/accounts/${accountId}/roles`)
+        .set('Authorization', bearer('token-super-administrador'))
+        .send({ role: Role.Moderator })
+      expect(allowed.status).toBe(200)
+      expect(allowed.body.roles).toContain(Role.Moderator)
+    })
+
+    it('rechaza ADMINISTRATOR sin TOTP y no acepta roles fuera del vocabulario', async () => {
+      const noMfa = await request(app.getHttpServer())
+        .post(`/api/accounts/${accountId}/roles`)
+        .set('Authorization', bearer('token-super-administrador'))
+        .send({ role: Role.Administrator })
+      expect(noMfa.status).toBe(409)
+      expect(noMfa.body.message).toMatch(/aplicacion autenticadora/)
+
+      for (const role of [Role.SuperAdministrator, 'INVENTADO']) {
+        const response = await request(app.getHttpServer())
+          .post(`/api/accounts/${accountId}/roles`)
+          .set('Authorization', bearer('token-super-administrador'))
+          .send({ role })
+
+        expect(response.status).toBe(400)
+      }
+    })
+
+    it('rechaza retirar PLAYER', async () => {
+      const response = await request(app.getHttpServer())
+        .delete(`/api/accounts/${accountId}/roles/${Role.Player}`)
+        .set('Authorization', bearer('token-super-administrador'))
+
+      expect(response.status).toBe(400)
     })
   })
 

@@ -242,7 +242,7 @@ describe('API de sesiones (HU-02)', () => {
       throw new Error('la cuenta de la prueba deberia existir')
     }
 
-    stored.grantRole(Role.Moderator, new Set([Role.Administrator]))
+    stored.grantRole(Role.Moderator, new Set([Role.SuperAdministrator]))
     await accounts.save(stored)
 
     const response = await request(app.getHttpServer())
