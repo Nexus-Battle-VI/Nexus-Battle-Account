@@ -1,6 +1,17 @@
 import { ApiProperty } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
-import { Allow, IsBoolean, IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator'
+import {
+  Allow,
+  IsBoolean,
+  IsEmail,
+  IsIn,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator'
+
+import { Role, type Role as RoleValue } from '../../../domain/entities/Role'
 
 /**
  * Contrato de entrada del registro (multipart/form-data).
@@ -88,6 +99,30 @@ export class AccountResponse {
 
   @ApiProperty({ example: ['PLAYER'], isArray: true, type: String })
   readonly roles!: readonly string[]
+}
+
+export class FindAccountByEmailQuery {
+  @ApiProperty({ example: 'jugador@nexus.test' })
+  @IsEmail({}, { message: 'El correo debe tener un formato valido.' })
+  @MaxLength(254)
+  email!: string
+}
+
+export class AssignRoleRequest {
+  @ApiProperty({ enum: [Role.Moderator, Role.Administrator], example: Role.Moderator })
+  @IsString()
+  @IsIn([Role.Moderator, Role.Administrator], {
+    message: 'El rol debe ser MODERATOR o ADMINISTRATOR.',
+  })
+  role!: RoleValue
+}
+
+export class ManagedAccountResponse extends AccountResponse {
+  @ApiProperty({
+    example: true,
+    description: 'Indica si Cognito confirma SOFTWARE_TOKEN_MFA para la cuenta.',
+  })
+  readonly mfaEnrolled!: boolean
 }
 
 export class ConfirmRegistrationRequest {

@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -10,6 +11,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   ServiceUnavailableException,
   UnauthorizedException,
   UploadedFile,
@@ -30,6 +32,8 @@ import {
   NicknameBlacklistedError,
 } from '../../../application/errors/ApplicationError'
 import { RoleDirectoryError } from '../../../application/ports/RoleDirectoryPort'
+import { MfaStatusError } from '../../../application/ports/MfaStatusPort'
+import { SessionRevocationError } from '../../../application/ports/SessionRevocationPort'
 import { IdentitySignUpError } from '../../../application/ports/IdentitySignUpPort'
 import type { RegisterSecurityAnswer } from '../../../application/dto/RegisterAccountCommand'
 import { RegisterAccount } from '../../../application/use-cases/RegisterAccount'
@@ -37,7 +41,10 @@ import { ConfirmRegistration } from '../../../application/use-cases/ConfirmRegis
 import { GetAccount } from '../../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../../application/use-cases/VerifyAccount'
-import { Role } from '../../../domain/entities/Role'
+import { AssignRole } from '../../../application/use-cases/AssignRole'
+import { FindAccountByEmail } from '../../../application/use-cases/FindAccountByEmail'
+import { RevokeRole } from '../../../application/use-cases/RevokeRole'
+import { Role, isRole } from '../../../domain/entities/Role'
 import { CurrentIdentity, Public, Roles } from './auth/decorators'
 import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
 import {
@@ -46,8 +53,18 @@ import {
   GET_OWN_ACCOUNT,
   VERIFY_ACCOUNT,
   CONFIRM_REGISTRATION,
+  FIND_ACCOUNT_BY_EMAIL,
+  ASSIGN_ROLE,
+  REVOKE_ROLE,
 } from './tokens'
-import { AccountResponse, ConfirmRegistrationRequest, RegisterAccountRequest } from './accounts.dto'
+import {
+  AccountResponse,
+  AssignRoleRequest,
+  ConfirmRegistrationRequest,
+  FindAccountByEmailQuery,
+  ManagedAccountResponse,
+  RegisterAccountRequest,
+} from './accounts.dto'
 
 interface UploadedAvatar {
   readonly mimetype: string
@@ -66,6 +83,9 @@ export class AccountsController {
     @Inject(GET_OWN_ACCOUNT) private readonly getOwnAccount: GetOwnAccount,
     @Inject(VERIFY_ACCOUNT) private readonly verifyAccount: VerifyAccount,
     @Inject(CONFIRM_REGISTRATION) private readonly confirmRegistration: ConfirmRegistration,
+    @Inject(FIND_ACCOUNT_BY_EMAIL) private readonly findAccountByEmail: FindAccountByEmail,
+    @Inject(ASSIGN_ROLE) private readonly assignRole: AssignRole,
+    @Inject(REVOKE_ROLE) private readonly revokeRole: RevokeRole,
   ) {}
 
   /**
@@ -165,6 +185,72 @@ export class AccountsController {
     }
   }
 
+  /** Debe permanecer antes de `:id`: Nest resolveria "search" como identificador. */
+  @Roles(Role.SuperAdministrator)
+  @Get('search')
+  @ApiOperation({ summary: 'Busca una cuenta por correo para gestionar sus roles' })
+  @ApiResponse({ status: 200, type: ManagedAccountResponse })
+  @ApiResponse({ status: 403, description: 'Solo el Super Administrador puede gestionar roles' })
+  async search(@Query() query: FindAccountByEmailQuery): Promise<ManagedAccountResponse> {
+    try {
+      return await this.findAccountByEmail.execute(query.email)
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  @Roles(Role.SuperAdministrator)
+  @Post(':id/roles')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Concede MODERATOR o ADMINISTRATOR a una cuenta' })
+  async assign(
+    @CurrentIdentity() identity: VerifiedIdentity,
+    @Param('id') id: string,
+    @Body() body: AssignRoleRequest,
+  ): Promise<AccountResponse> {
+    try {
+      const outcome = await this.assignRole.execute({
+        actorSubject: identity.subject,
+        targetAccountId: id,
+        role: body.role,
+      })
+
+      if (outcome.kind === 'mfaRequired') {
+        throw new ConflictException(
+          'La cuenta debe inscribir su aplicacion autenticadora antes de recibir un rol administrativo.',
+        )
+      }
+
+      return outcome.account
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  @Roles(Role.SuperAdministrator)
+  @Delete(':id/roles/:role')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Retira un rol y cierra las sesiones de la cuenta' })
+  async revoke(
+    @CurrentIdentity() identity: VerifiedIdentity,
+    @Param('id') id: string,
+    @Param('role') rawRole: string,
+  ): Promise<AccountResponse> {
+    if (!isRole(rawRole)) {
+      throw new BadRequestException('El rol indicado no existe.')
+    }
+
+    try {
+      return await this.revokeRole.execute({
+        actorSubject: identity.subject,
+        targetAccountId: id,
+        role: rawRole,
+      })
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
   @Roles(Role.Administrator)
   @Get(':id')
   @ApiOperation({ summary: 'Recupera una cuenta por su identificador. Requiere ADMINISTRATOR' })
@@ -235,7 +321,12 @@ export class AccountsController {
      * registro **falla cerrado** a proposito -no se guarda una cuenta cuyo rol
      * no viajaria en el testimonio- y quien llama merece saber por que.
      */
-    if (error instanceof RoleDirectoryError || error instanceof IdentitySignUpError) {
+    if (
+      error instanceof RoleDirectoryError ||
+      error instanceof IdentitySignUpError ||
+      error instanceof MfaStatusError ||
+      error instanceof SessionRevocationError
+    ) {
       return new ServiceUnavailableException(
         'El proveedor de identidad no esta disponible. Intentelo de nuevo mas tarde.',
       )

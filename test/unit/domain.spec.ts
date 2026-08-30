@@ -11,6 +11,7 @@ import { PasswordPolicy } from '../../src/domain/policies/PasswordPolicy'
 import { AT, buildAccount, defaultAvatarMetadata } from '../support/account-factory'
 
 const adminRoles = new Set<Role>([Role.Administrator])
+const superAdministratorRoles = new Set<Role>([Role.SuperAdministrator])
 const playerRoles = new Set<Role>([Role.Player])
 
 describe('EmailAddress', () => {
@@ -106,8 +107,9 @@ describe('RolePolicy', () => {
     expect(RolePolicy.isRemovable(Role.Moderator)).toBe(true)
   })
 
-  it('solo el administrador gestiona roles', () => {
-    expect(RolePolicy.canManageRoles(adminRoles)).toBe(true)
+  it('solo el Super Administrador gestiona roles', () => {
+    expect(RolePolicy.canManageRoles(superAdministratorRoles)).toBe(true)
+    expect(RolePolicy.canManageRoles(adminRoles)).toBe(false)
     expect(RolePolicy.canManageRoles(playerRoles)).toBe(false)
   })
 })
@@ -256,32 +258,32 @@ describe('Account', () => {
     expect(account.pullEvents()).toHaveLength(0)
   })
 
-  it('permite a un administrador conceder y retirar roles', () => {
+  it('permite al Super Administrador conceder y retirar roles', () => {
     const account = buildAccount()
 
-    account.grantRole(Role.Moderator, adminRoles)
+    account.grantRole(Role.Moderator, superAdministratorRoles)
     expect(account.hasRole(Role.Moderator)).toBe(true)
 
-    account.revokeRole(Role.Moderator, adminRoles)
+    account.revokeRole(Role.Moderator, superAdministratorRoles)
     expect(account.hasRole(Role.Moderator)).toBe(false)
   })
 
-  it('impide gestionar roles sin permiso de administrador', () => {
+  it('impide gestionar roles sin permiso de Super Administrador', () => {
     const account = buildAccount()
 
     expect(() => {
       account.grantRole(Role.Moderator, playerRoles)
-    }).toThrow(/Solo un administrador/)
+    }).toThrow(/Solo un Super Administrador/)
     expect(() => {
       account.revokeRole(Role.Player, playerRoles)
-    }).toThrow(/Solo un administrador/)
+    }).toThrow(/Solo un Super Administrador/)
   })
 
   it('impide retirar el rol base', () => {
     const account = buildAccount()
 
     expect(() => {
-      account.revokeRole(Role.Player, adminRoles)
+      account.revokeRole(Role.Player, superAdministratorRoles)
     }).toThrow(/minimo de toda cuenta/)
   })
 
