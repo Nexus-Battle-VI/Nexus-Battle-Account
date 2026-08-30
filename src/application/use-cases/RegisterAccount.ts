@@ -14,6 +14,7 @@ import type { NicknameBlacklistPort } from '../ports/NicknameBlacklistPort'
 import type { NotificationRequestPort } from '../ports/NotificationRequestPort'
 import type { RoleDirectoryPort } from '../ports/RoleDirectoryPort'
 import type { SecurityQuestionCatalogPort } from '../ports/SecurityQuestionCatalogPort'
+import type { VerifiedEmailDirectoryPort } from '../ports/VerifiedEmailDirectoryPort'
 import {
   AccountAlreadyExistsError,
   DisplayNameAlreadyTakenError,
@@ -33,6 +34,7 @@ export interface RegisterAccountDependencies {
   readonly blacklist: NicknameBlacklistPort
   readonly questions: SecurityQuestionCatalogPort
   readonly roleDirectory: RoleDirectoryPort
+  readonly verifiedEmailDirectory: VerifiedEmailDirectoryPort
 }
 
 /**
@@ -95,6 +97,11 @@ export class RegisterAccount {
       throw new IdentityRequiredError()
     }
 
+    // El access token autoriza la peticion y transporta los grupos, pero no
+    // contiene `email` ni `email_verified`. La prueba del buzon se consulta al
+    // proveedor por el sujeto; nunca se deduce del formulario.
+    const verifiedEmail = await this.deps.verifiedEmailDirectory.findVerifiedEmail(subject)
+
     const accountId = AccountId.create(this.deps.ids.generate())
     let storedKey: string | null = null
     let account: Account
@@ -116,12 +123,11 @@ export class RegisterAccount {
         firstNames,
         lastNames,
         termsAccepted: true,
-        // Se compara NORMALIZADO y contra el correo del testimonio, no contra
-        // el del formulario. Si alguien registra un correo distinto del que el
-        // proveedor verifico, la cuenta nace pendiente: la prueba que existe es
-        // sobre el otro buzon.
+        // Se compara NORMALIZADO y contra el correo consultado al proveedor, no
+        // contra una afirmacion del cuerpo. Si son distintos, la cuenta nace
+        // pendiente: la prueba que existe es sobre otro buzon.
         emailAlreadyVerified:
-          command.verifiedEmail?.trim().toLowerCase() === email.value.toLowerCase(),
+          verifiedEmail !== null && verifiedEmail.trim().toLowerCase() === email.value,
         avatar: AvatarMetadata.create({
           storageKey: stored.storageKey,
           mimeType: avatarUpload.mimeType,

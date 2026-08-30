@@ -34,6 +34,8 @@ Account **no posee credenciales**. No almacena contraseñas, hashes, sales, toke
 |                          CognitoTokenVerifier,                 |
 |                          InMemoryRoleDirectory,                |
 |                          CognitoRoleDirectory,                 |
+|                          InMemoryVerifiedEmailDirectory,       |
+|                          CognitoVerifiedEmailDirectory,        |
 |                          LoggingNotificationRequester,        |
 |                          LocalAvatarStorage,                   |
 |                          SystemClock, UuidGenerator          |
@@ -52,6 +54,7 @@ Las dependencias apuntan siempre hacia el dominio. El dominio no conoce ninguna 
 | `AccountRepositoryPort`       | Persistir y recuperar el agregado, incluida la busqueda por apodo (HU-02)                                | `InMemoryAccountRepository` / `PostgresAccountRepository`                                           |
 | `AuthenticationProviderPort`  | Verificacion de contrasena y segundo factor (HU-02)                                                      | `FakeAuthenticationProvider` / `CognitoAuthenticationProvider`, elegido por `AUTHENTICATION_DRIVER` |
 | `RoleDirectoryPort`           | Refleja en el proveedor el rol que este servicio decide. Direccion unica: Account decide, el pool recoge | `InMemoryRoleDirectory` / `CognitoRoleDirectory`, segun haya proveedor configurado                  |
+| `VerifiedEmailDirectoryPort`  | Consulta el correo que el proveedor verifico para el sujeto; no confia en el formulario ni en el token   | `InMemoryVerifiedEmailDirectory` / `CognitoVerifiedEmailDirectory`                                  |
 | `AvatarStoragePort`           | Guardar y borrar bytes de avatar                                                                         | `LocalAvatarStorage` (AWS sustituye el adaptador)                                                   |
 | `NicknameBlacklistPort`       | Consultar la lista negra vigente de apodos                                                               | `InMemoryNicknameBlacklist` / `PostgresNicknameBlacklist`                                           |
 | `SecurityQuestionCatalogPort` | Catálogo activo de preguntas de seguridad                                                                | En memoria / `PostgresSecurityQuestionCatalog`                                                      |
@@ -82,16 +85,22 @@ No se aplica CQRS ni Event Sourcing: el contexto no tiene un modelo de lectura d
    respuestas y avatar                         -> falla temprano, sin efectos
 2. Comprobar unicidad de correo y apodo        -> falla temprano, sin efectos
 3. Consultar lista negra vigente               -> falla temprano, sin efectos
-4. Alta en el proveedor de identidad           -> primer efecto externo
-5. Almacenar avatar                            -> segundo efecto externo
-6. Persistir cuenta, roles y hashes            -> transaccion PostgreSQL;
+4. Consultar por sujeto el correo verificado   -> AdminGetUser; si falla,
+                                                 responde 503 sin efectos
+5. Almacenar avatar                            -> primer efecto externo
+6. Crear el agregado                           -> ACTIVE solo si ambos correos
+                                                 coinciden normalizados; si no,
+                                                 PENDING_VERIFICATION
+7. Reflejar el rol en el proveedor             -> antes de persistir; si falla,
+                                                 se compensa el avatar
+8. Persistir cuenta, roles y hashes            -> transaccion PostgreSQL;
                                                  si falla, se borra el avatar
-                                                 y se revoca solo el sujeto
-                                                 creado en esta peticion
-7. Solicitar el correo                         -> no compensa: la cuenta ya es valida
+9. Solicitar el correo                         -> no compensa: la cuenta ya es valida
 ```
 
-El paso 7 no participa de la compensación de forma deliberada. Si la solicitud de notificación falla, la cuenta existe y es correcta; deshacer el registro por no haber podido enviar un correo de bienvenida sería peor que reintentar la notificación. El error se propaga para que quede registrado, pero no revierte nada.
+El paso 9 no participa de la compensación de forma deliberada. Si la solicitud de notificación falla, la cuenta existe y es correcta; deshacer el registro por no haber podido enviar un correo de bienvenida sería peor que reintentar la notificación. El error se propaga para que quede registrado, pero no revierte nada.
+
+El access token se conserva para autorización y RBAC: contiene `sub` y `cognito:groups`, no los atributos de perfil `email`/`email_verified`. Por eso el correo verificado se obtiene mediante `AdminGetUser` y se compara normalizado con el correo validado del formulario. Una respuesta sin correo verificado produce `PENDING_VERIFICATION`; una caída del proveedor falla cerrada y no crea la cuenta.
 
 ## Estados de la cuenta
 
@@ -226,6 +235,7 @@ El correo electrónico es un dato personal: la observabilidad registra el **domi
 
 - ~~El alta de identidad (HU-01) sigue simulada en local.~~ **Superado el 2026-08-29**: este servicio no da de alta identidades y `IdentityProviderPort` se eliminó. El alta ocurre en la pantalla del proveedor, de modo que quien llega a `POST /api/accounts` ya tiene con qué autenticarse.
 - `CognitoAuthenticationProvider` no está confirmado contra la configuración real: usa `AdminInitiateAuth`/`AdminRespondToAuthChallenge` (`ADMIN_USER_PASSWORD_AUTH`), que exige permiso IAM en el rol de ejecución del runtime y `ALLOW_ADMIN_USER_PASSWORD_AUTH` en `ExplicitAuthFlows`. ADR-004 no confirma ninguno de los dos. Si faltan, el login real falla (no las pruebas, que usan `FakeAuthenticationProvider`).
+- `CognitoVerifiedEmailDirectory` exige `cognito-idp:AdminGetUser` acotado al ARN del pool. El rol de instancia actual solo enumera autenticación y reflejo de grupos; desplegar este cambio antes de ampliar Infrastructure hace que el registro falle cerrado con 503.
 - El segundo factor administrativo (HU-02) usa el reto que el proveedor emita, pero el mecanismo aprobado por el cliente (correo) no coincide con el aprovisionado en el pool (TOTP): el correo exige SES, decisión todavía pendiente. Ver ADR-004 en Nexus-Battle-Infrastructure.
 - Los bytes del avatar viven fuera de PostgreSQL (`AvatarStoragePort`). En local se usa disco; AWS sustituye el adaptador.
 - Las solicitudes de notificación se registran en la observabilidad con la forma exacta del mensaje, pero no se publican en una cola. Depende de ADR-006.

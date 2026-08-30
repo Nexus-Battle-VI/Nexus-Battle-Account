@@ -19,11 +19,16 @@ import { InMemoryNicknameBlacklist } from '../../src/adapters/outbound/persisten
 import { InMemorySecurityQuestionCatalog } from '../../src/adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
 import { FakeAuthenticationProvider } from '../../src/adapters/outbound/identity/FakeAuthenticationProvider'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
+import { InMemoryVerifiedEmailDirectory } from '../../src/adapters/outbound/identity/InMemoryVerifiedEmailDirectory'
 import {
   RoleDirectoryError,
   type RoleDirectoryPort,
 } from '../../src/application/ports/RoleDirectoryPort'
 import { AuthenticationProviderError } from '../../src/application/ports/AuthenticationProviderPort'
+import {
+  VerifiedEmailDirectoryError,
+  type VerifiedEmailDirectoryPort,
+} from '../../src/application/ports/VerifiedEmailDirectoryPort'
 import { InMemoryAvatarStorage } from '../../src/adapters/outbound/storage/InMemoryAvatarStorage'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { Role } from '../../src/domain/entities/Role'
@@ -59,16 +64,22 @@ interface Harness {
   avatars: InMemoryAvatarStorage
   blacklist: InMemoryNicknameBlacklist
   roleDirectory: InMemoryRoleDirectory
+  verifiedEmailDirectory: InMemoryVerifiedEmailDirectory
 }
 
 const buildHarness = (
-  overrides: { accounts?: AccountRepositoryPort; roleDirectory?: RoleDirectoryPort } = {},
+  overrides: {
+    accounts?: AccountRepositoryPort
+    roleDirectory?: RoleDirectoryPort
+    verifiedEmailDirectory?: VerifiedEmailDirectoryPort
+  } = {},
 ): Harness => {
   const accounts = new InMemoryAccountRepository()
   const notifier = new RecordingNotifier()
   const avatars = new InMemoryAvatarStorage()
   const blacklist = new InMemoryNicknameBlacklist()
   const roleDirectory = new InMemoryRoleDirectory()
+  const verifiedEmailDirectory = new InMemoryVerifiedEmailDirectory()
   const clock = { now: (): Date => AT }
   const ids = { generate: sequence('acc') }
   const repository = overrides.accounts ?? accounts
@@ -79,6 +90,7 @@ const buildHarness = (
     avatars,
     blacklist,
     roleDirectory,
+    verifiedEmailDirectory,
     registerAccount: new RegisterAccount({
       accounts: repository,
       notifications: notifier,
@@ -88,6 +100,7 @@ const buildHarness = (
       blacklist,
       questions: new InMemorySecurityQuestionCatalog(),
       roleDirectory: overrides.roleDirectory ?? roleDirectory,
+      verifiedEmailDirectory: overrides.verifiedEmailDirectory ?? verifiedEmailDirectory,
     }),
     getAccount: new GetAccount(repository),
     verifyAccount: new VerifyAccount({ accounts: repository, clock }),
@@ -168,6 +181,41 @@ describe('RegisterAccount', () => {
 
     expect(result.email).toBe('jugador@nexus.test')
     expect(result.displayName).toBe('Ana Ramirez')
+  })
+
+  it('nace ACTIVE cuando el correo verificado del proveedor coincide normalizado', async () => {
+    const harness = buildHarness()
+    harness.verifiedEmailDirectory.setVerifiedEmail(command.subject!, '  JUGADOR@Nexus.TEST  ')
+
+    const result = await harness.registerAccount.execute(command)
+
+    expect(result.status).toBe(AccountStatus.Active)
+  })
+
+  it('nace PENDING_VERIFICATION cuando el proveedor verifico otro buzon', async () => {
+    const harness = buildHarness()
+    harness.verifiedEmailDirectory.setVerifiedEmail(command.subject!, 'otra@nexus.test')
+
+    const result = await harness.registerAccount.execute(command)
+
+    expect(result.status).toBe(AccountStatus.PendingVerification)
+  })
+
+  it('no crea la cuenta cuando no puede consultar el correo verificado', async () => {
+    const providerDown: VerifiedEmailDirectoryPort = {
+      findVerifiedEmail: () =>
+        Promise.reject(new VerifiedEmailDirectoryError('el proveedor no responde')),
+    }
+    const harness = buildHarness({ verifiedEmailDirectory: providerDown })
+
+    await expect(harness.registerAccount.execute(command)).rejects.toBeInstanceOf(
+      VerifiedEmailDirectoryError,
+    )
+
+    expect(harness.accounts.size).toBe(0)
+    expect(harness.avatars.size).toBe(0)
+    expect(harness.roleDirectory.rolesOf(command.subject!)).toEqual([])
+    expect(harness.notifier.requested).toEqual([])
   })
 
   it('rechaza un correo ya registrado sin tocar el proveedor de identidad', async () => {

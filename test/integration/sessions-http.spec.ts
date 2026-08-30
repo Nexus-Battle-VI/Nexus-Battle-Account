@@ -18,6 +18,8 @@ import {
 } from '../../src/application/ports/TokenVerifierPort'
 import { ROLE_DIRECTORY } from '../../src/application/ports/RoleDirectoryPort'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
+import { InMemoryVerifiedEmailDirectory } from '../../src/adapters/outbound/identity/InMemoryVerifiedEmailDirectory'
+import { VERIFIED_EMAIL_DIRECTORY } from '../../src/application/ports/VerifiedEmailDirectoryPort'
 import { registerAccountRequest } from '../support/http-register'
 import { VALID_PASSWORD, buildActiveAccount } from '../support/account-factory'
 
@@ -39,12 +41,10 @@ import { VALID_PASSWORD, buildActiveAccount } from '../support/account-factory'
 const FIXED_IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
   'token-registro': {
     subject: 'sujeto-registro',
-    email: 'registro@nexus.test',
     roles: new Set([Role.Player]),
   },
   'token-administrador-verificador': {
     subject: 'sujeto-admin-verificador',
-    email: 'verificador@nexus.test',
     roles: new Set([Role.Player, Role.Administrator]),
   },
 }
@@ -86,6 +86,8 @@ describe('API de sesiones (HU-02)', () => {
       // cuando el rol no se puede reflejar: es el comportamiento buscado.
       .overrideProvider(ROLE_DIRECTORY)
       .useValue(new InMemoryRoleDirectory())
+      .overrideProvider(VERIFIED_EMAIL_DIRECTORY)
+      .useValue(new InMemoryVerifiedEmailDirectory())
       .compile()
 
     app = moduleRef.createNestApplication()
@@ -122,7 +124,7 @@ describe('API de sesiones (HU-02)', () => {
   ): Promise<{ id: string; subject: string }> => {
     const registrationToken = `token-registro-${email}`
     const subject = `sujeto-${email}`
-    dynamicIdentities.set(registrationToken, { subject, email, roles: new Set([Role.Player]) })
+    dynamicIdentities.set(registrationToken, { subject, roles: new Set([Role.Player]) })
 
     const created = await registerAccountRequest(app, { email, nickname, password }).set(
       'Authorization',
@@ -265,7 +267,6 @@ describe('API de sesiones (HU-02)', () => {
     const accessToken = login.body.accessToken as string
     dynamicIdentities.set(accessToken, {
       subject,
-      email: 'ca05@nexus.test',
       roles: new Set([Role.Player]),
     })
 

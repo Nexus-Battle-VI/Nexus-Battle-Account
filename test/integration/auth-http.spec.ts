@@ -15,6 +15,11 @@ import {
 } from '../../src/application/ports/TokenVerifierPort'
 import { ROLE_DIRECTORY, RoleDirectoryError } from '../../src/application/ports/RoleDirectoryPort'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
+import { InMemoryVerifiedEmailDirectory } from '../../src/adapters/outbound/identity/InMemoryVerifiedEmailDirectory'
+import {
+  VERIFIED_EMAIL_DIRECTORY,
+  VerifiedEmailDirectoryError,
+} from '../../src/application/ports/VerifiedEmailDirectoryPort'
 
 /**
  * Integracion con la autenticacion ACTIVA.
@@ -33,24 +38,28 @@ import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMe
 const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
   'token-jugador': {
     subject: 'sujeto-jugador',
-    email: 'jugador@nexus.test',
     roles: new Set([Role.Player]),
   },
   'token-moderador': {
     subject: 'sujeto-moderador',
-    email: 'moderador@nexus.test',
     roles: new Set([Role.Player, Role.Moderator]),
   },
   'token-administrador': {
     subject: 'sujeto-administrador',
-    email: 'admin@nexus.test',
     roles: new Set([Role.Player, Role.Administrator]),
   },
   // Identidad verificada que todavia NO tiene cuenta: el estado exacto de quien
   // acaba de darse de alta en el proveedor y llega aqui a crear la suya.
   'token-sin-cuenta': {
     subject: 'sujeto-sin-cuenta',
-    email: 'sin-proveedor@nexus.test',
+    roles: new Set([Role.Player]),
+  },
+  'token-correo-distinto': {
+    subject: 'sujeto-correo-distinto',
+    roles: new Set([Role.Player]),
+  },
+  'token-proveedor-caido': {
+    subject: 'sujeto-proveedor-caido',
     roles: new Set([Role.Player]),
   },
   // Firma valida, `sub` inservible. El verificador solo rechaza el `sub`
@@ -59,7 +68,6 @@ const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
   // `IdentityRequiredError` se alcanza de verdad.
   'token-sujeto-en-blanco': {
     subject: '   ',
-    email: 'en-blanco@nexus.test',
     roles: new Set([Role.Player]),
   },
 }
@@ -78,6 +86,7 @@ describe('API de cuentas con autenticacion activa', () => {
   let app: INestApplication
   let previousEnv: Record<string, string | undefined>
   let accountId: string
+  let verifiedEmailDirectory: InMemoryVerifiedEmailDirectory
 
   beforeAll(async () => {
     // La configuracion se lee al construir el modulo, asi que el entorno debe
@@ -92,6 +101,13 @@ describe('API de cuentas con autenticacion activa', () => {
     process.env.COGNITO_USER_POOL_ID = 'us-east-1_pruebas'
     process.env.COGNITO_CLIENT_ID = 'cliente-de-pruebas'
 
+    verifiedEmailDirectory = new InMemoryVerifiedEmailDirectory()
+    verifiedEmailDirectory.setVerifiedEmail('sujeto-jugador', 'jugador@nexus.test')
+    verifiedEmailDirectory.setVerifiedEmail('sujeto-moderador', 'moderador@nexus.test')
+    verifiedEmailDirectory.setVerifiedEmail('sujeto-sin-cuenta', 'sin-proveedor@nexus.test')
+    verifiedEmailDirectory.setVerifiedEmail('sujeto-correo-distinto', 'otro@nexus.test')
+    verifiedEmailDirectory.setVerifiedEmail('sujeto-proveedor-caido', 'recuperado@nexus.test')
+
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(TOKEN_VERIFIER)
       .useValue(stubVerifier)
@@ -101,6 +117,8 @@ describe('API de cuentas con autenticacion activa', () => {
       // cuando el rol no se puede reflejar: es el comportamiento buscado.
       .overrideProvider(ROLE_DIRECTORY)
       .useValue(new InMemoryRoleDirectory())
+      .overrideProvider(VERIFIED_EMAIL_DIRECTORY)
+      .useValue(verifiedEmailDirectory)
       .compile()
 
     app = moduleRef.createNestApplication()
@@ -165,6 +183,44 @@ describe('API de cuentas con autenticacion activa', () => {
 
       expect(propia.status).toBe(200)
       expect(propia.body).toMatchObject({ email: 'moderador@nexus.test' })
+      expect(response.body).toMatchObject({ status: 'ACTIVE' })
+    })
+
+    it('mantiene pendiente la cuenta si el correo verificado pertenece a otro buzon', async () => {
+      const response = await registerAccountRequest(app, {
+        email: 'distinto@nexus.test',
+        nickname: 'Cuenta Correo Distinto',
+      }).set('Authorization', bearer('token-correo-distinto'))
+
+      expect(response.status).toBe(201)
+      expect(response.body).toMatchObject({ status: 'PENDING_VERIFICATION' })
+    })
+
+    it('responde 503 y no crea la cuenta si no puede consultar el correo verificado', async () => {
+      const original = verifiedEmailDirectory.findVerifiedEmail.bind(verifiedEmailDirectory)
+      verifiedEmailDirectory.findVerifiedEmail = () =>
+        Promise.reject(new VerifiedEmailDirectoryError('el proveedor no responde'))
+
+      try {
+        const failed = await registerAccountRequest(app, {
+          email: 'recuperado@nexus.test',
+          nickname: 'Cuenta Proveedor Caido',
+        }).set('Authorization', bearer('token-proveedor-caido'))
+
+        expect(failed.status).toBe(503)
+
+        verifiedEmailDirectory.findVerifiedEmail = original
+
+        const retried = await registerAccountRequest(app, {
+          email: 'recuperado@nexus.test',
+          nickname: 'Cuenta Proveedor Recuperado',
+        }).set('Authorization', bearer('token-proveedor-caido'))
+
+        expect(retried.status).toBe(201)
+        expect(retried.body).toMatchObject({ status: 'ACTIVE' })
+      } finally {
+        verifiedEmailDirectory.findVerifiedEmail = original
+      }
     })
 
     /**

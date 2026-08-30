@@ -62,8 +62,8 @@ export class CognitoTokenVerifier implements TokenVerifierPort {
  * Traduce el contenido del token a la identidad verificada.
  *
  * Es una funcion pura y exportada a proposito: es la parte del verificador que
- * decide QUE roles y QUE correo se aceptan, y debe poder probarse sin red y sin
- * un pool real. La comprobacion de firma, que es lo que no se debe reimplementar,
+ * decide QUE roles se aceptan, y debe poder probarse sin red y sin un pool real.
+ * La comprobacion de firma, que es lo que no se debe reimplementar,
  * queda en la biblioteca.
  */
 export const toVerifiedIdentity = (payload: Record<string, unknown>): VerifiedIdentity => {
@@ -79,25 +79,8 @@ export const toVerifiedIdentity = (payload: Record<string, unknown>): VerifiedId
 
   return {
     subject,
-    email: readVerifiedEmail(payload),
     roles: readRoles(payload),
   }
-}
-
-/**
- * El correo solo se acepta si el proveedor lo declara verificado. Un correo sin
- * verificar es una afirmacion del usuario, no un hecho comprobado, y usarlo para
- * decidir permisos permitiria suplantar a cualquiera con solo declararlo.
- */
-const readVerifiedEmail = (payload: Record<string, unknown>): string | null => {
-  const verified = payload.email_verified
-  const email = payload.email
-
-  if (verified !== true && verified !== 'true') {
-    return null
-  }
-
-  return typeof email === 'string' && email.length > 0 ? email.toLowerCase() : null
 }
 
 /**
