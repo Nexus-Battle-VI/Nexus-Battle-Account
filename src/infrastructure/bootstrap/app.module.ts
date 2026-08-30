@@ -5,6 +5,7 @@ import { AccountsController } from '../../adapters/inbound/http/accounts.control
 import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
 import { HealthController } from '../../adapters/inbound/http/health.controller'
 import {
+  CHOOSE_SECOND_FACTOR,
   COMPLETE_SECOND_FACTOR,
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
@@ -19,6 +20,7 @@ import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
 import { LoginAccount } from '../../application/use-cases/LoginAccount'
+import { ChooseSecondFactor } from '../../application/use-cases/ChooseSecondFactor'
 import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecondFactor'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
@@ -331,6 +333,14 @@ export const DATABASE = Symbol('Database')
         accounts: AccountRepositoryPort,
         authenticationProvider: AuthenticationProviderPort,
       ): CompleteSecondFactor => new CompleteSecondFactor({ accounts, authenticationProvider }),
+      inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
+    },
+    {
+      provide: CHOOSE_SECOND_FACTOR,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        authenticationProvider: AuthenticationProviderPort,
+      ): ChooseSecondFactor => new ChooseSecondFactor({ accounts, authenticationProvider }),
       inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
     },
     {

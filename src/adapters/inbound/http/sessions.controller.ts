@@ -14,8 +14,14 @@ import type { LoginOutcome } from '../../../application/dto/LoginResult'
 import { CompleteSecondFactor } from '../../../application/use-cases/CompleteSecondFactor'
 import { LoginAccount } from '../../../application/use-cases/LoginAccount'
 import { Public } from './auth/decorators'
-import { COMPLETE_SECOND_FACTOR, LOGIN_ACCOUNT } from './tokens'
-import { LoginRequest, SecondFactorRequest, SessionResponse } from './sessions.dto'
+import { CHOOSE_SECOND_FACTOR, COMPLETE_SECOND_FACTOR, LOGIN_ACCOUNT } from './tokens'
+import { ChooseSecondFactor } from '../../../application/use-cases/ChooseSecondFactor'
+import {
+  LoginRequest,
+  ChooseSecondFactorRequest,
+  SecondFactorRequest,
+  SessionResponse,
+} from './sessions.dto'
 
 /**
  * Sesiones (HU-02).
@@ -35,6 +41,7 @@ export class SessionsController {
   constructor(
     @Inject(LOGIN_ACCOUNT) private readonly loginAccount: LoginAccount,
     @Inject(COMPLETE_SECOND_FACTOR) private readonly completeSecondFactor: CompleteSecondFactor,
+    @Inject(CHOOSE_SECOND_FACTOR) private readonly chooseSecondFactor: ChooseSecondFactor,
   ) {}
 
   @Public()
@@ -53,6 +60,29 @@ export class SessionsController {
     const outcome = await this.loginAccount.execute({
       identifier: body.identifier,
       password: body.password,
+    })
+
+    return SessionsController.translate(outcome)
+  }
+
+  /**
+   * Elegir NO autentica: devuelve el reto del factor elegido, que sigue
+   * habiendo que responder en `second-factor`. Por eso es publica igual que las
+   * otras dos: pedirla exigiria ya tener una sesion, que es lo que aun no hay.
+   */
+  @Public()
+  @Post('second-factor/method')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Elige el segundo factor cuando el proveedor ofrece varios (HU-02)' })
+  @ApiResponse({ status: 200, description: 'Reto del factor elegido.', type: SessionResponse })
+  @ApiResponse({ status: 400, description: 'Datos invalidos' })
+  @ApiResponse({ status: 401, description: 'Credenciales o reto invalidos' })
+  @ApiResponse({ status: 503, description: 'El proveedor de identidad no esta disponible' })
+  async chooseFactor(@Body() body: ChooseSecondFactorRequest): Promise<SessionResponse> {
+    const outcome = await this.chooseSecondFactor.execute({
+      identifier: body.identifier,
+      challengeToken: body.challengeToken,
+      method: body.method,
     })
 
     return SessionsController.translate(outcome)
@@ -101,6 +131,13 @@ export class SessionsController {
           status: 'SECOND_FACTOR_REQUIRED',
           challengeToken: outcome.challengeToken,
           secondFactorMethod: outcome.method,
+        }
+
+      case 'secondFactorSelectionRequired':
+        return {
+          status: 'SECOND_FACTOR_SELECTION_REQUIRED',
+          challengeToken: outcome.challengeToken,
+          availableSecondFactors: outcome.methods,
         }
 
       case 'invalidCredentials':

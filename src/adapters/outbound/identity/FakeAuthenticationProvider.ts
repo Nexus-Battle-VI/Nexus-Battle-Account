@@ -1,5 +1,9 @@
-import { SecondFactorMethod } from '../../../application/ports/AuthenticationProviderPort'
+import {
+  AuthenticationProviderError,
+  SecondFactorMethod,
+} from '../../../application/ports/AuthenticationProviderPort'
 import type {
+  SecondFactorSelection,
   AuthenticationCredentials,
   AuthenticationOutcome,
   AuthenticationProviderPort,
@@ -95,6 +99,27 @@ export class FakeAuthenticationProvider implements AuthenticationProviderPort {
       kind: 'authenticated',
       accessToken: this.issueAccessToken(),
       expiresIn: FAKE_EXPIRES_IN_SECONDS,
+    })
+  }
+
+  /**
+   * El doble reproduce el contrato COMPLETO, incluida la seleccion.
+   *
+   * Sin esto, una prueba podria pasar contra un puerto que produccion no
+   * cumple: es justo el hueco por el que `SELECT_MFA_TYPE` habria roto el
+   * inicio de sesion al activar el segundo factor por correo.
+   */
+  chooseSecondFactor(input: SecondFactorSelection): Promise<AuthenticationOutcome> {
+    if (!this.pendingChallenges.has(input.challengeToken)) {
+      return Promise.reject(
+        new AuthenticationProviderError('No hay una seleccion de factor pendiente.'),
+      )
+    }
+
+    return Promise.resolve({
+      kind: 'challengeRequired',
+      challengeToken: input.challengeToken,
+      method: input.method,
     })
   }
 

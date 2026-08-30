@@ -22,6 +22,7 @@ import {
   type AuthenticationOutcome,
   type AuthenticationProviderPort,
   type SecondFactorOutcome,
+  type SecondFactorSelection,
   type SecondFactorVerification,
 } from '../../../application/ports/AuthenticationProviderPort'
 
@@ -57,6 +58,19 @@ const CHALLENGE_CODE_PARAMETER: Partial<Record<ChallengeNameType, string>> = {
  * Se declara junto al mapa de arriba y no aparte: las dos tablas describen el
  * mismo conjunto de retos, y separarlas invita a que una crezca sin la otra.
  */
+/**
+ * Nombre con el que Cognito conoce cada metodo al RESPONDER una seleccion.
+ *
+ * Es la inversa de `CHALLENGE_METHOD`, escrita a mano y no derivada: derivarla
+ * daria un mapa cuyo contenido depende del orden de las claves, y aqui lo que
+ * se manda a AWS tiene que ser literal y evidente al leerlo.
+ */
+const METHOD_CHALLENGE_NAME: Record<SecondFactorMethod, ChallengeNameType> = {
+  [SecondFactorMethod.AuthenticatorApp]: ChallengeNameType.SOFTWARE_TOKEN_MFA,
+  [SecondFactorMethod.Sms]: ChallengeNameType.SMS_MFA,
+  [SecondFactorMethod.Email]: ChallengeNameType.EMAIL_OTP,
+}
+
 const CHALLENGE_METHOD: Partial<Record<ChallengeNameType, SecondFactorMethod>> = {
   [ChallengeNameType.SOFTWARE_TOKEN_MFA]: SecondFactorMethod.AuthenticatorApp,
   [ChallengeNameType.SMS_MFA]: SecondFactorMethod.Sms,
@@ -130,6 +144,7 @@ export class CognitoAuthenticationProvider implements AuthenticationProviderPort
       return CognitoAuthenticationProvider.packSupportedChallenge(
         response.ChallengeName,
         response.Session,
+        response.ChallengeParameters,
       )
     }
 
@@ -138,6 +153,55 @@ export class CognitoAuthenticationProvider implements AuthenticationProviderPort
     )
 
     return { kind: 'authenticated', accessToken, expiresIn }
+  }
+
+  /**
+   * Responde el reto de seleccion, y devuelve el reto del factor elegido.
+   *
+   * Cognito espera el NOMBRE de su reto en `ANSWER`, no el nombre que usa este
+   * dominio. La traduccion vive en `METHOD_CHALLENGE_NAME` y no se deduce del
+   * texto: mandar un valor que Cognito no reconoce produce un error generico
+   * que no dice cual de las dos partes se equivoco.
+   */
+  async chooseSecondFactor(input: SecondFactorSelection): Promise<AuthenticationOutcome> {
+    const unpacked = CognitoAuthenticationProvider.unpackChallengeToken(input.challengeToken)
+
+    if (unpacked?.challengeName !== ChallengeNameType.SELECT_MFA_TYPE) {
+      throw new AuthenticationProviderError(
+        'El testimonio de reto no corresponde a una seleccion de factor pendiente.',
+      )
+    }
+
+    let response: AdminRespondToAuthChallengeCommandOutput
+
+    try {
+      response = await this.client.send(
+        new AdminRespondToAuthChallengeCommand({
+          UserPoolId: this.userPoolId,
+          ClientId: this.clientId,
+          ChallengeName: ChallengeNameType.SELECT_MFA_TYPE,
+          Session: unpacked.session,
+          ChallengeResponses: {
+            USERNAME: input.email,
+            ANSWER: METHOD_CHALLENGE_NAME[input.method],
+          },
+        }),
+      )
+    } catch (error: unknown) {
+      return CognitoAuthenticationProvider.translateAuthenticationError(error)
+    }
+
+    if (response.ChallengeName === undefined) {
+      throw new AuthenticationProviderError(
+        'Cognito acepto la seleccion de factor sin emitir ningun reto: respuesta inesperada.',
+      )
+    }
+
+    return CognitoAuthenticationProvider.packSupportedChallenge(
+      response.ChallengeName,
+      response.Session,
+      response.ChallengeParameters,
+    )
   }
 
   async verifySecondFactor(input: SecondFactorVerification): Promise<SecondFactorOutcome> {
@@ -199,7 +263,22 @@ export class CognitoAuthenticationProvider implements AuthenticationProviderPort
   private static packSupportedChallenge(
     challengeName: ChallengeNameType,
     session: string | undefined,
+    parameters?: Record<string, string>,
   ): AuthenticationOutcome {
+    if (challengeName === ChallengeNameType.SELECT_MFA_TYPE) {
+      if (session === undefined) {
+        throw new AuthenticationProviderError(
+          'Cognito emitio un reto sin sesion asociada: respuesta inesperada.',
+        )
+      }
+
+      return {
+        kind: 'selectionRequired',
+        challengeToken: CognitoAuthenticationProvider.packChallengeToken(challengeName, session),
+        methods: CognitoAuthenticationProvider.readSelectableMethods(parameters),
+      }
+    }
+
     if (CHALLENGE_CODE_PARAMETER[challengeName] === undefined) {
       throw new AuthenticationProviderError(
         `Cognito exige el reto "${challengeName}", que HU-02 no tiene definido como segundo factor.`,
@@ -225,6 +304,53 @@ export class CognitoAuthenticationProvider implements AuthenticationProviderPort
       challengeToken: CognitoAuthenticationProvider.packChallengeToken(challengeName, session),
       method,
     }
+  }
+
+  /**
+   * Factores que Cognito ofrece elegir, en `MFAS_CAN_CHOOSE`.
+   *
+   * Llega como un JSON dentro de un campo de texto, y se valida en lugar de
+   * confiar: un metodo que este adaptador no sabe responder se DESCARTA aqui.
+   * Ofrecerlo obligaria a la persona a elegir un camino que despues fallaria.
+   *
+   * Si no queda ninguno, es un fallo del proveedor y no una lista vacia: pedir
+   * que se elija entre nada no es un estado que la interfaz pueda representar.
+   */
+  private static readSelectableMethods(
+    parameters: Record<string, string> | undefined,
+  ): readonly SecondFactorMethod[] {
+    const crudo = parameters?.MFAS_CAN_CHOOSE
+
+    if (crudo === undefined) {
+      throw new AuthenticationProviderError(
+        'Cognito pidio elegir factor sin decir entre cuales (falta MFAS_CAN_CHOOSE).',
+      )
+    }
+
+    let nombres: unknown
+
+    try {
+      nombres = JSON.parse(crudo)
+    } catch {
+      throw new AuthenticationProviderError('MFAS_CAN_CHOOSE no es una lista JSON valida.')
+    }
+
+    if (!Array.isArray(nombres)) {
+      throw new AuthenticationProviderError('MFAS_CAN_CHOOSE no es una lista.')
+    }
+
+    const metodos = nombres
+      .filter((nombre): nombre is string => typeof nombre === 'string')
+      .map((nombre) => CHALLENGE_METHOD[nombre as ChallengeNameType])
+      .filter((metodo): metodo is SecondFactorMethod => metodo !== undefined)
+
+    if (metodos.length === 0) {
+      throw new AuthenticationProviderError(
+        'Cognito ofrecio elegir entre factores que este adaptador no sabe responder.',
+      )
+    }
+
+    return metodos
   }
 
   /**
