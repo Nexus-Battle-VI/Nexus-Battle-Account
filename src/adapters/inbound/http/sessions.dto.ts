@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger'
-import { IsString, MaxLength, MinLength } from 'class-validator'
+import { IsIn, IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator'
 
 /**
  * Contrato de entrada del login (HU-02).
@@ -73,13 +73,13 @@ export class AccountSummaryResponse {
 
 export class SessionResponse {
   @ApiProperty({
-    enum: ['AUTHENTICATED', 'SECOND_FACTOR_REQUIRED'],
+    enum: ['AUTHENTICATED', 'SECOND_FACTOR_REQUIRED', 'SECOND_FACTOR_SELECTION_REQUIRED'],
     description:
       'AUTHENTICATED: sesion completada, `accessToken` y `account` presentes. ' +
       'SECOND_FACTOR_REQUIRED: primera etapa superada, falta el segundo factor; ' +
       'solo `challengeToken` presente.',
   })
-  readonly status!: 'AUTHENTICATED' | 'SECOND_FACTOR_REQUIRED'
+  readonly status!: 'AUTHENTICATED' | 'SECOND_FACTOR_REQUIRED' | 'SECOND_FACTOR_SELECTION_REQUIRED'
 
   @ApiProperty({
     required: false,
@@ -111,4 +111,31 @@ export class SessionResponse {
       'y adivinaba mal: anunciaba un correo que nunca se enviaba.',
   })
   readonly secondFactorMethod?: 'AUTHENTICATOR_APP' | 'EMAIL' | 'SMS'
+
+  @ApiProperty({
+    required: false,
+    isArray: true,
+    enum: ['AUTHENTICATOR_APP', 'EMAIL', 'SMS'],
+    description:
+      'Factores entre los que hay que elegir. Presente solo cuando status es ' +
+      'SECOND_FACTOR_SELECTION_REQUIRED. Elegir no autentica: devuelve el reto del ' +
+      'factor elegido, que sigue habiendo que responder.',
+  })
+  readonly availableSecondFactors?: readonly ('AUTHENTICATOR_APP' | 'EMAIL' | 'SMS')[]
+}
+
+export class ChooseSecondFactorRequest {
+  @ApiProperty({ description: 'Correo o apodo, igual que en el inicio de sesion.' })
+  @IsString()
+  @IsNotEmpty()
+  identifier!: string
+
+  @ApiProperty({ description: 'Testimonio de reto devuelto por la etapa anterior.' })
+  @IsString()
+  @IsNotEmpty()
+  challengeToken!: string
+
+  @ApiProperty({ enum: ['AUTHENTICATOR_APP', 'EMAIL', 'SMS'] })
+  @IsIn(['AUTHENTICATOR_APP', 'EMAIL', 'SMS'])
+  method!: 'AUTHENTICATOR_APP' | 'EMAIL' | 'SMS'
 }

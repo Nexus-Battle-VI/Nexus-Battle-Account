@@ -83,6 +83,22 @@ export class LoginAccount {
       }
     }
 
+    /**
+     * Elegir factor es un reto tan valido como responderlo.
+     *
+     * Va ANTES de la comprobacion administrativa a proposito: `selectionRequired`
+     * significa que el proveedor SI esta exigiendo segundo factor, solo que
+     * todavia no ha decidido cual. Tratarlo como "no hubo reto" convertiria en
+     * fallo el caso normal de una cuenta con dos factores inscritos.
+     */
+    if (outcome.kind === 'selectionRequired') {
+      return {
+        kind: 'secondFactorSelectionRequired',
+        challengeToken: outcome.challengeToken,
+        methods: outcome.methods,
+      }
+    }
+
     if (isAdministrativeRole(account.currentRoles)) {
       return { kind: 'providerUnavailable' }
     }

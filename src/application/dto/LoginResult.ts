@@ -47,6 +47,11 @@ export type LoginOutcome =
       readonly challengeToken: string
       readonly method: SecondFactorMethod
     }
+  | {
+      readonly kind: 'secondFactorSelectionRequired'
+      readonly challengeToken: string
+      readonly methods: readonly SecondFactorMethod[]
+    }
   | { readonly kind: 'secondFactorInvalid' }
   | { readonly kind: 'invalidCredentials' }
   | { readonly kind: 'providerUnavailable' }

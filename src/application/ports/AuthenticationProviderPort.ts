@@ -66,7 +66,32 @@ export type AuthenticationOutcome =
       readonly challengeToken: string
       readonly method: SecondFactorMethod
     }
+  /**
+   * El proveedor ofrece VARIOS factores y pide elegir antes de retar.
+   *
+   * No es un reto de "ingresa un codigo": todavia no hay codigo. Se modela
+   * aparte porque tratarlo como los demas obligaria a la interfaz a mostrar un
+   * campo de codigo que nadie puede rellenar aun.
+   *
+   * Aparece cuando el pool tiene mas de un factor inscrito para esa cuenta.
+   * Antes de existir este caso, el adaptador lo trataba como fallo del
+   * proveedor -correctamente, porque fingir que un formulario de codigo lo
+   * resuelve seria inventar un flujo-, de modo que activar el segundo factor
+   * habria roto el inicio de sesion por credenciales.
+   */
+  | {
+      readonly kind: 'selectionRequired'
+      readonly challengeToken: string
+      readonly methods: readonly SecondFactorMethod[]
+    }
   | { readonly kind: 'invalidCredentials' }
+
+/** Eleccion de factor cuando el proveedor ofrece mas de uno. */
+export interface SecondFactorSelection {
+  readonly email: string
+  readonly challengeToken: string
+  readonly method: SecondFactorMethod
+}
 
 export interface SecondFactorVerification {
   readonly email: string
@@ -85,6 +110,15 @@ export interface AuthenticationProviderPort {
 
   /** Segunda etapa: completa un reto de segundo factor pendiente. */
   verifySecondFactor(input: SecondFactorVerification): Promise<SecondFactorOutcome>
+
+  /**
+   * Etapa intermedia: elige factor cuando el proveedor ofrecio varios.
+   *
+   * Devuelve un `AuthenticationOutcome` y no un tipo propio porque lo que sale
+   * de elegir ES el reto del factor elegido, con la misma forma que si el
+   * proveedor lo hubiera emitido directamente.
+   */
+  chooseSecondFactor(input: SecondFactorSelection): Promise<AuthenticationOutcome>
 }
 
 /**
