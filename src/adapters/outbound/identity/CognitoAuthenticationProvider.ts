@@ -17,6 +17,7 @@ import {
 
 import {
   AuthenticationProviderError,
+  SecondFactorMethod,
   type AuthenticationCredentials,
   type AuthenticationOutcome,
   type AuthenticationProviderPort,
@@ -48,6 +49,18 @@ const CHALLENGE_CODE_PARAMETER: Partial<Record<ChallengeNameType, string>> = {
   [ChallengeNameType.SOFTWARE_TOKEN_MFA]: 'SOFTWARE_TOKEN_MFA_CODE',
   [ChallengeNameType.SMS_MFA]: 'SMS_MFA_CODE',
   [ChallengeNameType.EMAIL_OTP]: 'EMAIL_OTP_CODE',
+}
+
+/**
+ * Donde tiene que mirar quien responde el reto.
+ *
+ * Se declara junto al mapa de arriba y no aparte: las dos tablas describen el
+ * mismo conjunto de retos, y separarlas invita a que una crezca sin la otra.
+ */
+const CHALLENGE_METHOD: Partial<Record<ChallengeNameType, SecondFactorMethod>> = {
+  [ChallengeNameType.SOFTWARE_TOKEN_MFA]: SecondFactorMethod.AuthenticatorApp,
+  [ChallengeNameType.SMS_MFA]: SecondFactorMethod.Sms,
+  [ChallengeNameType.EMAIL_OTP]: SecondFactorMethod.Email,
 }
 
 /**
@@ -199,9 +212,18 @@ export class CognitoAuthenticationProvider implements AuthenticationProviderPort
       )
     }
 
+    const method = CHALLENGE_METHOD[challengeName]
+
+    if (method === undefined) {
+      throw new AuthenticationProviderError(
+        `El reto "${challengeName}" no declara donde mirar para responderlo.`,
+      )
+    }
+
     return {
       kind: 'challengeRequired',
       challengeToken: CognitoAuthenticationProvider.packChallengeToken(challengeName, session),
+      method,
     }
   }
 

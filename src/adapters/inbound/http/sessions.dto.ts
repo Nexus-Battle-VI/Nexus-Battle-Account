@@ -101,4 +101,14 @@ export class SessionResponse {
     description: 'Presente solo cuando status es SECOND_FACTOR_REQUIRED.',
   })
   readonly challengeToken?: string
+
+  @ApiProperty({
+    required: false,
+    enum: ['AUTHENTICATOR_APP', 'EMAIL', 'SMS'],
+    description:
+      'Donde hay que mirar para obtener el codigo. Presente solo cuando status es ' +
+      'SECOND_FACTOR_REQUIRED. Existe porque sin el la interfaz solo podia adivinar, ' +
+      'y adivinaba mal: anunciaba un correo que nunca se enviaba.',
+  })
+  readonly secondFactorMethod?: 'AUTHENTICATOR_APP' | 'EMAIL' | 'SMS'
 }

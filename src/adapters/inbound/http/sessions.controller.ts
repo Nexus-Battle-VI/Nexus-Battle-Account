@@ -97,7 +97,11 @@ export class SessionsController {
         }
 
       case 'secondFactorRequired':
-        return { status: 'SECOND_FACTOR_REQUIRED', challengeToken: outcome.challengeToken }
+        return {
+          status: 'SECOND_FACTOR_REQUIRED',
+          challengeToken: outcome.challengeToken,
+          secondFactorMethod: outcome.method,
+        }
 
       case 'invalidCredentials':
         throw new UnauthorizedException('Las credenciales no son validas.')
