@@ -46,6 +46,33 @@ describe('API de cuentas', () => {
     expect(typeof response.body.id).toBe('string')
   })
 
+  it('POST /api/accounts/confirmation activa la cuenta con el codigo del proveedor', async () => {
+    await registerAccountRequest(app, {
+      email: 'confirmar@nexus.test',
+      nickname: 'Cuenta Confirmar',
+    })
+
+    const response = await request(app.getHttpServer())
+      .post('/api/accounts/confirmation')
+      .send({ identifier: 'confirmar@nexus.test', code: '000000' })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({ status: AccountStatus.Active })
+  })
+
+  it('POST /api/accounts/confirmation responde 400 con un codigo invalido', async () => {
+    await registerAccountRequest(app, {
+      email: 'malcodigo@nexus.test',
+      nickname: 'Cuenta Mal Codigo',
+    })
+
+    const response = await request(app.getHttpServer())
+      .post('/api/accounts/confirmation')
+      .send({ identifier: 'malcodigo@nexus.test', code: '999999' })
+
+    expect(response.status).toBe(400)
+  })
+
   it('POST /api/accounts responde 409 si el correo ya existe', async () => {
     await registerAccountRequest(app, {
       email: 'duplicado@nexus.test',

@@ -1,6 +1,6 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { ApiProperty } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
-import { Allow, IsBoolean, IsEmail, IsOptional, IsString, MaxLength } from 'class-validator'
+import { Allow, IsBoolean, IsEmail, IsString, MaxLength, MinLength } from 'class-validator'
 
 /**
  * Contrato de entrada del registro (multipart/form-data).
@@ -23,24 +23,15 @@ export class RegisterAccountRequest {
   email!: string
 
   /**
-   * OBSOLETO. Se acepta y se IGNORA; desaparecera del contrato.
-   *
-   * La contrasena la custodia el proveedor de identidad, no este servicio
-   * (ADR-004, decision 2). Este campo se validaba contra la politica y se
-   * TIRABA, de modo que quien rellenaba el formulario creia estar fijando su
-   * contrasena y no fijaba nada. Despues no podia entrar con ella, y el mensaje
-   * -"revisa tus credenciales"- le apuntaba al sitio equivocado.
-   *
-   * Se conserva como opcional para no romper a un cliente desplegado que
-   * todavia lo envie. Web deja de enviarlo en el mismo cambio.
+   * Se transporta a Cognito por `signUp` y NO se persiste aqui (ADR-004,
+   * decision 2). La politica la aplica el proveedor: un rechazo suyo llega como
+   * 400. Aqui solo se exige que exista y tenga una longitud minima razonable,
+   * sin duplicar la politica -que vive en el pool y podria cambiar-.
    */
-  @ApiPropertyOptional({
-    deprecated: true,
-    description: 'Ignorado. La contrasena vive en el proveedor.',
-  })
-  @IsOptional()
+  @ApiProperty({ example: 'Abcdefg1!', minLength: 8 })
   @IsString()
-  password?: string
+  @MinLength(8)
+  password!: string
 
   @ApiProperty({ example: 'Ana Ramirez', description: 'Apodo (display_name)', maxLength: 32 })
   @IsString()
@@ -97,4 +88,14 @@ export class AccountResponse {
 
   @ApiProperty({ example: ['PLAYER'], isArray: true, type: String })
   readonly roles!: readonly string[]
+}
+
+export class ConfirmRegistrationRequest {
+  @ApiProperty({ description: 'Correo o apodo con el que se registro.' })
+  @IsString()
+  identifier!: string
+
+  @ApiProperty({ example: '123456', description: 'Codigo que Cognito envio al correo.' })
+  @IsString()
+  code!: string
 }

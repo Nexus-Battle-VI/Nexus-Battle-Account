@@ -13,13 +13,10 @@ import {
   type TokenVerifierPort,
   type VerifiedIdentity,
 } from '../../src/application/ports/TokenVerifierPort'
+import { IDENTITY_SIGN_UP } from '../../src/application/ports/IdentitySignUpPort'
 import { ROLE_DIRECTORY, RoleDirectoryError } from '../../src/application/ports/RoleDirectoryPort'
+import { InMemoryIdentitySignUp } from '../../src/adapters/outbound/identity/InMemoryIdentitySignUp'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
-import { InMemoryVerifiedEmailDirectory } from '../../src/adapters/outbound/identity/InMemoryVerifiedEmailDirectory'
-import {
-  VERIFIED_EMAIL_DIRECTORY,
-  VerifiedEmailDirectoryError,
-} from '../../src/application/ports/VerifiedEmailDirectoryPort'
 
 /**
  * Integracion con la autenticacion ACTIVA.
@@ -36,8 +33,10 @@ import {
 
 /** Tokens reconocidos por el verificador de prueba. Fuera de estos, todo falla. */
 const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
+  // El sujeto del token es el que el alta deriva del correo (`sub:<correo>`),
+  // para que /me encuentre la cuenta de 'ana@nexus.test' creada en beforeAll.
   'token-jugador': {
-    subject: 'sujeto-jugador',
+    subject: 'sub:ana@nexus.test',
     roles: new Set([Role.Player]),
   },
   'token-moderador': {
@@ -47,28 +46,6 @@ const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
   'token-administrador': {
     subject: 'sujeto-administrador',
     roles: new Set([Role.Player, Role.Administrator]),
-  },
-  // Identidad verificada que todavia NO tiene cuenta: el estado exacto de quien
-  // acaba de darse de alta en el proveedor y llega aqui a crear la suya.
-  'token-sin-cuenta': {
-    subject: 'sujeto-sin-cuenta',
-    roles: new Set([Role.Player]),
-  },
-  'token-correo-distinto': {
-    subject: 'sujeto-correo-distinto',
-    roles: new Set([Role.Player]),
-  },
-  'token-proveedor-caido': {
-    subject: 'sujeto-proveedor-caido',
-    roles: new Set([Role.Player]),
-  },
-  // Firma valida, `sub` inservible. El verificador solo rechaza el `sub`
-  // AUSENTE o vacio, asi que uno de puros espacios lo atraviesa y llega al caso
-  // de uso, que si lo rechaza. Es el unico camino por el que
-  // `IdentityRequiredError` se alcanza de verdad.
-  'token-sujeto-en-blanco': {
-    subject: '   ',
-    roles: new Set([Role.Player]),
   },
 }
 
@@ -86,7 +63,6 @@ describe('API de cuentas con autenticacion activa', () => {
   let app: INestApplication
   let previousEnv: Record<string, string | undefined>
   let accountId: string
-  let verifiedEmailDirectory: InMemoryVerifiedEmailDirectory
 
   beforeAll(async () => {
     // La configuracion se lee al construir el modulo, asi que el entorno debe
@@ -101,13 +77,6 @@ describe('API de cuentas con autenticacion activa', () => {
     process.env.COGNITO_USER_POOL_ID = 'us-east-1_pruebas'
     process.env.COGNITO_CLIENT_ID = 'cliente-de-pruebas'
 
-    verifiedEmailDirectory = new InMemoryVerifiedEmailDirectory()
-    verifiedEmailDirectory.setVerifiedEmail('sujeto-jugador', 'jugador@nexus.test')
-    verifiedEmailDirectory.setVerifiedEmail('sujeto-moderador', 'moderador@nexus.test')
-    verifiedEmailDirectory.setVerifiedEmail('sujeto-sin-cuenta', 'sin-proveedor@nexus.test')
-    verifiedEmailDirectory.setVerifiedEmail('sujeto-correo-distinto', 'otro@nexus.test')
-    verifiedEmailDirectory.setVerifiedEmail('sujeto-proveedor-caido', 'recuperado@nexus.test')
-
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(TOKEN_VERIFIER)
       .useValue(stubVerifier)
@@ -117,8 +86,10 @@ describe('API de cuentas con autenticacion activa', () => {
       // cuando el rol no se puede reflejar: es el comportamiento buscado.
       .overrideProvider(ROLE_DIRECTORY)
       .useValue(new InMemoryRoleDirectory())
-      .overrideProvider(VERIFIED_EMAIL_DIRECTORY)
-      .useValue(verifiedEmailDirectory)
+      // El alta no debe hablar con un pool real: el doble deriva `sub:<correo>`,
+      // que es el mismo sujeto que llevan los tokens de este arnes.
+      .overrideProvider(IDENTITY_SIGN_UP)
+      .useValue(new InMemoryIdentitySignUp())
       .compile()
 
     app = moduleRef.createNestApplication()
@@ -129,11 +100,16 @@ describe('API de cuentas con autenticacion activa', () => {
 
     await app.init()
 
+    // El alta es PUBLICA: no lleva testimonio. La identidad la crea el propio
+    // endpoint en el proveedor (el doble deriva `sub:ana@nexus.test`).
     const created = await registerAccountRequest(app, {
       email: 'ana@nexus.test',
       nickname: 'Ana Ramirez',
-    }).set('Authorization', `Bearer token-jugador`)
+    })
 
+    // Se deja PENDING a proposito: el test de autorizacion por rol la activa
+    // usando la verificacion administrativa. GET /me y la lectura por
+    // administrador no necesitan que este activa.
     accountId = (created.body as { id: string }).id
   })
 
@@ -152,88 +128,57 @@ describe('API de cuentas con autenticacion activa', () => {
 
   describe('Rutas publicas', () => {
     /**
-     * El registro exige testimonio, y no es una restriccion arbitraria: con un
-     * proveedor real el alta ocurre en su propia pantalla, de modo que al
-     * llegar aqui la identidad YA existe y lo que falta es la cuenta del
-     * producto.
+     * El registro es PUBLICO: quien se registra todavia no tiene identidad, y
+     * este endpoint la crea en el proveedor (ADR-004, "Alta server-side"). La
+     * cuenta nace pendiente hasta que se confirma el correo.
      */
-    it('el registro exige testimonio', async () => {
-      const response = await request(app.getHttpServer())
-        .post('/api/accounts')
-        .send({ email: 'nuevo@nexus.test', nickname: 'Persona Nueva' })
-
-      expect(response.status).toBe(401)
-    })
-
-    it('registra la cuenta vinculada al sujeto del testimonio', async () => {
+    it('el registro es publico y la cuenta nace pendiente de confirmar', async () => {
       const response = await registerAccountRequest(app, {
-        email: 'moderador@nexus.test',
-        nickname: 'Cuenta Vinculada Uno',
-      }).set('Authorization', bearer('token-moderador'))
-
-      expect(response.status).toBe(201)
-
-      // El sujeto NO se expone en la respuesta: es un vinculo interno. Que el
-      // vinculo existe se comprueba leyendo /me con el mismo testimonio.
-      expect(response.body).not.toHaveProperty('subject')
-
-      const propia = await request(app.getHttpServer())
-        .get('/api/accounts/me')
-        .set('Authorization', bearer('token-moderador'))
-
-      expect(propia.status).toBe(200)
-      expect(propia.body).toMatchObject({ email: 'moderador@nexus.test' })
-      expect(response.body).toMatchObject({ status: 'ACTIVE' })
-    })
-
-    it('mantiene pendiente la cuenta si el correo verificado pertenece a otro buzon', async () => {
-      const response = await registerAccountRequest(app, {
-        email: 'distinto@nexus.test',
-        nickname: 'Cuenta Correo Distinto',
-      }).set('Authorization', bearer('token-correo-distinto'))
+        email: 'nueva@nexus.test',
+        nickname: 'Persona Nueva',
+      })
 
       expect(response.status).toBe(201)
       expect(response.body).toMatchObject({ status: 'PENDING_VERIFICATION' })
     })
 
-    it('responde 503 y no crea la cuenta si no puede consultar el correo verificado', async () => {
-      const original = verifiedEmailDirectory.findVerifiedEmail.bind(verifiedEmailDirectory)
-      verifiedEmailDirectory.findVerifiedEmail = () =>
-        Promise.reject(new VerifiedEmailDirectoryError('el proveedor no responde'))
+    it('confirma el correo con el codigo y activa la cuenta', async () => {
+      await registerAccountRequest(app, {
+        email: 'confirma@nexus.test',
+        nickname: 'Cuenta Confirma',
+      })
 
-      try {
-        const failed = await registerAccountRequest(app, {
-          email: 'recuperado@nexus.test',
-          nickname: 'Cuenta Proveedor Caido',
-        }).set('Authorization', bearer('token-proveedor-caido'))
+      const ok = await request(app.getHttpServer())
+        .post('/api/accounts/confirmation')
+        .send({ identifier: 'confirma@nexus.test', code: '000000' })
 
-        expect(failed.status).toBe(503)
+      expect(ok.status).toBe(200)
+      expect(ok.body).toMatchObject({ status: 'ACTIVE' })
+    })
 
-        verifiedEmailDirectory.findVerifiedEmail = original
+    it('un codigo invalido no activa la cuenta', async () => {
+      await registerAccountRequest(app, {
+        email: 'malcodigo@nexus.test',
+        nickname: 'Cuenta Mal Codigo',
+      })
 
-        const retried = await registerAccountRequest(app, {
-          email: 'recuperado@nexus.test',
-          nickname: 'Cuenta Proveedor Recuperado',
-        }).set('Authorization', bearer('token-proveedor-caido'))
+      const bad = await request(app.getHttpServer())
+        .post('/api/accounts/confirmation')
+        .send({ identifier: 'malcodigo@nexus.test', code: '999999' })
 
-        expect(retried.status).toBe(201)
-        expect(retried.body).toMatchObject({ status: 'ACTIVE' })
-      } finally {
-        verifiedEmailDirectory.findVerifiedEmail = original
-      }
+      expect(bad.status).toBe(400)
     })
 
     /**
      * El registro falla cerrado cuando el rol no se puede reflejar, y eso es
      * deliberado: guardar una cuenta cuyo rol no viajaria en el testimonio es
-     * justo la divergencia que el reflejo existe para impedir.
+     * la divergencia que el reflejo existe para impedir.
      *
-     * Lo que esta prueba fija es COMO se cuenta ese fallo. Un 500 diria "este
-     * servicio tiene un defecto" y no invita a reintentar; aqui el servicio
-     * funciona, la dependencia no, y volver a intentarlo mas tarde tiene
+     * Lo que fija esta prueba es COMO se cuenta ese fallo: 503 y no 500. El
+     * servicio funciona, la dependencia no, y reintentar mas tarde tiene
      * sentido.
      */
-    it('responde 503, y no 500, cuando el proveedor de identidad no responde', async () => {
+    it('responde 503, y no 500, cuando el reflejo del rol no responde', async () => {
       const directorio = app.get<{ reflect: () => Promise<void> }>(ROLE_DIRECTORY)
       const original = directorio.reflect
       directorio.reflect = () => Promise.reject(new RoleDirectoryError('el proveedor no responde'))
@@ -242,24 +187,13 @@ describe('API de cuentas con autenticacion activa', () => {
         const response = await registerAccountRequest(app, {
           email: 'sin-proveedor@nexus.test',
           nickname: 'Cuenta Sin Proveedor',
-        }).set('Authorization', bearer('token-sin-cuenta'))
+        })
 
         expect(response.status).toBe(503)
         expect(response.body.message).not.toMatch(/internal/i)
       } finally {
         directorio.reflect = original
       }
-    })
-
-    it('responde 401, y no 500, si el testimonio no identifica a nadie', async () => {
-      const response = await registerAccountRequest(app, {
-        email: 'en-blanco@nexus.test',
-        nickname: 'Cuenta En Blanco',
-      }).set('Authorization', bearer('token-sujeto-en-blanco'))
-
-      // Un fallo de autenticacion tiene que decir que lo es. Como 500 acusaria
-      // al servicio de un defecto que no tiene.
-      expect(response.status).toBe(401)
     })
 
     it.each(['/api/health/live', '/api/health/ready'])(

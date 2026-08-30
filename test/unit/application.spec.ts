@@ -6,11 +6,9 @@ import { LoginAccount } from '../../src/application/use-cases/LoginAccount'
 import { CompleteSecondFactor } from '../../src/application/use-cases/CompleteSecondFactor'
 import {
   AccountAlreadyExistsError,
-  IdentityAlreadyRegisteredError,
   AccountNotFoundError,
   DisplayNameAlreadyTakenError,
   NicknameBlacklistedError,
-  IdentityRequiredError,
 } from '../../src/application/errors/ApplicationError'
 import type { NotificationRequest } from '../../src/application/ports/NotificationRequestPort'
 import type { NotificationRequestPort } from '../../src/application/ports/NotificationRequestPort'
@@ -20,16 +18,16 @@ import { InMemoryNicknameBlacklist } from '../../src/adapters/outbound/persisten
 import { InMemorySecurityQuestionCatalog } from '../../src/adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
 import { FakeAuthenticationProvider } from '../../src/adapters/outbound/identity/FakeAuthenticationProvider'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
-import { InMemoryVerifiedEmailDirectory } from '../../src/adapters/outbound/identity/InMemoryVerifiedEmailDirectory'
+import { InMemoryIdentitySignUp } from '../../src/adapters/outbound/identity/InMemoryIdentitySignUp'
+import {
+  IdentitySignUpError,
+  type IdentitySignUpPort,
+} from '../../src/application/ports/IdentitySignUpPort'
 import {
   RoleDirectoryError,
   type RoleDirectoryPort,
 } from '../../src/application/ports/RoleDirectoryPort'
 import { AuthenticationProviderError } from '../../src/application/ports/AuthenticationProviderPort'
-import {
-  VerifiedEmailDirectoryError,
-  type VerifiedEmailDirectoryPort,
-} from '../../src/application/ports/VerifiedEmailDirectoryPort'
 import { InMemoryAvatarStorage } from '../../src/adapters/outbound/storage/InMemoryAvatarStorage'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { Role } from '../../src/domain/entities/Role'
@@ -65,14 +63,14 @@ interface Harness {
   avatars: InMemoryAvatarStorage
   blacklist: InMemoryNicknameBlacklist
   roleDirectory: InMemoryRoleDirectory
-  verifiedEmailDirectory: InMemoryVerifiedEmailDirectory
+  identitySignUp: InMemoryIdentitySignUp
 }
 
 const buildHarness = (
   overrides: {
     accounts?: AccountRepositoryPort
     roleDirectory?: RoleDirectoryPort
-    verifiedEmailDirectory?: VerifiedEmailDirectoryPort
+    identitySignUp?: IdentitySignUpPort
   } = {},
 ): Harness => {
   const accounts = new InMemoryAccountRepository()
@@ -80,7 +78,7 @@ const buildHarness = (
   const avatars = new InMemoryAvatarStorage()
   const blacklist = new InMemoryNicknameBlacklist()
   const roleDirectory = new InMemoryRoleDirectory()
-  const verifiedEmailDirectory = new InMemoryVerifiedEmailDirectory()
+  const identitySignUp = new InMemoryIdentitySignUp()
   const clock = { now: (): Date => AT }
   const ids = { generate: sequence('acc') }
   const repository = overrides.accounts ?? accounts
@@ -91,7 +89,7 @@ const buildHarness = (
     avatars,
     blacklist,
     roleDirectory,
-    verifiedEmailDirectory,
+    identitySignUp,
     registerAccount: new RegisterAccount({
       accounts: repository,
       notifications: notifier,
@@ -101,7 +99,7 @@ const buildHarness = (
       blacklist,
       questions: new InMemorySecurityQuestionCatalog(),
       roleDirectory: overrides.roleDirectory ?? roleDirectory,
-      verifiedEmailDirectory: overrides.verifiedEmailDirectory ?? verifiedEmailDirectory,
+      identitySignUp: overrides.identitySignUp ?? identitySignUp,
     }),
     getAccount: new GetAccount(repository),
     verifyAccount: new VerifyAccount({ accounts: repository, clock }),
@@ -147,26 +145,15 @@ describe('RegisterAccount', () => {
     ])
   })
 
-  /**
-   * El fallo que reporto la primera persona ajena al equipo: entro de nuevo con
-   * su identidad ya registrada y volvio a enviar el formulario. La columna
-   * `subject` es unica, asi que sin comprobarlo antes el segundo intento
-   * -correo y apodo distintos, que pasan sus propios chequeos- reventaba contra
-   * esa restriccion como un 500 en vez de un 409 con mensaje.
-   *
-   * Se usa correo Y apodo distintos a proposito: si se repitiera cualquiera de
-   * los dos, saltaria su chequeo y esta prueba no distinguiria el caso del
-   * sujeto, que es el unico que quedaba sin cubrir.
-   */
-  it('rechaza un segundo registro de la misma identidad, y no como 500', async () => {
+  it('rechaza un segundo registro con el mismo correo, y no como 500', async () => {
     const harness = buildHarness()
     await harness.registerAccount.execute(command)
 
+    // Mismo correo, apodo distinto: choca por el correo, que es unico. Debe ser
+    // un 409 con mensaje, no la restriccion de la base reventando sin traducir.
     await expect(
-      harness.registerAccount.execute(
-        validCommand({ email: 'otro@nexus.test', displayName: 'OtroApodo' }),
-      ),
-    ).rejects.toBeInstanceOf(IdentityAlreadyRegisteredError)
+      harness.registerAccount.execute(validCommand({ displayName: 'OtroApodo' })),
+    ).rejects.toBeInstanceOf(AccountAlreadyExistsError)
   })
 
   it('asigna el rol PLAYER y no persiste la contrasena', async () => {
@@ -206,38 +193,38 @@ describe('RegisterAccount', () => {
     expect(result.displayName).toBe('Ana Ramirez')
   })
 
-  it('nace ACTIVE cuando el correo verificado del proveedor coincide normalizado', async () => {
+  /**
+   * Nace PENDING: Cognito acaba de enviar el codigo y el correo aun no esta
+   * confirmado. La activacion la hace `ConfirmRegistration`, con su propia
+   * suite. Antes este caso de uso "adivinaba" el estado consultando el correo
+   * verificado; ahora controla el alta y sabe que esta pendiente.
+   */
+  it('nace PENDING_VERIFICATION: el correo aun no esta confirmado', async () => {
     const harness = buildHarness()
-    harness.verifiedEmailDirectory.setVerifiedEmail(command.subject!, '  JUGADOR@Nexus.TEST  ')
-
-    const result = await harness.registerAccount.execute(command)
-
-    expect(result.status).toBe(AccountStatus.Active)
-  })
-
-  it('nace PENDING_VERIFICATION cuando el proveedor verifico otro buzon', async () => {
-    const harness = buildHarness()
-    harness.verifiedEmailDirectory.setVerifiedEmail(command.subject!, 'otra@nexus.test')
 
     const result = await harness.registerAccount.execute(command)
 
     expect(result.status).toBe(AccountStatus.PendingVerification)
   })
 
-  it('no crea la cuenta cuando no puede consultar el correo verificado', async () => {
-    const providerDown: VerifiedEmailDirectoryPort = {
-      findVerifiedEmail: () =>
-        Promise.reject(new VerifiedEmailDirectoryError('el proveedor no responde')),
+  /**
+   * El alta empieza por crear la identidad. Si el proveedor la rechaza -caido,
+   * contrasena debil-, NO debe quedar ni cuenta, ni avatar, ni rol reflejado.
+   * El fallo llega antes de tocar nada de eso.
+   */
+  it('no crea nada cuando el proveedor rechaza el alta', async () => {
+    const providerDown: IdentitySignUpPort = {
+      signUp: () => Promise.reject(new IdentitySignUpError('el proveedor no responde')),
+      confirmSignUp: () => Promise.reject(new Error('no deberia llamarse')),
     }
-    const harness = buildHarness({ verifiedEmailDirectory: providerDown })
+    const harness = buildHarness({ identitySignUp: providerDown })
 
     await expect(harness.registerAccount.execute(command)).rejects.toBeInstanceOf(
-      VerifiedEmailDirectoryError,
+      IdentitySignUpError,
     )
 
     expect(harness.accounts.size).toBe(0)
     expect(harness.avatars.size).toBe(0)
-    expect(harness.roleDirectory.rolesOf(command.subject!)).toEqual([])
     expect(harness.notifier.requested).toEqual([])
   })
 
@@ -271,18 +258,11 @@ describe('RegisterAccount', () => {
     )
   })
 
-  /**
-   * La identidad existe ANTES que la cuenta (ADR-004). Sin sujeto verificado no
-   * hay a quien vincular la cuenta, y el caso de uso NO inventa uno: eso
-   * significaria que Account decide quien existe.
-   */
-  it('rechaza registrar sin una identidad ya verificada', async () => {
+  it('rechaza registrar sin contrasena, y no crea nada', async () => {
     const harness = buildHarness()
-    const sinSujeto = { ...validCommand(), subject: '   ' }
+    const sinContrasena = { ...validCommand(), password: '' }
 
-    await expect(harness.registerAccount.execute(sinSujeto)).rejects.toBeInstanceOf(
-      IdentityRequiredError,
-    )
+    await expect(harness.registerAccount.execute(sinContrasena)).rejects.toBeInstanceOf(DomainError)
     expect(harness.accounts.size).toBe(0)
   })
 
@@ -321,36 +301,17 @@ describe('RegisterAccount', () => {
   })
 
   /**
-   * Esta prueba EXIGIA lo contrario, y protegia una garantia falsa.
-   *
-   * Este servicio no custodia contrasenas (ADR-004, decision 2): validaba la
-   * del formulario y la TIRABA. Quien se registraba creia estar fijando su
-   * contrasena y no fijaba nada; al intentar entrar con ella recibia "revisa
-   * tus credenciales", que apunta al sitio equivocado. Le paso a la primera
-   * persona ajena al equipo que uso el alta.
-   *
-   * Se afirma que una contrasena que la politica habria rechazado NO impide
-   * registrarse, porque el registro no tiene nada que decir sobre ella.
+   * La contrasena vuelve al alta y esta vez SI va a algun sitio: a Cognito, por
+   * `signUp`. Este servicio la transporta y no la persiste. Se afirma que NO
+   * aparece en la instantanea guardada.
    */
-  it('ignora la contrasena del formulario: no la custodia este servicio', async () => {
+  it('transporta la contrasena al proveedor y no la persiste', async () => {
     const harness = buildHarness()
+    await harness.registerAccount.execute(command)
 
-    await expect(
-      harness.registerAccount.execute(validCommand({ password: 'debil' })),
-    ).resolves.toBeDefined()
-  })
+    const stored = await harness.accounts.findByEmail(EmailAddress.create(command.email))
 
-  /**
-   * El control del caso anterior: sin el campo tampoco falla. Si el registro
-   * dependiera de la contrasena de alguna forma que se nos escapa, esto lo
-   * delataria.
-   */
-  it('se registra igual sin enviar contrasena', async () => {
-    const harness = buildHarness()
-    const sinContrasena = { ...validCommand() }
-    delete (sinContrasena as { password?: string }).password
-
-    await expect(harness.registerAccount.execute(sinContrasena)).resolves.toBeDefined()
+    expect(JSON.stringify(stored?.toSnapshot())).not.toContain(command.password)
   })
 
   it('rechaza un apodo de mas de 32 caracteres', async () => {
@@ -434,10 +395,10 @@ describe('RegisterAccount', () => {
     const created = await harness.registerAccount.execute(command)
 
     expect(created.roles).toEqual([Role.Player])
-    // Lo que se comprueba no es que la cuenta tenga el rol -eso ya lo cubre la
-    // prueba de arriba- sino que el rol tambien esta donde el testimonio lo
-    // recoge. Sin esto, los otros servicios ven a esta persona sin ningun rol.
-    expect(harness.roleDirectory.rolesOf(command.subject!)).toEqual([Role.Player])
+    // El rol tambien esta donde el testimonio lo recoge. El sujeto lo asigno el
+    // proveedor (el doble), asi que se lee de la cuenta, no del comando.
+    const stored = await harness.accounts.findByEmail(EmailAddress.create(command.email))
+    expect(harness.roleDirectory.rolesOf(stored!.subject)).toEqual([Role.Player])
   })
 
   /**
@@ -553,12 +514,11 @@ describe('GetOwnAccount', () => {
 
   it('devuelve la cuenta vinculada al sujeto', async () => {
     const harness = buildHarness()
-    const created = await harness.registerAccount.execute(
-      validCommand({ ...command, subject: 'sub-propio' }),
-    )
+    const created = await harness.registerAccount.execute(command)
+    const stored = await harness.accounts.findByEmail(EmailAddress.create(command.email))
     const useCase = new GetOwnAccount(harness.accounts)
 
-    expect(await useCase.execute('sub-propio')).toEqual(created)
+    expect(await useCase.execute(stored!.subject)).toEqual(created)
   })
 })
 

@@ -30,17 +30,24 @@ import {
   NicknameBlacklistedError,
 } from '../../../application/errors/ApplicationError'
 import { RoleDirectoryError } from '../../../application/ports/RoleDirectoryPort'
-import { VerifiedEmailDirectoryError } from '../../../application/ports/VerifiedEmailDirectoryPort'
+import { IdentitySignUpError } from '../../../application/ports/IdentitySignUpPort'
 import type { RegisterSecurityAnswer } from '../../../application/dto/RegisterAccountCommand'
 import { RegisterAccount } from '../../../application/use-cases/RegisterAccount'
+import { ConfirmRegistration } from '../../../application/use-cases/ConfirmRegistration'
 import { GetAccount } from '../../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../../application/use-cases/VerifyAccount'
 import { Role } from '../../../domain/entities/Role'
-import { CurrentIdentity, Roles } from './auth/decorators'
+import { CurrentIdentity, Public, Roles } from './auth/decorators'
 import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
-import { REGISTER_ACCOUNT, GET_ACCOUNT, GET_OWN_ACCOUNT, VERIFY_ACCOUNT } from './tokens'
-import { AccountResponse, RegisterAccountRequest } from './accounts.dto'
+import {
+  REGISTER_ACCOUNT,
+  GET_ACCOUNT,
+  GET_OWN_ACCOUNT,
+  VERIFY_ACCOUNT,
+  CONFIRM_REGISTRATION,
+} from './tokens'
+import { AccountResponse, ConfirmRegistrationRequest, RegisterAccountRequest } from './accounts.dto'
 
 interface UploadedAvatar {
   readonly mimetype: string
@@ -58,8 +65,16 @@ export class AccountsController {
     @Inject(GET_ACCOUNT) private readonly getAccount: GetAccount,
     @Inject(GET_OWN_ACCOUNT) private readonly getOwnAccount: GetOwnAccount,
     @Inject(VERIFY_ACCOUNT) private readonly verifyAccount: VerifyAccount,
+    @Inject(CONFIRM_REGISTRATION) private readonly confirmRegistration: ConfirmRegistration,
   ) {}
 
+  /**
+   * PUBLICO: quien se registra todavia NO tiene identidad; este endpoint la
+   * crea en el proveedor (ADR-004, "Alta server-side"). Antes exigia un
+   * testimonio porque la identidad se creaba en la pantalla alojada; ese paso
+   * desaparecio.
+   */
+  @Public()
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
@@ -70,30 +85,18 @@ export class AccountsController {
   )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Registra una cuenta de jugador (HU-01)' })
-  @ApiResponse({ status: 201, description: 'Cuenta registrada', type: AccountResponse })
-  @ApiResponse({ status: 400, description: 'Datos invalidos' })
-  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
-  @ApiResponse({ status: 409, description: 'El correo o el apodo ya estan registrados' })
+  @ApiResponse({ status: 201, description: 'Cuenta registrada, pendiente de confirmar el correo' })
   @ApiResponse({
-    status: 503,
-    description:
-      'El proveedor de identidad no respondio. La cuenta NO se creo: no se pudo comprobar el correo o reflejar el rol.',
+    status: 400,
+    description: 'Datos invalidos o contrasena que no cumple la politica',
   })
+  @ApiResponse({ status: 409, description: 'El correo o el apodo ya estan registrados' })
+  @ApiResponse({ status: 503, description: 'El proveedor de identidad no respondio' })
   async register(
     @Body() body: RegisterAccountRequest,
     @UploadedFile() avatar: UploadedAvatar | undefined,
-    @CurrentIdentity() identity: VerifiedIdentity,
   ): Promise<AccountResponse> {
     try {
-      // El sujeto se pasa TAL CUAL, tambien cuando es `anonymous`.
-      //
-      // Antes se convertia a `undefined` para que el caso de uso creara una
-      // identidad. Ya no crea ninguna: la identidad existe antes que la cuenta.
-      // Con `AUTH_MODE=disabled` el sujeto queda literalmente `anonymous`, que
-      // es lo que ADR-004 describe: los datos dicen que nadie fue verificado en
-      // vez de aparentar personas concretas.
-      const subject = identity.subject
-
       return await this.registerAccount.execute({
         email: body.email,
         password: body.password,
@@ -112,11 +115,41 @@ export class AccountsController {
                 bytes: avatar.buffer,
               },
             }),
-        subject,
       })
     } catch (error: unknown) {
       throw AccountsController.translate(error)
     }
+  }
+
+  /**
+   * PUBLICO: confirma el correo con el codigo que envio el proveedor y activa
+   * la cuenta. No exige testimonio: quien confirma aun no puede iniciar sesion,
+   * que es justo lo que este paso desbloquea.
+   */
+  @Public()
+  @Post('confirmation')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirma el correo y activa la cuenta (HU-01)' })
+  @ApiResponse({ status: 200, description: 'Cuenta activada', type: AccountResponse })
+  @ApiResponse({ status: 400, description: 'Codigo invalido o expirado' })
+  @ApiResponse({ status: 503, description: 'El proveedor de identidad no respondio' })
+  async confirm(@Body() body: ConfirmRegistrationRequest): Promise<AccountResponse> {
+    const outcome = await this.confirmRegistration.execute({
+      identifier: body.identifier,
+      code: body.code,
+    })
+
+    if (outcome.kind === 'invalidCode') {
+      throw new BadRequestException('El codigo no es valido o ha expirado.')
+    }
+
+    if (outcome.kind === 'providerUnavailable') {
+      throw new ServiceUnavailableException(
+        'El proveedor de identidad no esta disponible. Intentelo de nuevo mas tarde.',
+      )
+    }
+
+    return outcome.account
   }
 
   @Get('me')
@@ -202,7 +235,7 @@ export class AccountsController {
      * registro **falla cerrado** a proposito -no se guarda una cuenta cuyo rol
      * no viajaria en el testimonio- y quien llama merece saber por que.
      */
-    if (error instanceof RoleDirectoryError || error instanceof VerifiedEmailDirectoryError) {
+    if (error instanceof RoleDirectoryError || error instanceof IdentitySignUpError) {
       return new ServiceUnavailableException(
         'El proveedor de identidad no esta disponible. Intentelo de nuevo mas tarde.',
       )
