@@ -9,7 +9,6 @@ import {
   AccountNotFoundError,
   DisplayNameAlreadyTakenError,
   NicknameBlacklistedError,
-  IdentityRequiredError,
 } from '../../src/application/errors/ApplicationError'
 import type { NotificationRequest } from '../../src/application/ports/NotificationRequestPort'
 import type { NotificationRequestPort } from '../../src/application/ports/NotificationRequestPort'
@@ -19,6 +18,11 @@ import { InMemoryNicknameBlacklist } from '../../src/adapters/outbound/persisten
 import { InMemorySecurityQuestionCatalog } from '../../src/adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
 import { FakeAuthenticationProvider } from '../../src/adapters/outbound/identity/FakeAuthenticationProvider'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
+import { InMemoryIdentitySignUp } from '../../src/adapters/outbound/identity/InMemoryIdentitySignUp'
+import {
+  IdentitySignUpError,
+  type IdentitySignUpPort,
+} from '../../src/application/ports/IdentitySignUpPort'
 import {
   RoleDirectoryError,
   type RoleDirectoryPort,
@@ -59,16 +63,22 @@ interface Harness {
   avatars: InMemoryAvatarStorage
   blacklist: InMemoryNicknameBlacklist
   roleDirectory: InMemoryRoleDirectory
+  identitySignUp: InMemoryIdentitySignUp
 }
 
 const buildHarness = (
-  overrides: { accounts?: AccountRepositoryPort; roleDirectory?: RoleDirectoryPort } = {},
+  overrides: {
+    accounts?: AccountRepositoryPort
+    roleDirectory?: RoleDirectoryPort
+    identitySignUp?: IdentitySignUpPort
+  } = {},
 ): Harness => {
   const accounts = new InMemoryAccountRepository()
   const notifier = new RecordingNotifier()
   const avatars = new InMemoryAvatarStorage()
   const blacklist = new InMemoryNicknameBlacklist()
   const roleDirectory = new InMemoryRoleDirectory()
+  const identitySignUp = new InMemoryIdentitySignUp()
   const clock = { now: (): Date => AT }
   const ids = { generate: sequence('acc') }
   const repository = overrides.accounts ?? accounts
@@ -79,6 +89,7 @@ const buildHarness = (
     avatars,
     blacklist,
     roleDirectory,
+    identitySignUp,
     registerAccount: new RegisterAccount({
       accounts: repository,
       notifications: notifier,
@@ -88,6 +99,7 @@ const buildHarness = (
       blacklist,
       questions: new InMemorySecurityQuestionCatalog(),
       roleDirectory: overrides.roleDirectory ?? roleDirectory,
+      identitySignUp: overrides.identitySignUp ?? identitySignUp,
     }),
     getAccount: new GetAccount(repository),
     verifyAccount: new VerifyAccount({ accounts: repository, clock }),
@@ -133,6 +145,17 @@ describe('RegisterAccount', () => {
     ])
   })
 
+  it('rechaza un segundo registro con el mismo correo, y no como 500', async () => {
+    const harness = buildHarness()
+    await harness.registerAccount.execute(command)
+
+    // Mismo correo, apodo distinto: choca por el correo, que es unico. Debe ser
+    // un 409 con mensaje, no la restriccion de la base reventando sin traducir.
+    await expect(
+      harness.registerAccount.execute(validCommand({ displayName: 'OtroApodo' })),
+    ).rejects.toBeInstanceOf(AccountAlreadyExistsError)
+  })
+
   it('asigna el rol PLAYER y no persiste la contrasena', async () => {
     const harness = buildHarness()
     await harness.registerAccount.execute(command)
@@ -170,6 +193,41 @@ describe('RegisterAccount', () => {
     expect(result.displayName).toBe('Ana Ramirez')
   })
 
+  /**
+   * Nace PENDING: Cognito acaba de enviar el codigo y el correo aun no esta
+   * confirmado. La activacion la hace `ConfirmRegistration`, con su propia
+   * suite. Antes este caso de uso "adivinaba" el estado consultando el correo
+   * verificado; ahora controla el alta y sabe que esta pendiente.
+   */
+  it('nace PENDING_VERIFICATION: el correo aun no esta confirmado', async () => {
+    const harness = buildHarness()
+
+    const result = await harness.registerAccount.execute(command)
+
+    expect(result.status).toBe(AccountStatus.PendingVerification)
+  })
+
+  /**
+   * El alta empieza por crear la identidad. Si el proveedor la rechaza -caido,
+   * contrasena debil-, NO debe quedar ni cuenta, ni avatar, ni rol reflejado.
+   * El fallo llega antes de tocar nada de eso.
+   */
+  it('no crea nada cuando el proveedor rechaza el alta', async () => {
+    const providerDown: IdentitySignUpPort = {
+      signUp: () => Promise.reject(new IdentitySignUpError('el proveedor no responde')),
+      confirmSignUp: () => Promise.reject(new Error('no deberia llamarse')),
+    }
+    const harness = buildHarness({ identitySignUp: providerDown })
+
+    await expect(harness.registerAccount.execute(command)).rejects.toBeInstanceOf(
+      IdentitySignUpError,
+    )
+
+    expect(harness.accounts.size).toBe(0)
+    expect(harness.avatars.size).toBe(0)
+    expect(harness.notifier.requested).toEqual([])
+  })
+
   it('rechaza un correo ya registrado sin tocar el proveedor de identidad', async () => {
     const harness = buildHarness()
     await harness.registerAccount.execute(command)
@@ -200,18 +258,11 @@ describe('RegisterAccount', () => {
     )
   })
 
-  /**
-   * La identidad existe ANTES que la cuenta (ADR-004). Sin sujeto verificado no
-   * hay a quien vincular la cuenta, y el caso de uso NO inventa uno: eso
-   * significaria que Account decide quien existe.
-   */
-  it('rechaza registrar sin una identidad ya verificada', async () => {
+  it('rechaza registrar sin contrasena, y no crea nada', async () => {
     const harness = buildHarness()
-    const sinSujeto = { ...validCommand(), subject: '   ' }
+    const sinContrasena = { ...validCommand(), password: '' }
 
-    await expect(harness.registerAccount.execute(sinSujeto)).rejects.toBeInstanceOf(
-      IdentityRequiredError,
-    )
+    await expect(harness.registerAccount.execute(sinContrasena)).rejects.toBeInstanceOf(DomainError)
     expect(harness.accounts.size).toBe(0)
   })
 
@@ -249,24 +300,18 @@ describe('RegisterAccount', () => {
     ).rejects.toBeInstanceOf(DomainError)
   })
 
-  it('rechaza contrasenas que no cumplen la politica', async () => {
+  /**
+   * La contrasena vuelve al alta y esta vez SI va a algun sitio: a Cognito, por
+   * `signUp`. Este servicio la transporta y no la persiste. Se afirma que NO
+   * aparece en la instantanea guardada.
+   */
+  it('transporta la contrasena al proveedor y no la persiste', async () => {
     const harness = buildHarness()
+    await harness.registerAccount.execute(command)
 
-    await expect(
-      harness.registerAccount.execute(validCommand({ password: 'Abcde1!x' })),
-    ).rejects.toThrow(/mas de 8/)
-    await expect(
-      harness.registerAccount.execute(validCommand({ password: 'abcdefg1!' })),
-    ).rejects.toThrow(/mayuscula/)
-    await expect(
-      harness.registerAccount.execute(validCommand({ password: 'ABCDEFG1!' })),
-    ).rejects.toThrow(/minuscula/)
-    await expect(
-      harness.registerAccount.execute(validCommand({ password: 'Abcdefgh!' })),
-    ).rejects.toThrow(/numero/)
-    await expect(
-      harness.registerAccount.execute(validCommand({ password: 'Abcdefg12' })),
-    ).rejects.toThrow(/simbolo/)
+    const stored = await harness.accounts.findByEmail(EmailAddress.create(command.email))
+
+    expect(JSON.stringify(stored?.toSnapshot())).not.toContain(command.password)
   })
 
   it('rechaza un apodo de mas de 32 caracteres', async () => {
@@ -350,10 +395,10 @@ describe('RegisterAccount', () => {
     const created = await harness.registerAccount.execute(command)
 
     expect(created.roles).toEqual([Role.Player])
-    // Lo que se comprueba no es que la cuenta tenga el rol -eso ya lo cubre la
-    // prueba de arriba- sino que el rol tambien esta donde el testimonio lo
-    // recoge. Sin esto, los otros servicios ven a esta persona sin ningun rol.
-    expect(harness.roleDirectory.rolesOf(command.subject!)).toEqual([Role.Player])
+    // El rol tambien esta donde el testimonio lo recoge. El sujeto lo asigno el
+    // proveedor (el doble), asi que se lee de la cuenta, no del comando.
+    const stored = await harness.accounts.findByEmail(EmailAddress.create(command.email))
+    expect(harness.roleDirectory.rolesOf(stored!.subject)).toEqual([Role.Player])
   })
 
   /**
@@ -469,12 +514,11 @@ describe('GetOwnAccount', () => {
 
   it('devuelve la cuenta vinculada al sujeto', async () => {
     const harness = buildHarness()
-    const created = await harness.registerAccount.execute(
-      validCommand({ ...command, subject: 'sub-propio' }),
-    )
+    const created = await harness.registerAccount.execute(command)
+    const stored = await harness.accounts.findByEmail(EmailAddress.create(command.email))
     const useCase = new GetOwnAccount(harness.accounts)
 
-    expect(await useCase.execute('sub-propio')).toEqual(created)
+    expect(await useCase.execute(stored!.subject)).toEqual(created)
   })
 })
 

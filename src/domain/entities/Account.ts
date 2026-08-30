@@ -289,7 +289,7 @@ export class Account {
 
   grantRole(role: Role, actorRoles: ReadonlySet<Role>): void {
     if (!RolePolicy.canManageRoles(actorRoles)) {
-      throw new DomainError('Solo un administrador puede conceder roles.')
+      throw new DomainError('Solo un Super Administrador puede conceder roles.')
     }
 
     this.roles.add(role)
@@ -297,7 +297,7 @@ export class Account {
 
   revokeRole(role: Role, actorRoles: ReadonlySet<Role>): void {
     if (!RolePolicy.canManageRoles(actorRoles)) {
-      throw new DomainError('Solo un administrador puede retirar roles.')
+      throw new DomainError('Solo un Super Administrador puede retirar roles.')
     }
 
     if (!RolePolicy.isRemovable(role)) {

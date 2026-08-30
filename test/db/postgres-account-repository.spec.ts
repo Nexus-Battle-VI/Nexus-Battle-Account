@@ -138,7 +138,7 @@ describe('PostgresAccountRepository', () => {
     const account = buildAccount()
     await repository.save(account)
 
-    account.grantRole(Role.Moderator, new Set([Role.Administrator]))
+    account.grantRole(Role.Moderator, new Set([Role.SuperAdministrator]))
 
     const found = await repository.findById(account.id)
 
@@ -150,7 +150,7 @@ describe('PostgresAccountRepository', () => {
     await repository.save(account)
 
     account.verify(AT)
-    account.grantRole(Role.Moderator, new Set([Role.Administrator]))
+    account.grantRole(Role.Moderator, new Set([Role.SuperAdministrator]))
     await repository.save(account)
 
     const found = await repository.findById(account.id)
@@ -173,10 +173,10 @@ describe('PostgresAccountRepository', () => {
    */
   it('retira los roles que el agregado ya no tiene', async () => {
     const account = buildAccount()
-    account.grantRole(Role.Moderator, new Set([Role.Administrator]))
+    account.grantRole(Role.Moderator, new Set([Role.SuperAdministrator]))
     await repository.save(account)
 
-    account.revokeRole(Role.Moderator, new Set([Role.Administrator]))
+    account.revokeRole(Role.Moderator, new Set([Role.SuperAdministrator]))
     await repository.save(account)
 
     const roles = await db

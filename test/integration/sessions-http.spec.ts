@@ -18,6 +18,8 @@ import {
 } from '../../src/application/ports/TokenVerifierPort'
 import { ROLE_DIRECTORY } from '../../src/application/ports/RoleDirectoryPort'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
+import { InMemoryIdentitySignUp } from '../../src/adapters/outbound/identity/InMemoryIdentitySignUp'
+import { IDENTITY_SIGN_UP } from '../../src/application/ports/IdentitySignUpPort'
 import { registerAccountRequest } from '../support/http-register'
 import { VALID_PASSWORD, buildActiveAccount } from '../support/account-factory'
 
@@ -39,12 +41,10 @@ import { VALID_PASSWORD, buildActiveAccount } from '../support/account-factory'
 const FIXED_IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
   'token-registro': {
     subject: 'sujeto-registro',
-    email: 'registro@nexus.test',
     roles: new Set([Role.Player]),
   },
   'token-administrador-verificador': {
     subject: 'sujeto-admin-verificador',
-    email: 'verificador@nexus.test',
     roles: new Set([Role.Player, Role.Administrator]),
   },
 }
@@ -86,6 +86,8 @@ describe('API de sesiones (HU-02)', () => {
       // cuando el rol no se puede reflejar: es el comportamiento buscado.
       .overrideProvider(ROLE_DIRECTORY)
       .useValue(new InMemoryRoleDirectory())
+      .overrideProvider(IDENTITY_SIGN_UP)
+      .useValue(new InMemoryIdentitySignUp())
       .compile()
 
     app = moduleRef.createNestApplication()
@@ -120,18 +122,16 @@ describe('API de sesiones (HU-02)', () => {
     nickname: string,
     password = VALID_PASSWORD,
   ): Promise<{ id: string; subject: string }> => {
-    const registrationToken = `token-registro-${email}`
-    const subject = `sujeto-${email}`
-    dynamicIdentities.set(registrationToken, { subject, email, roles: new Set([Role.Player]) })
+    // El alta es publica: sin token. El sujeto lo deriva el doble del correo,
+    // el mismo que despues resuelve el login.
+    const subject = `sub:${email.trim().toLowerCase()}`
 
-    const created = await registerAccountRequest(app, { email, nickname, password }).set(
-      'Authorization',
-      `Bearer ${registrationToken}`,
-    )
+    const created = await registerAccountRequest(app, { email, nickname, password })
 
+    // Se confirma el correo con el codigo fijo del doble, que la activa.
     await request(app.getHttpServer())
-      .post(`/api/accounts/${(created.body as { id: string }).id}/verification`)
-      .set('Authorization', 'Bearer token-administrador-verificador')
+      .post('/api/accounts/confirmation')
+      .send({ identifier: email, code: '000000' })
 
     authProvider.seed({ email, password })
 
@@ -188,7 +188,7 @@ describe('API de sesiones (HU-02)', () => {
       .send({ identifier: 'subject-real@nexus.test', password: VALID_PASSWORD })
 
     expect(response.status).toBe(200)
-    expect(response.body.account.subject).toBe('sujeto-subject-real@nexus.test')
+    expect(response.body.account.subject).toBe('sub:subject-real@nexus.test')
     expect(response.body.account.id).not.toBe(response.body.account.subject)
     expect(typeof response.body.account.id).toBe('string')
   })
@@ -242,7 +242,7 @@ describe('API de sesiones (HU-02)', () => {
       throw new Error('la cuenta de la prueba deberia existir')
     }
 
-    stored.grantRole(Role.Moderator, new Set([Role.Administrator]))
+    stored.grantRole(Role.Moderator, new Set([Role.SuperAdministrator]))
     await accounts.save(stored)
 
     const response = await request(app.getHttpServer())
@@ -265,7 +265,6 @@ describe('API de sesiones (HU-02)', () => {
     const accessToken = login.body.accessToken as string
     dynamicIdentities.set(accessToken, {
       subject,
-      email: 'ca05@nexus.test',
       roles: new Set([Role.Player]),
     })
 
