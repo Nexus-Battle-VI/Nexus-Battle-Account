@@ -113,6 +113,33 @@ describe('RolePolicy', () => {
 })
 
 describe('Account', () => {
+  /**
+   * `PENDING_VERIFICATION` espera la prueba de que alguien controla el buzon, y
+   * el proveedor de identidad ya la entrega en el testimonio. Pedirla otra vez
+   * dejaba la cuenta esperando algo que NADIE resolvia: `VerifyAccount` solo lo
+   * invoca un endpoint que exige rol ADMINISTRATOR, asi que toda cuenta nacida
+   * del flujo real se quedaba pendiente para siempre y no podia usar el inicio
+   * de sesion por credenciales, que exige `canAuthenticate`.
+   */
+  it('nace ACTIVA cuando el proveedor ya declaro verificado ese correo', () => {
+    const account = buildAccount({ emailAlreadyVerified: true })
+
+    expect(account.currentStatus).toBe(AccountStatus.Active)
+    expect(account.canAuthenticate).toBe(true)
+  })
+
+  /**
+   * El control del caso anterior, y la razon de que el dato venga del
+   * TESTIMONIO y no del formulario. Sin esta prueba, bastaria con que alguien
+   * escribiera un correo cualquiera para nacer activo.
+   */
+  it('sigue pendiente si no consta esa verificacion', () => {
+    const account = buildAccount({ emailAlreadyVerified: false })
+
+    expect(account.currentStatus).toBe(AccountStatus.PendingVerification)
+    expect(account.canAuthenticate).toBe(false)
+  })
+
   it('nace pendiente de verificacion con el rol base y emite el evento', () => {
     const account = buildAccount()
 

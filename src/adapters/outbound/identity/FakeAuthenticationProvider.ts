@@ -1,4 +1,9 @@
+import {
+  AuthenticationProviderError,
+  SecondFactorMethod,
+} from '../../../application/ports/AuthenticationProviderPort'
 import type {
+  SecondFactorSelection,
   AuthenticationCredentials,
   AuthenticationOutcome,
   AuthenticationProviderPort,
@@ -46,8 +51,16 @@ export class FakeAuthenticationProvider implements AuthenticationProviderPort {
   private readonly pendingChallenges = new Map<string, PendingChallenge>()
   private readonly nextToken: () => string
 
-  constructor(nextToken: () => string) {
+  /**
+   * Metodo que este doble anuncia al retar. Por defecto la aplicacion
+   * autenticadora, que es lo que el pool tiene aprovisionado; se puede cambiar
+   * para ejercitar los otros sin tocar el adaptador real.
+   */
+  readonly secondFactorMethod: SecondFactorMethod
+
+  constructor(nextToken: () => string, secondFactorMethod?: SecondFactorMethod) {
     this.nextToken = nextToken
+    this.secondFactorMethod = secondFactorMethod ?? SecondFactorMethod.AuthenticatorApp
   }
 
   seed(credential: SeededCredential): void {
@@ -73,13 +86,40 @@ export class FakeAuthenticationProvider implements AuthenticationProviderPort {
         code: stored.secondFactorCode,
       })
 
-      return Promise.resolve({ kind: 'challengeRequired', challengeToken })
+      // El doble declara el metodo igual que el adaptador real: si no, una
+      // prueba podria pasar con un contrato que produccion no cumple.
+      return Promise.resolve({
+        kind: 'challengeRequired',
+        challengeToken,
+        method: this.secondFactorMethod,
+      })
     }
 
     return Promise.resolve({
       kind: 'authenticated',
       accessToken: this.issueAccessToken(),
       expiresIn: FAKE_EXPIRES_IN_SECONDS,
+    })
+  }
+
+  /**
+   * El doble reproduce el contrato COMPLETO, incluida la seleccion.
+   *
+   * Sin esto, una prueba podria pasar contra un puerto que produccion no
+   * cumple: es justo el hueco por el que `SELECT_MFA_TYPE` habria roto el
+   * inicio de sesion al activar el segundo factor por correo.
+   */
+  chooseSecondFactor(input: SecondFactorSelection): Promise<AuthenticationOutcome> {
+    if (!this.pendingChallenges.has(input.challengeToken)) {
+      return Promise.reject(
+        new AuthenticationProviderError('No hay una seleccion de factor pendiente.'),
+      )
+    }
+
+    return Promise.resolve({
+      kind: 'challengeRequired',
+      challengeToken: input.challengeToken,
+      method: input.method,
     })
   }
 

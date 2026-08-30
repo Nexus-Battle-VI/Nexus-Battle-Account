@@ -32,6 +32,7 @@ export const buildAccount = (
     email?: string
     subject?: string
     displayName?: string
+    emailAlreadyVerified?: boolean
   } = {},
 ): Account => {
   const id = overrides.id ?? 'acc-1'
@@ -46,6 +47,9 @@ export const buildAccount = (
     termsAccepted: true,
     avatar: defaultAvatarMetadata(id),
     occurredAt: AT,
+    ...(overrides.emailAlreadyVerified === undefined
+      ? {}
+      : { emailAlreadyVerified: overrides.emailAlreadyVerified }),
   })
 }
 

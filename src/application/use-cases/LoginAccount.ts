@@ -1,4 +1,5 @@
 import { isAdministrativeRole } from '../../domain/entities/Role'
+import { SecondFactorPolicy } from '../../domain/policies/SecondFactorPolicy'
 import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
 import {
   AuthenticationProviderError,
@@ -76,7 +77,47 @@ export class LoginAccount {
     }
 
     if (outcome.kind === 'challengeRequired') {
-      return { kind: 'secondFactorRequired', challengeToken: outcome.challengeToken }
+      /**
+       * El proveedor no distingue por rol; Account si.
+       *
+       * Un administrador cuyo segundo factor sea el correo tendria el factor
+       * colgando del mismo buzon que sirve para recuperar la cuenta. Se
+       * rechaza aqui, que es el unico sitio donde se conoce el rol y donde la
+       * fuente de verdad es `account_roles` y no el testimonio.
+       */
+      if (!SecondFactorPolicy.permits(account.currentRoles, outcome.method)) {
+        return { kind: 'secondFactorNotPermitted' }
+      }
+
+      return {
+        kind: 'secondFactorRequired',
+        challengeToken: outcome.challengeToken,
+        method: outcome.method,
+      }
+    }
+
+    /**
+     * Elegir factor es un reto tan valido como responderlo.
+     *
+     * Va ANTES de la comprobacion administrativa a proposito: `selectionRequired`
+     * significa que el proveedor SI esta exigiendo segundo factor, solo que
+     * todavia no ha decidido cual. Tratarlo como "no hubo reto" convertiria en
+     * fallo el caso normal de una cuenta con dos factores inscritos.
+     */
+    if (outcome.kind === 'selectionRequired') {
+      // Se ofrece SOLO lo que la politica permite. Mostrar un factor que
+      // despues se rechazaria seria invitar a elegir un camino sin salida.
+      const permitidos = SecondFactorPolicy.narrow(account.currentRoles, outcome.methods)
+
+      if (permitidos.length === 0) {
+        return { kind: 'secondFactorNotPermitted' }
+      }
+
+      return {
+        kind: 'secondFactorSelectionRequired',
+        challengeToken: outcome.challengeToken,
+        methods: permitidos,
+      }
     }
 
     if (isAdministrativeRole(account.currentRoles)) {

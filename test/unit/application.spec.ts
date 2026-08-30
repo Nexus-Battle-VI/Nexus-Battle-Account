@@ -661,6 +661,17 @@ describe('LoginAccount', () => {
       })
 
       expect(outcome).toMatchObject({ kind: 'secondFactorRequired' })
+
+      /**
+       * El reto debe decir DONDE mirar, y no solo que hay reto.
+       *
+       * Sin este dato la interfaz solo podia adivinar, y adivinaba mal:
+       * anunciaba "te enviamos un codigo por correo" mientras el pool retaba
+       * con la aplicacion autenticadora y no se enviaba ningun correo. Un
+       * mensaje que manda a alguien a revisar un buzon vacio es peor que no
+       * decir nada.
+       */
+      expect(outcome).toMatchObject({ method: 'AUTHENTICATOR_APP' })
     },
   )
 

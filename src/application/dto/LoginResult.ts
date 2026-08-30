@@ -1,3 +1,5 @@
+import type { SecondFactorMethod } from '../ports/AuthenticationProviderPort'
+
 import type { AccountDto } from './AccountDto'
 
 /**
@@ -40,7 +42,25 @@ export type LoginOutcome =
       /** Vigencia del `accessToken` en segundos, informada por el proveedor. */
       readonly expiresIn: number
     }
-  | { readonly kind: 'secondFactorRequired'; readonly challengeToken: string }
+  | {
+      readonly kind: 'secondFactorRequired'
+      readonly challengeToken: string
+      readonly method: SecondFactorMethod
+    }
+  | {
+      readonly kind: 'secondFactorSelectionRequired'
+      readonly challengeToken: string
+      readonly methods: readonly SecondFactorMethod[]
+    }
+  /**
+   * El proveedor reto con un factor que esta cuenta NO puede usar.
+   *
+   * No es "codigo invalido" ni "proveedor caido": es una cuenta administrativa
+   * cuyo unico factor inscrito es el correo, cuando la politica exige la
+   * aplicacion autenticadora. Se distingue para que el mensaje pueda decir que
+   * hacer -inscribir el autenticador- en lugar de parecer un fallo transitorio.
+   */
+  | { readonly kind: 'secondFactorNotPermitted' }
   | { readonly kind: 'secondFactorInvalid' }
   | { readonly kind: 'invalidCredentials' }
   | { readonly kind: 'providerUnavailable' }

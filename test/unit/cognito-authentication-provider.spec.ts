@@ -130,6 +130,9 @@ describe('CognitoAuthenticationProvider', () => {
       expect(outcome).toEqual({
         kind: 'challengeRequired',
         challengeToken: 'SOFTWARE_TOKEN_MFA:sesion-cognito-abc',
+        // El token sigue siendo opaco. El metodo va APARTE justo para que nadie
+        // tenga que destriparlo para saber donde mirar.
+        method: 'AUTHENTICATOR_APP',
       })
     })
 
