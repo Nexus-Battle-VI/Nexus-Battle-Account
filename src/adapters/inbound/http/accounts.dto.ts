@@ -1,6 +1,17 @@
 import { ApiProperty } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
-import { Allow, IsBoolean, IsEmail, IsString, MaxLength } from 'class-validator'
+import {
+  Allow,
+  IsBoolean,
+  IsEmail,
+  IsIn,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator'
+
+import { Role, type Role as RoleValue } from '../../../domain/entities/Role'
 
 /**
  * Contrato de entrada del registro (multipart/form-data).
@@ -22,8 +33,15 @@ export class RegisterAccountRequest {
   @MaxLength(254)
   email!: string
 
-  @ApiProperty({ example: 'Abcdefg1!' })
+  /**
+   * Se transporta a Cognito por `signUp` y NO se persiste aqui (ADR-004,
+   * decision 2). La politica la aplica el proveedor: un rechazo suyo llega como
+   * 400. Aqui solo se exige que exista y tenga una longitud minima razonable,
+   * sin duplicar la politica -que vive en el pool y podria cambiar-.
+   */
+  @ApiProperty({ example: 'Abcdefg1!', minLength: 8 })
   @IsString()
+  @MinLength(8)
   password!: string
 
   @ApiProperty({ example: 'Ana Ramirez', description: 'Apodo (display_name)', maxLength: 32 })
@@ -81,4 +99,60 @@ export class AccountResponse {
 
   @ApiProperty({ example: ['PLAYER'], isArray: true, type: String })
   readonly roles!: readonly string[]
+}
+
+export class FindAccountByEmailQuery {
+  @ApiProperty({ example: 'jugador@nexus.test' })
+  @IsEmail({}, { message: 'El correo debe tener un formato valido.' })
+  @MaxLength(254)
+  email!: string
+}
+
+export class AssignRoleRequest {
+  @ApiProperty({ enum: [Role.Moderator, Role.Administrator], example: Role.Moderator })
+  @IsString()
+  @IsIn([Role.Moderator, Role.Administrator], {
+    message: 'El rol debe ser MODERATOR o ADMINISTRATOR.',
+  })
+  role!: RoleValue
+}
+
+export class ManagedAccountResponse extends AccountResponse {
+  @ApiProperty({
+    example: true,
+    description: 'Indica si Cognito confirma SOFTWARE_TOKEN_MFA para la cuenta.',
+  })
+  readonly mfaEnrolled!: boolean
+}
+
+export class ConfirmRegistrationRequest {
+  @ApiProperty({ description: 'Correo o apodo con el que se registro.' })
+  @IsString()
+  identifier!: string
+
+  @ApiProperty({ example: '123456', description: 'Codigo que Cognito envio al correo.' })
+  @IsString()
+  code!: string
+}
+
+export class TotpEnrollmentResponse {
+  @ApiProperty({
+    example:
+      'otpauth://totp/Nexus%20Battles%20VI:jugador@nexus.test?secret=JBSWY3DPEHPK3PXP&issuer=Nexus%20Battles%20VI&algorithm=SHA1&digits=6&period=30',
+    description: 'URI otpauth para generar el QR. Contiene el secreto: es una credencial.',
+  })
+  readonly otpauthUri!: string
+
+  @ApiProperty({
+    example: 'JBSWY3DPEHPK3PXP',
+    description: 'Clave base32 para introducir a mano si no se escanea el QR.',
+  })
+  readonly secret!: string
+}
+
+export class ConfirmTotpRequest {
+  @ApiProperty({ example: '123456', description: 'Codigo de seis digitos del autenticador.' })
+  @IsString()
+  @Matches(/^\d{6}$/u, { message: 'El codigo debe tener exactamente seis digitos.' })
+  code!: string
 }

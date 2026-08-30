@@ -2,6 +2,7 @@ import { Module, type CanActivate } from '@nestjs/common'
 import { APP_GUARD, Reflector } from '@nestjs/core'
 
 import { AccountsController } from '../../adapters/inbound/http/accounts.controller'
+import { MfaController } from '../../adapters/inbound/http/mfa.controller'
 import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
 import { HealthController } from '../../adapters/inbound/http/health.controller'
 import {
@@ -12,19 +13,44 @@ import {
   LOGIN_ACCOUNT,
   REGISTER_ACCOUNT,
   VERIFY_ACCOUNT,
+  CONFIRM_REGISTRATION,
+  ENROLL_TOTP,
+  CONFIRM_TOTP_ENROLLMENT,
+  FIND_ACCOUNT_BY_EMAIL,
+  ASSIGN_ROLE,
+  REVOKE_ROLE,
 } from '../../adapters/inbound/http/tokens'
 import { READINESS_CHECKS, VERSION_REPORT } from '../../adapters/inbound/http/tokens.health'
 
 import { RegisterAccount } from '../../application/use-cases/RegisterAccount'
+import { ConfirmRegistration } from '../../application/use-cases/ConfirmRegistration'
+import { EnrollTotp } from '../../application/use-cases/EnrollTotp'
+import { ConfirmTotpEnrollment } from '../../application/use-cases/ConfirmTotpEnrollment'
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
 import { LoginAccount } from '../../application/use-cases/LoginAccount'
 import { ChooseSecondFactor } from '../../application/use-cases/ChooseSecondFactor'
 import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecondFactor'
+import { AssignRole } from '../../application/use-cases/AssignRole'
+import { FindAccountByEmail } from '../../application/use-cases/FindAccountByEmail'
+import { RevokeRole } from '../../application/use-cases/RevokeRole'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
 import { ROLE_DIRECTORY, type RoleDirectoryPort } from '../../application/ports/RoleDirectoryPort'
+import {
+  IDENTITY_SIGN_UP,
+  type IdentitySignUpPort,
+} from '../../application/ports/IdentitySignUpPort'
+import {
+  TOTP_ENROLLMENT,
+  type TotpEnrollmentPort,
+} from '../../application/ports/TotpEnrollmentPort'
+import { MFA_STATUS, type MfaStatusPort } from '../../application/ports/MfaStatusPort'
+import {
+  SESSION_REVOCATION,
+  type SessionRevocationPort,
+} from '../../application/ports/SessionRevocationPort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
 import { CLOCK } from '../../application/ports/ClockPort'
 import { ID_GENERATOR } from '../../application/ports/IdGeneratorPort'
@@ -61,6 +87,14 @@ import { FakeAuthenticationProvider } from '../../adapters/outbound/identity/Fak
 import { CognitoAuthenticationProvider } from '../../adapters/outbound/identity/CognitoAuthenticationProvider'
 import { CognitoRoleDirectory } from '../../adapters/outbound/identity/CognitoRoleDirectory'
 import { InMemoryRoleDirectory } from '../../adapters/outbound/identity/InMemoryRoleDirectory'
+import { CognitoIdentitySignUp } from '../../adapters/outbound/identity/CognitoIdentitySignUp'
+import { InMemoryIdentitySignUp } from '../../adapters/outbound/identity/InMemoryIdentitySignUp'
+import { CognitoTotpEnrollment } from '../../adapters/outbound/identity/CognitoTotpEnrollment'
+import { InMemoryTotpEnrollment } from '../../adapters/outbound/identity/InMemoryTotpEnrollment'
+import { CognitoMfaStatus } from '../../adapters/outbound/identity/CognitoMfaStatus'
+import { InMemoryMfaStatus } from '../../adapters/outbound/identity/InMemoryMfaStatus'
+import { CognitoSessionRevocation } from '../../adapters/outbound/identity/CognitoSessionRevocation'
+import { InMemorySessionRevocation } from '../../adapters/outbound/identity/InMemorySessionRevocation'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
@@ -88,7 +122,7 @@ export const DATABASE = Symbol('Database')
  * framework y podria ejecutarse fuera de el sin cambios.
  */
 @Module({
-  controllers: [AccountsController, SessionsController, HealthController],
+  controllers: [AccountsController, MfaController, SessionsController, HealthController],
   providers: [
     {
       provide: APP_CONFIG,
@@ -271,6 +305,95 @@ export const DATABASE = Symbol('Database')
       inject: [APP_CONFIG, LOGGER],
     },
     {
+      // El alta de identidad ocurre detras de la UI de Web (ADR-004, "Alta
+      // server-side"): este puerto crea la identidad en Cognito y confirma su
+      // correo. Sin proveedor configurado, el doble en memoria reproduce el
+      // contrato completo -incluida la confirmacion por codigo- para desarrollo.
+      provide: IDENTITY_SIGN_UP,
+      useFactory: (config: AppConfig, logger: Logger): IdentitySignUpPort => {
+        if (config.cognito === null) {
+          logger.warn('identity_sign_up', {
+            driver: 'memoria',
+            detail: 'Sin proveedor de identidad: el alta no llega a Cognito.',
+          })
+
+          return new InMemoryIdentitySignUp()
+        }
+
+        logger.info('identity_sign_up', { driver: 'cognito' })
+
+        return new CognitoIdentitySignUp(config.cognito)
+      },
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
+      // Inscripcion TOTP self-service. Actua sobre el testimonio del usuario, no
+      // sobre credenciales de AWS; sin proveedor configurado, el doble en memoria
+      // reproduce el contrato (asociar -> confirmar con codigo fijo).
+      provide: TOTP_ENROLLMENT,
+      useFactory: (config: AppConfig, logger: Logger): TotpEnrollmentPort => {
+        if (config.cognito === null) {
+          logger.warn('totp_enrollment', {
+            driver: 'memoria',
+            detail: 'Sin proveedor de identidad: la inscripcion TOTP no llega a Cognito.',
+          })
+
+          return new InMemoryTotpEnrollment()
+        }
+
+        logger.info('totp_enrollment', { driver: 'cognito' })
+
+        return new CognitoTotpEnrollment({ userPoolId: config.cognito.userPoolId })
+      },
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
+      provide: MFA_STATUS,
+      useFactory: (config: AppConfig, logger: Logger): MfaStatusPort => {
+        if (config.cognito === null) {
+          logger.warn('mfa_status', {
+            driver: 'memoria',
+            detail: 'Sin proveedor de identidad: el estado TOTP vive solo en memoria.',
+          })
+
+          return new InMemoryMfaStatus()
+        }
+
+        return new CognitoMfaStatus({ userPoolId: config.cognito.userPoolId })
+      },
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
+      provide: SESSION_REVOCATION,
+      useFactory: (config: AppConfig, logger: Logger): SessionRevocationPort => {
+        if (config.cognito === null) {
+          logger.warn('session_revocation', {
+            driver: 'memoria',
+            detail: 'Sin proveedor de identidad: el cierre global vive solo en memoria.',
+          })
+
+          return new InMemorySessionRevocation()
+        }
+
+        return new CognitoSessionRevocation({ userPoolId: config.cognito.userPoolId })
+      },
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
+      provide: ENROLL_TOTP,
+      useFactory: (
+        totpEnrollment: TotpEnrollmentPort,
+        accounts: AccountRepositoryPort,
+      ): EnrollTotp => new EnrollTotp({ totpEnrollment, accounts }),
+      inject: [TOTP_ENROLLMENT, ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: CONFIRM_TOTP_ENROLLMENT,
+      useFactory: (totpEnrollment: TotpEnrollmentPort): ConfirmTotpEnrollment =>
+        new ConfirmTotpEnrollment({ totpEnrollment }),
+      inject: [TOTP_ENROLLMENT],
+    },
+    {
       provide: REGISTER_ACCOUNT,
       useFactory: (
         accounts: AccountRepositoryPort,
@@ -281,6 +404,7 @@ export const DATABASE = Symbol('Database')
         blacklist: NicknameBlacklistPort,
         questions: SecurityQuestionCatalogPort,
         roleDirectory: RoleDirectoryPort,
+        identitySignUp: IdentitySignUpPort,
       ): RegisterAccount =>
         new RegisterAccount({
           accounts,
@@ -291,6 +415,7 @@ export const DATABASE = Symbol('Database')
           blacklist,
           questions,
           roleDirectory,
+          identitySignUp,
         }),
       inject: [
         ACCOUNT_REPOSITORY,
@@ -301,12 +426,46 @@ export const DATABASE = Symbol('Database')
         NICKNAME_BLACKLIST,
         SECURITY_QUESTION_CATALOG,
         ROLE_DIRECTORY,
+        IDENTITY_SIGN_UP,
       ],
+    },
+    {
+      provide: CONFIRM_REGISTRATION,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        identitySignUp: IdentitySignUpPort,
+        clock: ClockPort,
+      ): ConfirmRegistration => new ConfirmRegistration({ accounts, identitySignUp, clock }),
+      inject: [ACCOUNT_REPOSITORY, IDENTITY_SIGN_UP, CLOCK],
     },
     {
       provide: GET_ACCOUNT,
       useFactory: (accounts: AccountRepositoryPort): GetAccount => new GetAccount(accounts),
       inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: FIND_ACCOUNT_BY_EMAIL,
+      useFactory: (accounts: AccountRepositoryPort, mfaStatus: MfaStatusPort): FindAccountByEmail =>
+        new FindAccountByEmail(accounts, mfaStatus),
+      inject: [ACCOUNT_REPOSITORY, MFA_STATUS],
+    },
+    {
+      provide: ASSIGN_ROLE,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        roleDirectory: RoleDirectoryPort,
+        mfaStatus: MfaStatusPort,
+      ): AssignRole => new AssignRole(accounts, roleDirectory, mfaStatus),
+      inject: [ACCOUNT_REPOSITORY, ROLE_DIRECTORY, MFA_STATUS],
+    },
+    {
+      provide: REVOKE_ROLE,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        roleDirectory: RoleDirectoryPort,
+        sessionRevocation: SessionRevocationPort,
+      ): RevokeRole => new RevokeRole(accounts, roleDirectory, sessionRevocation),
+      inject: [ACCOUNT_REPOSITORY, ROLE_DIRECTORY, SESSION_REVOCATION],
     },
     {
       provide: GET_OWN_ACCOUNT,

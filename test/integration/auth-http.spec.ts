@@ -13,8 +13,17 @@ import {
   type TokenVerifierPort,
   type VerifiedIdentity,
 } from '../../src/application/ports/TokenVerifierPort'
+import { IDENTITY_SIGN_UP } from '../../src/application/ports/IdentitySignUpPort'
 import { ROLE_DIRECTORY, RoleDirectoryError } from '../../src/application/ports/RoleDirectoryPort'
+import { InMemoryIdentitySignUp } from '../../src/adapters/outbound/identity/InMemoryIdentitySignUp'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
+import { MFA_STATUS } from '../../src/application/ports/MfaStatusPort'
+import { SESSION_REVOCATION } from '../../src/application/ports/SessionRevocationPort'
+import { ACCOUNT_REPOSITORY } from '../../src/application/ports/AccountRepositoryPort'
+import type { AccountRepositoryPort } from '../../src/application/ports/AccountRepositoryPort'
+import { InMemoryMfaStatus } from '../../src/adapters/outbound/identity/InMemoryMfaStatus'
+import { InMemorySessionRevocation } from '../../src/adapters/outbound/identity/InMemorySessionRevocation'
+import { buildActiveAccount } from '../support/account-factory'
 
 /**
  * Integracion con la autenticacion ACTIVA.
@@ -31,36 +40,23 @@ import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMe
 
 /** Tokens reconocidos por el verificador de prueba. Fuera de estos, todo falla. */
 const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
+  // El sujeto del token es el que el alta deriva del correo (`sub:<correo>`),
+  // para que /me encuentre la cuenta de 'ana@nexus.test' creada en beforeAll.
   'token-jugador': {
-    subject: 'sujeto-jugador',
-    email: 'jugador@nexus.test',
+    subject: 'sub:ana@nexus.test',
     roles: new Set([Role.Player]),
   },
   'token-moderador': {
     subject: 'sujeto-moderador',
-    email: 'moderador@nexus.test',
     roles: new Set([Role.Player, Role.Moderator]),
   },
   'token-administrador': {
     subject: 'sujeto-administrador',
-    email: 'admin@nexus.test',
     roles: new Set([Role.Player, Role.Administrator]),
   },
-  // Identidad verificada que todavia NO tiene cuenta: el estado exacto de quien
-  // acaba de darse de alta en el proveedor y llega aqui a crear la suya.
-  'token-sin-cuenta': {
-    subject: 'sujeto-sin-cuenta',
-    email: 'sin-proveedor@nexus.test',
-    roles: new Set([Role.Player]),
-  },
-  // Firma valida, `sub` inservible. El verificador solo rechaza el `sub`
-  // AUSENTE o vacio, asi que uno de puros espacios lo atraviesa y llega al caso
-  // de uso, que si lo rechaza. Es el unico camino por el que
-  // `IdentityRequiredError` se alcanza de verdad.
-  'token-sujeto-en-blanco': {
-    subject: '   ',
-    email: 'en-blanco@nexus.test',
-    roles: new Set([Role.Player]),
+  'token-super-administrador': {
+    subject: 'sujeto-super-administrador',
+    roles: new Set([Role.Player, Role.SuperAdministrator]),
   },
 }
 
@@ -101,6 +97,14 @@ describe('API de cuentas con autenticacion activa', () => {
       // cuando el rol no se puede reflejar: es el comportamiento buscado.
       .overrideProvider(ROLE_DIRECTORY)
       .useValue(new InMemoryRoleDirectory())
+      // El alta no debe hablar con un pool real: el doble deriva `sub:<correo>`,
+      // que es el mismo sujeto que llevan los tokens de este arnes.
+      .overrideProvider(IDENTITY_SIGN_UP)
+      .useValue(new InMemoryIdentitySignUp())
+      .overrideProvider(MFA_STATUS)
+      .useValue(new InMemoryMfaStatus())
+      .overrideProvider(SESSION_REVOCATION)
+      .useValue(new InMemorySessionRevocation())
       .compile()
 
     app = moduleRef.createNestApplication()
@@ -111,11 +115,26 @@ describe('API de cuentas con autenticacion activa', () => {
 
     await app.init()
 
+    await app.get<AccountRepositoryPort>(ACCOUNT_REPOSITORY).save(
+      buildActiveAccount({
+        id: 'super-administrador',
+        subject: 'sujeto-super-administrador',
+        email: 'super@nexus.test',
+        displayName: 'Super Root',
+        roles: [Role.Player, Role.SuperAdministrator],
+      }),
+    )
+
+    // El alta es PUBLICA: no lleva testimonio. La identidad la crea el propio
+    // endpoint en el proveedor (el doble deriva `sub:ana@nexus.test`).
     const created = await registerAccountRequest(app, {
       email: 'ana@nexus.test',
       nickname: 'Ana Ramirez',
-    }).set('Authorization', `Bearer token-jugador`)
+    })
 
+    // Se deja PENDING a proposito: el test de autorizacion por rol la activa
+    // usando la verificacion administrativa. GET /me y la lectura por
+    // administrador no necesitan que este activa.
     accountId = (created.body as { id: string }).id
   })
 
@@ -134,50 +153,57 @@ describe('API de cuentas con autenticacion activa', () => {
 
   describe('Rutas publicas', () => {
     /**
-     * El registro exige testimonio, y no es una restriccion arbitraria: con un
-     * proveedor real el alta ocurre en su propia pantalla, de modo que al
-     * llegar aqui la identidad YA existe y lo que falta es la cuenta del
-     * producto.
+     * El registro es PUBLICO: quien se registra todavia no tiene identidad, y
+     * este endpoint la crea en el proveedor (ADR-004, "Alta server-side"). La
+     * cuenta nace pendiente hasta que se confirma el correo.
      */
-    it('el registro exige testimonio', async () => {
-      const response = await request(app.getHttpServer())
-        .post('/api/accounts')
-        .send({ email: 'nuevo@nexus.test', nickname: 'Persona Nueva' })
-
-      expect(response.status).toBe(401)
-    })
-
-    it('registra la cuenta vinculada al sujeto del testimonio', async () => {
+    it('el registro es publico y la cuenta nace pendiente de confirmar', async () => {
       const response = await registerAccountRequest(app, {
-        email: 'moderador@nexus.test',
-        nickname: 'Cuenta Vinculada Uno',
-      }).set('Authorization', bearer('token-moderador'))
+        email: 'nueva@nexus.test',
+        nickname: 'Persona Nueva',
+      })
 
       expect(response.status).toBe(201)
+      expect(response.body).toMatchObject({ status: 'PENDING_VERIFICATION' })
+    })
 
-      // El sujeto NO se expone en la respuesta: es un vinculo interno. Que el
-      // vinculo existe se comprueba leyendo /me con el mismo testimonio.
-      expect(response.body).not.toHaveProperty('subject')
+    it('confirma el correo con el codigo y activa la cuenta', async () => {
+      await registerAccountRequest(app, {
+        email: 'confirma@nexus.test',
+        nickname: 'Cuenta Confirma',
+      })
 
-      const propia = await request(app.getHttpServer())
-        .get('/api/accounts/me')
-        .set('Authorization', bearer('token-moderador'))
+      const ok = await request(app.getHttpServer())
+        .post('/api/accounts/confirmation')
+        .send({ identifier: 'confirma@nexus.test', code: '000000' })
 
-      expect(propia.status).toBe(200)
-      expect(propia.body).toMatchObject({ email: 'moderador@nexus.test' })
+      expect(ok.status).toBe(200)
+      expect(ok.body).toMatchObject({ status: 'ACTIVE' })
+    })
+
+    it('un codigo invalido no activa la cuenta', async () => {
+      await registerAccountRequest(app, {
+        email: 'malcodigo@nexus.test',
+        nickname: 'Cuenta Mal Codigo',
+      })
+
+      const bad = await request(app.getHttpServer())
+        .post('/api/accounts/confirmation')
+        .send({ identifier: 'malcodigo@nexus.test', code: '999999' })
+
+      expect(bad.status).toBe(400)
     })
 
     /**
      * El registro falla cerrado cuando el rol no se puede reflejar, y eso es
      * deliberado: guardar una cuenta cuyo rol no viajaria en el testimonio es
-     * justo la divergencia que el reflejo existe para impedir.
+     * la divergencia que el reflejo existe para impedir.
      *
-     * Lo que esta prueba fija es COMO se cuenta ese fallo. Un 500 diria "este
-     * servicio tiene un defecto" y no invita a reintentar; aqui el servicio
-     * funciona, la dependencia no, y volver a intentarlo mas tarde tiene
+     * Lo que fija esta prueba es COMO se cuenta ese fallo: 503 y no 500. El
+     * servicio funciona, la dependencia no, y reintentar mas tarde tiene
      * sentido.
      */
-    it('responde 503, y no 500, cuando el proveedor de identidad no responde', async () => {
+    it('responde 503, y no 500, cuando el reflejo del rol no responde', async () => {
       const directorio = app.get<{ reflect: () => Promise<void> }>(ROLE_DIRECTORY)
       const original = directorio.reflect
       directorio.reflect = () => Promise.reject(new RoleDirectoryError('el proveedor no responde'))
@@ -186,24 +212,13 @@ describe('API de cuentas con autenticacion activa', () => {
         const response = await registerAccountRequest(app, {
           email: 'sin-proveedor@nexus.test',
           nickname: 'Cuenta Sin Proveedor',
-        }).set('Authorization', bearer('token-sin-cuenta'))
+        })
 
         expect(response.status).toBe(503)
         expect(response.body.message).not.toMatch(/internal/i)
       } finally {
         directorio.reflect = original
       }
-    })
-
-    it('responde 401, y no 500, si el testimonio no identifica a nadie', async () => {
-      const response = await registerAccountRequest(app, {
-        email: 'en-blanco@nexus.test',
-        nickname: 'Cuenta En Blanco',
-      }).set('Authorization', bearer('token-sujeto-en-blanco'))
-
-      // Un fallo de autenticacion tiene que decir que lo es. Como 500 acusaria
-      // al servicio de un defecto que no tiene.
-      expect(response.status).toBe(401)
     })
 
     it.each(['/api/health/live', '/api/health/ready'])(
@@ -251,6 +266,84 @@ describe('API de cuentas con autenticacion activa', () => {
 
       expect(response.status).toBe(200)
       expect(response.body).toMatchObject({ email: 'ana@nexus.test' })
+    })
+
+    it('un SUPER_ADMINISTRATOR puro satisface una ruta ADMINISTRATOR', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/accounts/${accountId}`)
+        .set('Authorization', bearer('token-super-administrador'))
+
+      expect(response.status).toBe(200)
+    })
+  })
+
+  describe('Gestion de roles HU-39', () => {
+    const search = () => `/api/accounts/search?email=${encodeURIComponent('ana@nexus.test')}`
+
+    it('protege la busqueda con SUPER_ADMINISTRATOR en un solo sentido', async () => {
+      expect((await request(app.getHttpServer()).get(search())).status).toBe(401)
+
+      for (const token of ['token-jugador', 'token-moderador', 'token-administrador']) {
+        const response = await request(app.getHttpServer())
+          .get(search())
+          .set('Authorization', bearer(token))
+
+        expect(response.status).toBe(403)
+      }
+    })
+
+    it('resuelve search antes que :id y devuelve el estado TOTP', async () => {
+      const response = await request(app.getHttpServer())
+        .get(search())
+        .set('Authorization', bearer('token-super-administrador'))
+
+      expect(response.status).toBe(200)
+      expect(response.body).toMatchObject({
+        id: accountId,
+        email: 'ana@nexus.test',
+        mfaEnrolled: false,
+      })
+    })
+
+    it('solo el Super Administrador concede MODERATOR', async () => {
+      const denied = await request(app.getHttpServer())
+        .post(`/api/accounts/${accountId}/roles`)
+        .set('Authorization', bearer('token-administrador'))
+        .send({ role: Role.Moderator })
+      expect(denied.status).toBe(403)
+
+      const allowed = await request(app.getHttpServer())
+        .post(`/api/accounts/${accountId}/roles`)
+        .set('Authorization', bearer('token-super-administrador'))
+        .send({ role: Role.Moderator })
+      expect(allowed.status).toBe(200)
+      expect(allowed.body.roles).toContain(Role.Moderator)
+    })
+
+    it('rechaza ADMINISTRATOR sin TOTP y no acepta roles fuera del vocabulario', async () => {
+      const noMfa = await request(app.getHttpServer())
+        .post(`/api/accounts/${accountId}/roles`)
+        .set('Authorization', bearer('token-super-administrador'))
+        .send({ role: Role.Administrator })
+      expect(noMfa.status).toBe(409)
+      expect(noMfa.body.message).toMatch(/aplicacion autenticadora/)
+
+      for (const role of [Role.SuperAdministrator, 'INVENTADO']) {
+        const response = await request(app.getHttpServer())
+          .post(`/api/accounts/${accountId}/roles`)
+          .set('Authorization', bearer('token-super-administrador'))
+          .send({ role })
+
+        expect(response.status).toBe(400)
+      }
+    })
+
+    it('rechaza retirar PLAYER', async () => {
+      const response = await request(app.getHttpServer())
+        .delete(`/api/accounts/${accountId}/roles/${Role.Player}`)
+        .set('Authorization', bearer('token-super-administrador'))
+
+      expect(response.status).toBe(400)
     })
   })
 

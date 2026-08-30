@@ -27,6 +27,14 @@ export const Roles = (...roles: readonly Role[]): MethodDecorator & ClassDecorat
 
 export interface RequestWithIdentity {
   identity?: VerifiedIdentity
+  /**
+   * El testimonio de acceso CRUDO, tal cual llego en la cabecera. El guard lo
+   * deja tras verificarlo para las pocas rutas que deben reenviarlo al proveedor
+   * -la inscripcion TOTP actua sobre el propio token del usuario-. No se lee de
+   * la cabecera en el controlador: solo lo que el guard dejo tras comprobar la
+   * firma.
+   */
+  accessToken?: string
 }
 
 /**
@@ -50,4 +58,23 @@ export const currentIdentityOf = (context: ExecutionContext): VerifiedIdentity =
 
 export const CurrentIdentity = createParamDecorator(
   (_data: unknown, context: ExecutionContext): VerifiedIdentity => currentIdentityOf(context),
+)
+
+/**
+ * Inyecta el testimonio de acceso crudo que el guard verifico. Falla cerrado con
+ * 401 si no lo hay -por ejemplo con `AUTH_MODE=disabled`, donde no hay token que
+ * reenviar al proveedor-, nunca con un `undefined` que produciria un 500.
+ */
+export const currentAccessTokenOf = (context: ExecutionContext): string => {
+  const { accessToken } = context.switchToHttp().getRequest<RequestWithIdentity>()
+
+  if (accessToken === undefined) {
+    throw new UnauthorizedException('La peticion no llego con un testimonio de acceso.')
+  }
+
+  return accessToken
+}
+
+export const CurrentAccessToken = createParamDecorator(
+  (_data: unknown, context: ExecutionContext): string => currentAccessTokenOf(context),
 )

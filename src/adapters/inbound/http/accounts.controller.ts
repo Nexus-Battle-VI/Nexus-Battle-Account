@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -10,6 +11,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   ServiceUnavailableException,
   UnauthorizedException,
   UploadedFile,
@@ -25,20 +27,44 @@ import {
   AccountAlreadyExistsError,
   AccountNotFoundError,
   DisplayNameAlreadyTakenError,
+  IdentityAlreadyRegisteredError,
   IdentityRequiredError,
   NicknameBlacklistedError,
 } from '../../../application/errors/ApplicationError'
 import { RoleDirectoryError } from '../../../application/ports/RoleDirectoryPort'
+import { MfaStatusError } from '../../../application/ports/MfaStatusPort'
+import { SessionRevocationError } from '../../../application/ports/SessionRevocationPort'
+import { IdentitySignUpError } from '../../../application/ports/IdentitySignUpPort'
 import type { RegisterSecurityAnswer } from '../../../application/dto/RegisterAccountCommand'
 import { RegisterAccount } from '../../../application/use-cases/RegisterAccount'
+import { ConfirmRegistration } from '../../../application/use-cases/ConfirmRegistration'
 import { GetAccount } from '../../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../../application/use-cases/VerifyAccount'
-import { Role } from '../../../domain/entities/Role'
-import { CurrentIdentity, Roles } from './auth/decorators'
+import { AssignRole } from '../../../application/use-cases/AssignRole'
+import { FindAccountByEmail } from '../../../application/use-cases/FindAccountByEmail'
+import { RevokeRole } from '../../../application/use-cases/RevokeRole'
+import { Role, isRole } from '../../../domain/entities/Role'
+import { CurrentIdentity, Public, Roles } from './auth/decorators'
 import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
-import { REGISTER_ACCOUNT, GET_ACCOUNT, GET_OWN_ACCOUNT, VERIFY_ACCOUNT } from './tokens'
-import { AccountResponse, RegisterAccountRequest } from './accounts.dto'
+import {
+  REGISTER_ACCOUNT,
+  GET_ACCOUNT,
+  GET_OWN_ACCOUNT,
+  VERIFY_ACCOUNT,
+  CONFIRM_REGISTRATION,
+  FIND_ACCOUNT_BY_EMAIL,
+  ASSIGN_ROLE,
+  REVOKE_ROLE,
+} from './tokens'
+import {
+  AccountResponse,
+  AssignRoleRequest,
+  ConfirmRegistrationRequest,
+  FindAccountByEmailQuery,
+  ManagedAccountResponse,
+  RegisterAccountRequest,
+} from './accounts.dto'
 
 interface UploadedAvatar {
   readonly mimetype: string
@@ -56,8 +82,19 @@ export class AccountsController {
     @Inject(GET_ACCOUNT) private readonly getAccount: GetAccount,
     @Inject(GET_OWN_ACCOUNT) private readonly getOwnAccount: GetOwnAccount,
     @Inject(VERIFY_ACCOUNT) private readonly verifyAccount: VerifyAccount,
+    @Inject(CONFIRM_REGISTRATION) private readonly confirmRegistration: ConfirmRegistration,
+    @Inject(FIND_ACCOUNT_BY_EMAIL) private readonly findAccountByEmail: FindAccountByEmail,
+    @Inject(ASSIGN_ROLE) private readonly assignRole: AssignRole,
+    @Inject(REVOKE_ROLE) private readonly revokeRole: RevokeRole,
   ) {}
 
+  /**
+   * PUBLICO: quien se registra todavia NO tiene identidad; este endpoint la
+   * crea en el proveedor (ADR-004, "Alta server-side"). Antes exigia un
+   * testimonio porque la identidad se creaba en la pantalla alojada; ese paso
+   * desaparecio.
+   */
+  @Public()
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
@@ -68,30 +105,18 @@ export class AccountsController {
   )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Registra una cuenta de jugador (HU-01)' })
-  @ApiResponse({ status: 201, description: 'Cuenta registrada', type: AccountResponse })
-  @ApiResponse({ status: 400, description: 'Datos invalidos' })
-  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
-  @ApiResponse({ status: 409, description: 'El correo o el apodo ya estan registrados' })
+  @ApiResponse({ status: 201, description: 'Cuenta registrada, pendiente de confirmar el correo' })
   @ApiResponse({
-    status: 503,
-    description:
-      'El proveedor de identidad no respondio. La cuenta NO se creo: sin reflejar el rol en el proveedor, el testimonio no lo llevaria.',
+    status: 400,
+    description: 'Datos invalidos o contrasena que no cumple la politica',
   })
+  @ApiResponse({ status: 409, description: 'El correo o el apodo ya estan registrados' })
+  @ApiResponse({ status: 503, description: 'El proveedor de identidad no respondio' })
   async register(
     @Body() body: RegisterAccountRequest,
     @UploadedFile() avatar: UploadedAvatar | undefined,
-    @CurrentIdentity() identity: VerifiedIdentity,
   ): Promise<AccountResponse> {
     try {
-      // El sujeto se pasa TAL CUAL, tambien cuando es `anonymous`.
-      //
-      // Antes se convertia a `undefined` para que el caso de uso creara una
-      // identidad. Ya no crea ninguna: la identidad existe antes que la cuenta.
-      // Con `AUTH_MODE=disabled` el sujeto queda literalmente `anonymous`, que
-      // es lo que ADR-004 describe: los datos dicen que nadie fue verificado en
-      // vez de aparentar personas concretas.
-      const subject = identity.subject
-
       return await this.registerAccount.execute({
         email: body.email,
         password: body.password,
@@ -110,15 +135,41 @@ export class AccountsController {
                 bytes: avatar.buffer,
               },
             }),
-        subject,
-        // `identity.email` solo viene informado si el proveedor lo declara
-        // verificado (ver `toVerifiedIdentity`), asi que su mera presencia ya
-        // es la prueba. No se deduce del cuerpo de la peticion.
-        verifiedEmail: identity.email,
       })
     } catch (error: unknown) {
       throw AccountsController.translate(error)
     }
+  }
+
+  /**
+   * PUBLICO: confirma el correo con el codigo que envio el proveedor y activa
+   * la cuenta. No exige testimonio: quien confirma aun no puede iniciar sesion,
+   * que es justo lo que este paso desbloquea.
+   */
+  @Public()
+  @Post('confirmation')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Confirma el correo y activa la cuenta (HU-01)' })
+  @ApiResponse({ status: 200, description: 'Cuenta activada', type: AccountResponse })
+  @ApiResponse({ status: 400, description: 'Codigo invalido o expirado' })
+  @ApiResponse({ status: 503, description: 'El proveedor de identidad no respondio' })
+  async confirm(@Body() body: ConfirmRegistrationRequest): Promise<AccountResponse> {
+    const outcome = await this.confirmRegistration.execute({
+      identifier: body.identifier,
+      code: body.code,
+    })
+
+    if (outcome.kind === 'invalidCode') {
+      throw new BadRequestException('El codigo no es valido o ha expirado.')
+    }
+
+    if (outcome.kind === 'providerUnavailable') {
+      throw new ServiceUnavailableException(
+        'El proveedor de identidad no esta disponible. Intentelo de nuevo mas tarde.',
+      )
+    }
+
+    return outcome.account
   }
 
   @Get('me')
@@ -129,6 +180,72 @@ export class AccountsController {
   async findOwn(@CurrentIdentity() identity: VerifiedIdentity): Promise<AccountResponse> {
     try {
       return await this.getOwnAccount.execute(identity.subject)
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  /** Debe permanecer antes de `:id`: Nest resolveria "search" como identificador. */
+  @Roles(Role.SuperAdministrator)
+  @Get('search')
+  @ApiOperation({ summary: 'Busca una cuenta por correo para gestionar sus roles' })
+  @ApiResponse({ status: 200, type: ManagedAccountResponse })
+  @ApiResponse({ status: 403, description: 'Solo el Super Administrador puede gestionar roles' })
+  async search(@Query() query: FindAccountByEmailQuery): Promise<ManagedAccountResponse> {
+    try {
+      return await this.findAccountByEmail.execute(query.email)
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  @Roles(Role.SuperAdministrator)
+  @Post(':id/roles')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Concede MODERATOR o ADMINISTRATOR a una cuenta' })
+  async assign(
+    @CurrentIdentity() identity: VerifiedIdentity,
+    @Param('id') id: string,
+    @Body() body: AssignRoleRequest,
+  ): Promise<AccountResponse> {
+    try {
+      const outcome = await this.assignRole.execute({
+        actorSubject: identity.subject,
+        targetAccountId: id,
+        role: body.role,
+      })
+
+      if (outcome.kind === 'mfaRequired') {
+        throw new ConflictException(
+          'La cuenta debe inscribir su aplicacion autenticadora antes de recibir un rol administrativo.',
+        )
+      }
+
+      return outcome.account
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  @Roles(Role.SuperAdministrator)
+  @Delete(':id/roles/:role')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Retira un rol y cierra las sesiones de la cuenta' })
+  async revoke(
+    @CurrentIdentity() identity: VerifiedIdentity,
+    @Param('id') id: string,
+    @Param('role') rawRole: string,
+  ): Promise<AccountResponse> {
+    if (!isRole(rawRole)) {
+      throw new BadRequestException('El rol indicado no existe.')
+    }
+
+    try {
+      return await this.revokeRole.execute({
+        actorSubject: identity.subject,
+        targetAccountId: id,
+        role: rawRole,
+      })
     } catch (error: unknown) {
       throw AccountsController.translate(error)
     }
@@ -169,7 +286,8 @@ export class AccountsController {
   private static translate(error: unknown): Error {
     if (
       error instanceof AccountAlreadyExistsError ||
-      error instanceof DisplayNameAlreadyTakenError
+      error instanceof DisplayNameAlreadyTakenError ||
+      error instanceof IdentityAlreadyRegisteredError
     ) {
       return new ConflictException(error.message)
     }
@@ -203,7 +321,12 @@ export class AccountsController {
      * registro **falla cerrado** a proposito -no se guarda una cuenta cuyo rol
      * no viajaria en el testimonio- y quien llama merece saber por que.
      */
-    if (error instanceof RoleDirectoryError) {
+    if (
+      error instanceof RoleDirectoryError ||
+      error instanceof IdentitySignUpError ||
+      error instanceof MfaStatusError ||
+      error instanceof SessionRevocationError
+    ) {
       return new ServiceUnavailableException(
         'El proveedor de identidad no esta disponible. Intentelo de nuevo mas tarde.',
       )

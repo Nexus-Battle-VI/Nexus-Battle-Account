@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
 
-import type { Role } from '../../../../domain/entities/Role'
+import { Role, type Role as RoleValue } from '../../../../domain/entities/Role'
 import { REQUIRED_ROLES, type RequestWithIdentity } from './decorators'
 
 /**
@@ -16,10 +16,10 @@ export class RolesGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const required = this.reflector.getAllAndOverride<readonly Role[] | undefined>(REQUIRED_ROLES, [
-      context.getHandler(),
-      context.getClass(),
-    ])
+    const required = this.reflector.getAllAndOverride<readonly RoleValue[] | undefined>(
+      REQUIRED_ROLES,
+      [context.getHandler(), context.getClass()],
+    )
 
     if (required === undefined || required.length === 0) {
       return true
@@ -31,7 +31,11 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('La peticion no lleva una identidad verificada.')
     }
 
-    if (!required.some((role) => identity.roles.has(role))) {
+    const satisfies = (requiredRole: RoleValue): boolean =>
+      identity.roles.has(requiredRole) ||
+      (requiredRole === Role.Administrator && identity.roles.has(Role.SuperAdministrator))
+
+    if (!required.some(satisfies)) {
       throw new ForbiddenException('La identidad no posee el rol necesario para esta operacion.')
     }
 

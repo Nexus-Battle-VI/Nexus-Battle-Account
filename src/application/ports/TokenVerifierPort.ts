@@ -15,9 +15,6 @@ export interface VerifiedIdentity {
   /** `sub` del proveedor. Es estable: un correo no lo es. */
   readonly subject: string
 
-  /** Presente solo si el proveedor declara el correo como verificado. */
-  readonly email: string | null
-
   /** Roles reconocidos. Los grupos desconocidos se descartan. */
   readonly roles: ReadonlySet<Role>
 }
