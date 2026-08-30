@@ -17,6 +17,7 @@ import type { VerifiedEmailDirectoryPort } from '../ports/VerifiedEmailDirectory
 import {
   AccountAlreadyExistsError,
   DisplayNameAlreadyTakenError,
+  IdentityAlreadyRegisteredError,
   IdentityRequiredError,
   NicknameBlacklistedError,
 } from '../errors/ApplicationError'
@@ -103,6 +104,26 @@ export class RegisterAccount {
 
     if (subject.length === 0) {
       throw new IdentityRequiredError()
+    }
+
+    /**
+     * Una identidad tiene UNA cuenta. La columna `subject` es unica en la base,
+     * asi que sin esta comprobacion un segundo registro con la misma identidad
+     * -correo y apodo distintos, que pasan sus propios chequeos- reventaba
+     * contra esa restriccion con un error crudo de PostgreSQL que nadie
+     * traducia: un 500 en vez de un mensaje. Le paso a la primera persona ajena
+     * al equipo, que entro de nuevo y se registro otra vez.
+     *
+     * Va ANTES de guardar el avatar y de reflejar el rol: fallar aqui es barato
+     * y no deja efectos a medias en el proveedor ni en el almacenamiento.
+     *
+     * `anonymous` se excluye a proposito: es el sujeto centinela de
+     * `AUTH_MODE=disabled` -desarrollo, nunca produccion- y NO es una identidad
+     * que pueda "ya estar registrada". Comprobarlo ahi impediria registrar mas
+     * de una cuenta en un entorno donde la identidad es deliberadamente falsa.
+     */
+    if (subject !== 'anonymous' && (await this.deps.accounts.findBySubject(subject)) !== null) {
+      throw new IdentityAlreadyRegisteredError()
     }
 
     // El access token autoriza la peticion y transporta los grupos, pero no

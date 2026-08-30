@@ -25,6 +25,7 @@ import {
   AccountAlreadyExistsError,
   AccountNotFoundError,
   DisplayNameAlreadyTakenError,
+  IdentityAlreadyRegisteredError,
   IdentityRequiredError,
   NicknameBlacklistedError,
 } from '../../../application/errors/ApplicationError'
@@ -166,7 +167,8 @@ export class AccountsController {
   private static translate(error: unknown): Error {
     if (
       error instanceof AccountAlreadyExistsError ||
-      error instanceof DisplayNameAlreadyTakenError
+      error instanceof DisplayNameAlreadyTakenError ||
+      error instanceof IdentityAlreadyRegisteredError
     ) {
       return new ConflictException(error.message)
     }

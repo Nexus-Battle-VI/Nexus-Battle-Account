@@ -52,6 +52,13 @@ export class AccountNotFoundError extends Error {
  * sitio, y entonces el fallo seria una cuenta con un sujeto inventado en vez de
  * un error.
  */
+export class IdentityAlreadyRegisteredError extends Error {
+  constructor() {
+    super('Esta identidad ya tiene una cuenta. Inicia sesion en lugar de registrarte.')
+    this.name = 'IdentityAlreadyRegisteredError'
+  }
+}
+
 export class IdentityRequiredError extends Error {
   constructor() {
     super('El registro exige una identidad ya verificada.')
