@@ -12,13 +12,11 @@ import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
 import type { NicknameBlacklistPort } from '../ports/NicknameBlacklistPort'
 import type { NotificationRequestPort } from '../ports/NotificationRequestPort'
 import type { RoleDirectoryPort } from '../ports/RoleDirectoryPort'
+import type { IdentitySignUpPort } from '../ports/IdentitySignUpPort'
 import type { SecurityQuestionCatalogPort } from '../ports/SecurityQuestionCatalogPort'
-import type { VerifiedEmailDirectoryPort } from '../ports/VerifiedEmailDirectoryPort'
 import {
   AccountAlreadyExistsError,
   DisplayNameAlreadyTakenError,
-  IdentityAlreadyRegisteredError,
-  IdentityRequiredError,
   NicknameBlacklistedError,
 } from '../errors/ApplicationError'
 import type { RegisterAccountCommand } from '../dto/RegisterAccountCommand'
@@ -34,7 +32,7 @@ export interface RegisterAccountDependencies {
   readonly blacklist: NicknameBlacklistPort
   readonly questions: SecurityQuestionCatalogPort
   readonly roleDirectory: RoleDirectoryPort
-  readonly verifiedEmailDirectory: VerifiedEmailDirectoryPort
+  readonly identitySignUp: IdentitySignUpPort
 }
 
 /**
@@ -42,8 +40,17 @@ export interface RegisterAccountDependencies {
  *
  * Coordina colaboradores fuera de PostgreSQL (avatar y directorio de roles) y
  * persiste cuenta, roles y respuestas en un unico paso del repositorio. Si la
- * persistencia falla, se compensa el avatar guardado en esta peticion. El
- * sujeto ya no se compensa porque este caso de uso ya no lo crea.
+ * persistencia falla, se compensa el avatar guardado en esta peticion.
+ *
+ * LIMITACION conocida: la identidad que crea `signUp` NO se compensa. Un fallo
+ * despues del alta -carrera de apodo, el proveedor de roles caido, el avatar sin
+ * poder escribirse- deja en Cognito una identidad sin confirmar que bloquea el
+ * reintento con ese mismo correo (`SignUp` responderia `emailTaken`). Se acepta
+ * a proposito: compensarla exige `AdminDeleteUser`, que reintroduce la API de
+ * administracion y su permiso IAM que este alta evita. La ventana se minimiza
+ * validando todo lo validable -unicidad, apodo, avatar, respuestas- ANTES de
+ * `signUp`. Si se vuelve frecuente, la salida es una identidad huerfana que se
+ * pueda reclamar, no abrir el alta a la API de administracion.
  */
 export class RegisterAccount {
   private readonly deps: RegisterAccountDependencies
@@ -61,16 +68,15 @@ export class RegisterAccount {
       throw new AccountAlreadyExistsError(email.value)
     }
 
-    // La contrasena YA NO se valida aqui, y sobre todo YA NO SE PIDE.
-    //
-    // Este servicio no la custodia (ADR-004, decision 2), asi que validarla
-    // daba una garantia falsa: se comprobaba una cadena que despues se tiraba.
-    // Quien registraba creia estar fijando su contrasena, y al intentar entrar
-    // con ella recibia "revisa tus credenciales", que apunta al sitio
-    // equivocado. Le paso a la primera persona ajena al equipo que uso el alta.
-    //
-    // La politica de contrasenas la aplica el proveedor en SU pantalla, que es
-    // donde la contrasena existe de verdad.
+    // La contrasena vuelve, y esta vez SI va a algun sitio: a Cognito, por
+    // `signUp` (ADR-004, "Alta server-side"). Account no la custodia -la
+    // decision 2 sigue intacta-, solo la transporta a su unico custodio. Aqui
+    // solo se comprueba que exista; la POLITICA la aplica el proveedor, y su
+    // rechazo llega como `IdentitySignUpError` -> 400 con el motivo.
+    if (command.password.length === 0) {
+      throw new DomainError('La contrasena es obligatoria.')
+    }
+
     const displayName = DisplayName.create(command.displayName)
 
     if (await this.deps.accounts.existsByDisplayName(displayName)) {
@@ -94,42 +100,22 @@ export class RegisterAccount {
 
     assertAvatarUpload(avatarUpload)
 
-    // La identidad existe ANTES que la cuenta.
+    // Account CREA la identidad en el proveedor y obtiene el sujeto que este
+    // asigna. No la decide -Cognito sigue siendo la autoridad: valida el
+    // correo, custodia la contrasena, aplica la politica-. Account es el
+    // mensajero, igual que ya lo es en el login (ADR-004, "Alta server-side").
     //
-    // El alta ocurre en la pantalla del proveedor, de modo que al llegar aqui
-    // ya hay un sujeto verificado y lo que falta es la cuenta del producto. Este
-    // caso de uso NO crea identidades: hacerlo significaria que Account decide
-    // quien existe, que es justo lo que ADR-004 saco de Account.
-    const subject = command.subject?.trim() ?? ''
+    // Ocurre ANTES de guardar el avatar: si el proveedor rechaza el alta -correo
+    // ya existente, contrasena debil-, no queda ningun efecto a medias.
+    const signUp = await this.deps.identitySignUp.signUp(email.value, command.password)
 
-    if (subject.length === 0) {
-      throw new IdentityRequiredError()
+    if (signUp.kind === 'emailTaken') {
+      // El correo ya existe en el proveedor. Mismo trato que si existiera en la
+      // base: 409, e invitar a iniciar sesion, no un 500.
+      throw new AccountAlreadyExistsError(email.value)
     }
 
-    /**
-     * Una identidad tiene UNA cuenta. La columna `subject` es unica en la base,
-     * asi que sin esta comprobacion un segundo registro con la misma identidad
-     * -correo y apodo distintos, que pasan sus propios chequeos- reventaba
-     * contra esa restriccion con un error crudo de PostgreSQL que nadie
-     * traducia: un 500 en vez de un mensaje. Le paso a la primera persona ajena
-     * al equipo, que entro de nuevo y se registro otra vez.
-     *
-     * Va ANTES de guardar el avatar y de reflejar el rol: fallar aqui es barato
-     * y no deja efectos a medias en el proveedor ni en el almacenamiento.
-     *
-     * `anonymous` se excluye a proposito: es el sujeto centinela de
-     * `AUTH_MODE=disabled` -desarrollo, nunca produccion- y NO es una identidad
-     * que pueda "ya estar registrada". Comprobarlo ahi impediria registrar mas
-     * de una cuenta en un entorno donde la identidad es deliberadamente falsa.
-     */
-    if (subject !== 'anonymous' && (await this.deps.accounts.findBySubject(subject)) !== null) {
-      throw new IdentityAlreadyRegisteredError()
-    }
-
-    // El access token autoriza la peticion y transporta los grupos, pero no
-    // contiene `email` ni `email_verified`. La prueba del buzon se consulta al
-    // proveedor por el sujeto; nunca se deduce del formulario.
-    const verifiedEmail = await this.deps.verifiedEmailDirectory.findVerifiedEmail(subject)
+    const subject = signUp.subject
 
     const accountId = AccountId.create(this.deps.ids.generate())
     let storedKey: string | null = null
@@ -152,11 +138,8 @@ export class RegisterAccount {
         firstNames,
         lastNames,
         termsAccepted: true,
-        // Se compara NORMALIZADO y contra el correo consultado al proveedor, no
-        // contra una afirmacion del cuerpo. Si son distintos, la cuenta nace
-        // pendiente: la prueba que existe es sobre otro buzon.
-        emailAlreadyVerified:
-          verifiedEmail !== null && verifiedEmail.trim().toLowerCase() === email.value,
+        // Nace PENDING. Cognito acaba de enviar el codigo al correo; la cuenta
+        // se activa cuando quien registra lo confirma (`ConfirmRegistration`).
         avatar: AvatarMetadata.create({
           storageKey: stored.storageKey,
           mimeType: avatarUpload.mimeType,

@@ -12,10 +12,12 @@ import {
   LOGIN_ACCOUNT,
   REGISTER_ACCOUNT,
   VERIFY_ACCOUNT,
+  CONFIRM_REGISTRATION,
 } from '../../adapters/inbound/http/tokens'
 import { READINESS_CHECKS, VERSION_REPORT } from '../../adapters/inbound/http/tokens.health'
 
 import { RegisterAccount } from '../../application/use-cases/RegisterAccount'
+import { ConfirmRegistration } from '../../application/use-cases/ConfirmRegistration'
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
@@ -26,9 +28,9 @@ import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPor
 import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
 import { ROLE_DIRECTORY, type RoleDirectoryPort } from '../../application/ports/RoleDirectoryPort'
 import {
-  VERIFIED_EMAIL_DIRECTORY,
-  type VerifiedEmailDirectoryPort,
-} from '../../application/ports/VerifiedEmailDirectoryPort'
+  IDENTITY_SIGN_UP,
+  type IdentitySignUpPort,
+} from '../../application/ports/IdentitySignUpPort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
 import { CLOCK } from '../../application/ports/ClockPort'
 import { ID_GENERATOR } from '../../application/ports/IdGeneratorPort'
@@ -65,8 +67,8 @@ import { FakeAuthenticationProvider } from '../../adapters/outbound/identity/Fak
 import { CognitoAuthenticationProvider } from '../../adapters/outbound/identity/CognitoAuthenticationProvider'
 import { CognitoRoleDirectory } from '../../adapters/outbound/identity/CognitoRoleDirectory'
 import { InMemoryRoleDirectory } from '../../adapters/outbound/identity/InMemoryRoleDirectory'
-import { CognitoVerifiedEmailDirectory } from '../../adapters/outbound/identity/CognitoVerifiedEmailDirectory'
-import { InMemoryVerifiedEmailDirectory } from '../../adapters/outbound/identity/InMemoryVerifiedEmailDirectory'
+import { CognitoIdentitySignUp } from '../../adapters/outbound/identity/CognitoIdentitySignUp'
+import { InMemoryIdentitySignUp } from '../../adapters/outbound/identity/InMemoryIdentitySignUp'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
@@ -277,24 +279,24 @@ export const DATABASE = Symbol('Database')
       inject: [APP_CONFIG, LOGGER],
     },
     {
-      // Un access token de Cognito no contiene los atributos `email` ni
-      // `email_verified`. Este puerto consulta el perfil real del sujeto. Sin
-      // proveedor configurado, el doble responde que no hay prueba y conserva
-      // el comportamiento cerrado de desarrollo.
-      provide: VERIFIED_EMAIL_DIRECTORY,
-      useFactory: (config: AppConfig, logger: Logger): VerifiedEmailDirectoryPort => {
+      // El alta de identidad ocurre detras de la UI de Web (ADR-004, "Alta
+      // server-side"): este puerto crea la identidad en Cognito y confirma su
+      // correo. Sin proveedor configurado, el doble en memoria reproduce el
+      // contrato completo -incluida la confirmacion por codigo- para desarrollo.
+      provide: IDENTITY_SIGN_UP,
+      useFactory: (config: AppConfig, logger: Logger): IdentitySignUpPort => {
         if (config.cognito === null) {
-          logger.warn('verified_email_directory', {
+          logger.warn('identity_sign_up', {
             driver: 'memoria',
-            detail: 'Sin proveedor de identidad: ningun correo se considera verificado.',
+            detail: 'Sin proveedor de identidad: el alta no llega a Cognito.',
           })
 
-          return new InMemoryVerifiedEmailDirectory()
+          return new InMemoryIdentitySignUp()
         }
 
-        logger.info('verified_email_directory', { driver: 'cognito' })
+        logger.info('identity_sign_up', { driver: 'cognito' })
 
-        return new CognitoVerifiedEmailDirectory({ userPoolId: config.cognito.userPoolId })
+        return new CognitoIdentitySignUp(config.cognito)
       },
       inject: [APP_CONFIG, LOGGER],
     },
@@ -309,7 +311,7 @@ export const DATABASE = Symbol('Database')
         blacklist: NicknameBlacklistPort,
         questions: SecurityQuestionCatalogPort,
         roleDirectory: RoleDirectoryPort,
-        verifiedEmailDirectory: VerifiedEmailDirectoryPort,
+        identitySignUp: IdentitySignUpPort,
       ): RegisterAccount =>
         new RegisterAccount({
           accounts,
@@ -320,7 +322,7 @@ export const DATABASE = Symbol('Database')
           blacklist,
           questions,
           roleDirectory,
-          verifiedEmailDirectory,
+          identitySignUp,
         }),
       inject: [
         ACCOUNT_REPOSITORY,
@@ -331,8 +333,17 @@ export const DATABASE = Symbol('Database')
         NICKNAME_BLACKLIST,
         SECURITY_QUESTION_CATALOG,
         ROLE_DIRECTORY,
-        VERIFIED_EMAIL_DIRECTORY,
+        IDENTITY_SIGN_UP,
       ],
+    },
+    {
+      provide: CONFIRM_REGISTRATION,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        identitySignUp: IdentitySignUpPort,
+        clock: ClockPort,
+      ): ConfirmRegistration => new ConfirmRegistration({ accounts, identitySignUp, clock }),
+      inject: [ACCOUNT_REPOSITORY, IDENTITY_SIGN_UP, CLOCK],
     },
     {
       provide: GET_ACCOUNT,

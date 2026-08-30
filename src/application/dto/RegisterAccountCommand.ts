@@ -13,10 +13,10 @@ export interface RegisterAvatarUpload {
 export interface RegisterAccountCommand {
   readonly email: string
   /**
-   * OBSOLETO: se acepta y se ignora. La contrasena la custodia el proveedor de
-   * identidad (ADR-004, decision 2). Ver `accounts.dto.ts`.
+   * Se transporta a Cognito por `signUp` y NO se persiste (ADR-004, decision 2).
+   * La politica la aplica el proveedor.
    */
-  readonly password?: string
+  readonly password: string
   /** Apodo de HU-01. Se valida como `DisplayName`. */
   readonly displayName: string
   readonly firstNames: string
@@ -24,13 +24,4 @@ export interface RegisterAccountCommand {
   readonly termsAccepted: boolean
   readonly securityAnswers: readonly RegisterSecurityAnswer[]
   readonly avatar?: RegisterAvatarUpload
-
-  /**
-   * Sujeto ya existente en el proveedor de identidad.
-   *
-   * Se informa cuando quien registra llega con un testimonio verificado: en ese
-   * caso el sujeto YA existe y crearlo de nuevo produciria dos identidades para
-   * la misma persona. Cuando no se informa, el caso de uso lo da de alta.
-   */
-  readonly subject?: string
 }
