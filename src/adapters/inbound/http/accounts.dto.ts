@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
-import { Allow, IsBoolean, IsEmail, IsString, MaxLength, MinLength } from 'class-validator'
+import { Allow, IsBoolean, IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator'
 
 /**
  * Contrato de entrada del registro (multipart/form-data).
@@ -97,5 +97,27 @@ export class ConfirmRegistrationRequest {
 
   @ApiProperty({ example: '123456', description: 'Codigo que Cognito envio al correo.' })
   @IsString()
+  code!: string
+}
+
+export class TotpEnrollmentResponse {
+  @ApiProperty({
+    example:
+      'otpauth://totp/Nexus%20Battles%20VI:jugador@nexus.test?secret=JBSWY3DPEHPK3PXP&issuer=Nexus%20Battles%20VI&algorithm=SHA1&digits=6&period=30',
+    description: 'URI otpauth para generar el QR. Contiene el secreto: es una credencial.',
+  })
+  readonly otpauthUri!: string
+
+  @ApiProperty({
+    example: 'JBSWY3DPEHPK3PXP',
+    description: 'Clave base32 para introducir a mano si no se escanea el QR.',
+  })
+  readonly secret!: string
+}
+
+export class ConfirmTotpRequest {
+  @ApiProperty({ example: '123456', description: 'Codigo de seis digitos del autenticador.' })
+  @IsString()
+  @Matches(/^\d{6}$/u, { message: 'El codigo debe tener exactamente seis digitos.' })
   code!: string
 }
