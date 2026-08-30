@@ -116,6 +116,12 @@ export class RegisterAccount {
         firstNames,
         lastNames,
         termsAccepted: true,
+        // Se compara NORMALIZADO y contra el correo del testimonio, no contra
+        // el del formulario. Si alguien registra un correo distinto del que el
+        // proveedor verifico, la cuenta nace pendiente: la prueba que existe es
+        // sobre el otro buzon.
+        emailAlreadyVerified:
+          command.verifiedEmail?.trim().toLowerCase() === email.value.toLowerCase(),
         avatar: AvatarMetadata.create({
           storageKey: stored.storageKey,
           mimeType: avatarUpload.mimeType,

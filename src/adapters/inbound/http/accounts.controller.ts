@@ -111,6 +111,10 @@ export class AccountsController {
               },
             }),
         subject,
+        // `identity.email` solo viene informado si el proveedor lo declara
+        // verificado (ver `toVerifiedIdentity`), asi que su mera presencia ya
+        // es la prueba. No se deduce del cuerpo de la peticion.
+        verifiedEmail: identity.email,
       })
     } catch (error: unknown) {
       throw AccountsController.translate(error)
