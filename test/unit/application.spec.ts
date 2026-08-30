@@ -6,6 +6,7 @@ import { LoginAccount } from '../../src/application/use-cases/LoginAccount'
 import { CompleteSecondFactor } from '../../src/application/use-cases/CompleteSecondFactor'
 import {
   AccountAlreadyExistsError,
+  IdentityAlreadyRegisteredError,
   AccountNotFoundError,
   DisplayNameAlreadyTakenError,
   NicknameBlacklistedError,
@@ -144,6 +145,28 @@ describe('RegisterAccount', () => {
         variables: { displayName: 'Ana Ramirez' },
       },
     ])
+  })
+
+  /**
+   * El fallo que reporto la primera persona ajena al equipo: entro de nuevo con
+   * su identidad ya registrada y volvio a enviar el formulario. La columna
+   * `subject` es unica, asi que sin comprobarlo antes el segundo intento
+   * -correo y apodo distintos, que pasan sus propios chequeos- reventaba contra
+   * esa restriccion como un 500 en vez de un 409 con mensaje.
+   *
+   * Se usa correo Y apodo distintos a proposito: si se repitiera cualquiera de
+   * los dos, saltaria su chequeo y esta prueba no distinguiria el caso del
+   * sujeto, que es el unico que quedaba sin cubrir.
+   */
+  it('rechaza un segundo registro de la misma identidad, y no como 500', async () => {
+    const harness = buildHarness()
+    await harness.registerAccount.execute(command)
+
+    await expect(
+      harness.registerAccount.execute(
+        validCommand({ email: 'otro@nexus.test', displayName: 'OtroApodo' }),
+      ),
+    ).rejects.toBeInstanceOf(IdentityAlreadyRegisteredError)
   })
 
   it('asigna el rol PLAYER y no persiste la contrasena', async () => {
