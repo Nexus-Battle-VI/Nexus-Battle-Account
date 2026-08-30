@@ -1,4 +1,5 @@
 import { resolveAccountByIdentifier } from './AccountIdentifierResolver'
+import { SecondFactorPolicy } from '../../domain/policies/SecondFactorPolicy'
 import {
   AuthenticationProviderError,
   type AuthenticationProviderPort,
@@ -47,6 +48,18 @@ export class ChooseSecondFactor {
     // cuentas por su estado.
     if (!account?.canAuthenticate) {
       return { kind: 'invalidCredentials' }
+    }
+
+    /**
+     * Se comprueba ANTES de llamar al proveedor.
+     *
+     * `LoginAccount` ya recorta lo que se ofrece, pero esta ruta es publica y
+     * recibe el metodo del cuerpo de la peticion: sin esto, bastaria con
+     * llamarla a mano pidiendo EMAIL para saltarse la politica. Filtrar solo en
+     * la pantalla seria seguridad aparente.
+     */
+    if (!SecondFactorPolicy.permits(account.currentRoles, command.method)) {
+      return { kind: 'secondFactorNotPermitted' }
     }
 
     let outcome: Awaited<ReturnType<AuthenticationProviderPort['chooseSecondFactor']>>

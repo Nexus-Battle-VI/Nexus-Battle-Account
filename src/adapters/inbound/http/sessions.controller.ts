@@ -1,5 +1,6 @@
 import {
   Body,
+  ForbiddenException,
   Controller,
   HttpCode,
   HttpStatus,
@@ -142,6 +143,18 @@ export class SessionsController {
 
       case 'invalidCredentials':
         throw new UnauthorizedException('Las credenciales no son validas.')
+
+      /**
+       * 403 y no 401: las credenciales SI eran validas. Lo que no se admite es
+       * el medio del segundo factor para esta cuenta. Devolver 401 haria pensar
+       * en una contrasena mal escrita y llevaria a intentarlo otra vez sin
+       * cambiar nada.
+       */
+      case 'secondFactorNotPermitted':
+        throw new ForbiddenException(
+          'Esta cuenta requiere una aplicacion autenticadora como segundo factor. ' +
+            'Inscribe un autenticador antes de iniciar sesion.',
+        )
 
       case 'secondFactorInvalid':
         throw new UnauthorizedException('El segundo factor no es valido o ha expirado.')
