@@ -87,7 +87,14 @@ export class Account {
     this.roles = params.roles
   }
 
-  /** Registra una cuenta nueva. Nace pendiente de verificacion. */
+  /**
+   * Registra una cuenta nueva.
+   *
+   * Nace pendiente de verificacion, SALVO que el proveedor ya haya declarado
+   * verificado ese mismo correo. `PENDING_VERIFICATION` espera la prueba de que
+   * alguien controla el buzon, y esa prueba es justo la que el proveedor
+   * entrega en el testimonio.
+   */
   static register(params: {
     id: AccountId
     subject: string
@@ -98,6 +105,8 @@ export class Account {
     termsAccepted: boolean
     avatar: AvatarMetadata
     occurredAt: Date
+    /** El proveedor declara verificado ESTE correo, no otro. */
+    emailAlreadyVerified?: boolean
   }): Account {
     if (params.subject.trim().length === 0) {
       throw new DomainError('Una cuenta debe quedar vinculada a un sujeto de identidad.')
@@ -116,7 +125,10 @@ export class Account {
       lastNames: params.lastNames,
       termsAccepted: true,
       avatar: params.avatar,
-      status: AccountStatus.PendingVerification,
+      status:
+        params.emailAlreadyVerified === true
+          ? AccountStatus.Active
+          : AccountStatus.PendingVerification,
       roles: new Set<Role>([RolePolicy.baseRole]),
     })
 
