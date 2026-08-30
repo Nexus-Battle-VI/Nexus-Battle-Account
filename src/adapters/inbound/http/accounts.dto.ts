@@ -1,6 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger'
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform } from 'class-transformer'
-import { Allow, IsBoolean, IsEmail, IsString, MaxLength } from 'class-validator'
+import { Allow, IsBoolean, IsEmail, IsOptional, IsString, MaxLength } from 'class-validator'
 
 /**
  * Contrato de entrada del registro (multipart/form-data).
@@ -22,9 +22,25 @@ export class RegisterAccountRequest {
   @MaxLength(254)
   email!: string
 
-  @ApiProperty({ example: 'Abcdefg1!' })
+  /**
+   * OBSOLETO. Se acepta y se IGNORA; desaparecera del contrato.
+   *
+   * La contrasena la custodia el proveedor de identidad, no este servicio
+   * (ADR-004, decision 2). Este campo se validaba contra la politica y se
+   * TIRABA, de modo que quien rellenaba el formulario creia estar fijando su
+   * contrasena y no fijaba nada. Despues no podia entrar con ella, y el mensaje
+   * -"revisa tus credenciales"- le apuntaba al sitio equivocado.
+   *
+   * Se conserva como opcional para no romper a un cliente desplegado que
+   * todavia lo envie. Web deja de enviarlo en el mismo cambio.
+   */
+  @ApiPropertyOptional({
+    deprecated: true,
+    description: 'Ignorado. La contrasena vive en el proveedor.',
+  })
+  @IsOptional()
   @IsString()
-  password!: string
+  password?: string
 
   @ApiProperty({ example: 'Ana Ramirez', description: 'Apodo (display_name)', maxLength: 32 })
   @IsString()
