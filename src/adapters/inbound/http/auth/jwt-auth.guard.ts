@@ -52,6 +52,10 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       request.identity = await this.verifier.verify(token)
+      // Se conserva el token crudo, ya verificado, para las rutas que deben
+      // reenviarlo al proveedor (inscripcion TOTP self-service). Va DESPUES de
+      // verificar: nunca se guarda un token cuya firma no se comprobo.
+      request.accessToken = token
     } catch (error: unknown) {
       if (error instanceof TokenVerificationError) {
         throw new UnauthorizedException(error.message)
