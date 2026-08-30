@@ -12,7 +12,11 @@ export interface RegisterAvatarUpload {
 
 export interface RegisterAccountCommand {
   readonly email: string
-  readonly password: string
+  /**
+   * OBSOLETO: se acepta y se ignora. La contrasena la custodia el proveedor de
+   * identidad (ADR-004, decision 2). Ver `accounts.dto.ts`.
+   */
+  readonly password?: string
   /** Apodo de HU-01. Se valida como `DisplayName`. */
   readonly displayName: string
   readonly firstNames: string

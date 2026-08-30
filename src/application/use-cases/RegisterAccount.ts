@@ -5,7 +5,6 @@ import { DisplayName } from '../../domain/value-objects/DisplayName'
 import { EmailAddress } from '../../domain/value-objects/EmailAddress'
 import { PersonName } from '../../domain/value-objects/PersonName'
 import { DomainError } from '../../domain/errors/DomainError'
-import { PasswordPolicy } from '../../domain/policies/PasswordPolicy'
 import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
 import type { AvatarStoragePort } from '../ports/AvatarStoragePort'
 import type { ClockPort } from '../ports/ClockPort'
@@ -61,7 +60,16 @@ export class RegisterAccount {
       throw new AccountAlreadyExistsError(email.value)
     }
 
-    PasswordPolicy.assertValid(command.password)
+    // La contrasena YA NO se valida aqui, y sobre todo YA NO SE PIDE.
+    //
+    // Este servicio no la custodia (ADR-004, decision 2), asi que validarla
+    // daba una garantia falsa: se comprobaba una cadena que despues se tiraba.
+    // Quien registraba creia estar fijando su contrasena, y al intentar entrar
+    // con ella recibia "revisa tus credenciales", que apunta al sitio
+    // equivocado. Le paso a la primera persona ajena al equipo que uso el alta.
+    //
+    // La politica de contrasenas la aplica el proveedor en SU pantalla, que es
+    // donde la contrasena existe de verdad.
     const displayName = DisplayName.create(command.displayName)
 
     if (await this.deps.accounts.existsByDisplayName(displayName)) {

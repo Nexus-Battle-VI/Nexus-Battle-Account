@@ -297,24 +297,37 @@ describe('RegisterAccount', () => {
     ).rejects.toBeInstanceOf(DomainError)
   })
 
-  it('rechaza contrasenas que no cumplen la politica', async () => {
+  /**
+   * Esta prueba EXIGIA lo contrario, y protegia una garantia falsa.
+   *
+   * Este servicio no custodia contrasenas (ADR-004, decision 2): validaba la
+   * del formulario y la TIRABA. Quien se registraba creia estar fijando su
+   * contrasena y no fijaba nada; al intentar entrar con ella recibia "revisa
+   * tus credenciales", que apunta al sitio equivocado. Le paso a la primera
+   * persona ajena al equipo que uso el alta.
+   *
+   * Se afirma que una contrasena que la politica habria rechazado NO impide
+   * registrarse, porque el registro no tiene nada que decir sobre ella.
+   */
+  it('ignora la contrasena del formulario: no la custodia este servicio', async () => {
     const harness = buildHarness()
 
     await expect(
-      harness.registerAccount.execute(validCommand({ password: 'Abcde1!x' })),
-    ).rejects.toThrow(/mas de 8/)
-    await expect(
-      harness.registerAccount.execute(validCommand({ password: 'abcdefg1!' })),
-    ).rejects.toThrow(/mayuscula/)
-    await expect(
-      harness.registerAccount.execute(validCommand({ password: 'ABCDEFG1!' })),
-    ).rejects.toThrow(/minuscula/)
-    await expect(
-      harness.registerAccount.execute(validCommand({ password: 'Abcdefgh!' })),
-    ).rejects.toThrow(/numero/)
-    await expect(
-      harness.registerAccount.execute(validCommand({ password: 'Abcdefg12' })),
-    ).rejects.toThrow(/simbolo/)
+      harness.registerAccount.execute(validCommand({ password: 'debil' })),
+    ).resolves.toBeDefined()
+  })
+
+  /**
+   * El control del caso anterior: sin el campo tampoco falla. Si el registro
+   * dependiera de la contrasena de alguna forma que se nos escapa, esto lo
+   * delataria.
+   */
+  it('se registra igual sin enviar contrasena', async () => {
+    const harness = buildHarness()
+    const sinContrasena = { ...validCommand() }
+    delete (sinContrasena as { password?: string }).password
+
+    await expect(harness.registerAccount.execute(sinContrasena)).resolves.toBeDefined()
   })
 
   it('rechaza un apodo de mas de 32 caracteres', async () => {
