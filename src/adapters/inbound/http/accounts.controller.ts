@@ -29,6 +29,7 @@ import {
   NicknameBlacklistedError,
 } from '../../../application/errors/ApplicationError'
 import { RoleDirectoryError } from '../../../application/ports/RoleDirectoryPort'
+import { VerifiedEmailDirectoryError } from '../../../application/ports/VerifiedEmailDirectoryPort'
 import type { RegisterSecurityAnswer } from '../../../application/dto/RegisterAccountCommand'
 import { RegisterAccount } from '../../../application/use-cases/RegisterAccount'
 import { GetAccount } from '../../../application/use-cases/GetAccount'
@@ -75,7 +76,7 @@ export class AccountsController {
   @ApiResponse({
     status: 503,
     description:
-      'El proveedor de identidad no respondio. La cuenta NO se creo: sin reflejar el rol en el proveedor, el testimonio no lo llevaria.',
+      'El proveedor de identidad no respondio. La cuenta NO se creo: no se pudo comprobar el correo o reflejar el rol.',
   })
   async register(
     @Body() body: RegisterAccountRequest,
@@ -111,10 +112,6 @@ export class AccountsController {
               },
             }),
         subject,
-        // `identity.email` solo viene informado si el proveedor lo declara
-        // verificado (ver `toVerifiedIdentity`), asi que su mera presencia ya
-        // es la prueba. No se deduce del cuerpo de la peticion.
-        verifiedEmail: identity.email,
       })
     } catch (error: unknown) {
       throw AccountsController.translate(error)
@@ -203,7 +200,7 @@ export class AccountsController {
      * registro **falla cerrado** a proposito -no se guarda una cuenta cuyo rol
      * no viajaria en el testimonio- y quien llama merece saber por que.
      */
-    if (error instanceof RoleDirectoryError) {
+    if (error instanceof RoleDirectoryError || error instanceof VerifiedEmailDirectoryError) {
       return new ServiceUnavailableException(
         'El proveedor de identidad no esta disponible. Intentelo de nuevo mas tarde.',
       )

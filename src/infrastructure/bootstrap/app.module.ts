@@ -25,6 +25,10 @@ import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecond
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
 import { ROLE_DIRECTORY, type RoleDirectoryPort } from '../../application/ports/RoleDirectoryPort'
+import {
+  VERIFIED_EMAIL_DIRECTORY,
+  type VerifiedEmailDirectoryPort,
+} from '../../application/ports/VerifiedEmailDirectoryPort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
 import { CLOCK } from '../../application/ports/ClockPort'
 import { ID_GENERATOR } from '../../application/ports/IdGeneratorPort'
@@ -61,6 +65,8 @@ import { FakeAuthenticationProvider } from '../../adapters/outbound/identity/Fak
 import { CognitoAuthenticationProvider } from '../../adapters/outbound/identity/CognitoAuthenticationProvider'
 import { CognitoRoleDirectory } from '../../adapters/outbound/identity/CognitoRoleDirectory'
 import { InMemoryRoleDirectory } from '../../adapters/outbound/identity/InMemoryRoleDirectory'
+import { CognitoVerifiedEmailDirectory } from '../../adapters/outbound/identity/CognitoVerifiedEmailDirectory'
+import { InMemoryVerifiedEmailDirectory } from '../../adapters/outbound/identity/InMemoryVerifiedEmailDirectory'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
@@ -271,6 +277,28 @@ export const DATABASE = Symbol('Database')
       inject: [APP_CONFIG, LOGGER],
     },
     {
+      // Un access token de Cognito no contiene los atributos `email` ni
+      // `email_verified`. Este puerto consulta el perfil real del sujeto. Sin
+      // proveedor configurado, el doble responde que no hay prueba y conserva
+      // el comportamiento cerrado de desarrollo.
+      provide: VERIFIED_EMAIL_DIRECTORY,
+      useFactory: (config: AppConfig, logger: Logger): VerifiedEmailDirectoryPort => {
+        if (config.cognito === null) {
+          logger.warn('verified_email_directory', {
+            driver: 'memoria',
+            detail: 'Sin proveedor de identidad: ningun correo se considera verificado.',
+          })
+
+          return new InMemoryVerifiedEmailDirectory()
+        }
+
+        logger.info('verified_email_directory', { driver: 'cognito' })
+
+        return new CognitoVerifiedEmailDirectory({ userPoolId: config.cognito.userPoolId })
+      },
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
       provide: REGISTER_ACCOUNT,
       useFactory: (
         accounts: AccountRepositoryPort,
@@ -281,6 +309,7 @@ export const DATABASE = Symbol('Database')
         blacklist: NicknameBlacklistPort,
         questions: SecurityQuestionCatalogPort,
         roleDirectory: RoleDirectoryPort,
+        verifiedEmailDirectory: VerifiedEmailDirectoryPort,
       ): RegisterAccount =>
         new RegisterAccount({
           accounts,
@@ -291,6 +320,7 @@ export const DATABASE = Symbol('Database')
           blacklist,
           questions,
           roleDirectory,
+          verifiedEmailDirectory,
         }),
       inject: [
         ACCOUNT_REPOSITORY,
@@ -301,6 +331,7 @@ export const DATABASE = Symbol('Database')
         NICKNAME_BLACKLIST,
         SECURITY_QUESTION_CATALOG,
         ROLE_DIRECTORY,
+        VERIFIED_EMAIL_DIRECTORY,
       ],
     },
     {

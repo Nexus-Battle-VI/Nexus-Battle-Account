@@ -45,23 +45,29 @@ describe('Traduccion del token a identidad verificada', () => {
   it('acepta solo los grupos que corresponden a un rol conocido', () => {
     const identity = toVerifiedIdentity({
       sub: 'sujeto-1',
+      iss: 'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_pruebas',
+      client_id: 'cliente-de-pruebas',
+      token_use: 'access',
+      scope: 'aws.cognito.signin.user.admin',
+      username: 'sujeto-1',
       'cognito:groups': ['ADMINISTRATOR', 'PLAYER', 'SUPERUSUARIO', 'admin'],
     })
 
     expect([...identity.roles].sort()).toEqual([Role.Administrator, Role.Player])
   })
 
-  it('descarta el correo cuando el proveedor no lo declara verificado', () => {
-    expect(toVerifiedIdentity({ sub: 's', email: 'a@b.test' }).email).toBeNull()
-    expect(
-      toVerifiedIdentity({ sub: 's', email: 'a@b.test', email_verified: false }).email,
-    ).toBeNull()
-  })
+  it('modela un access token sin inventar atributos del perfil', () => {
+    const identity = toVerifiedIdentity({
+      sub: 'sujeto-1',
+      iss: 'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_pruebas',
+      client_id: 'cliente-de-pruebas',
+      token_use: 'access',
+      scope: 'aws.cognito.signin.user.admin',
+      username: 'sujeto-1',
+      'cognito:groups': ['PLAYER'],
+    })
 
-  it('acepta el correo verificado y lo normaliza', () => {
-    expect(
-      toVerifiedIdentity({ sub: 's', email: 'Ana@Nexus.TEST', email_verified: true }).email,
-    ).toBe('ana@nexus.test')
+    expect(identity).toEqual({ subject: 'sujeto-1', roles: new Set([Role.Player]) })
   })
 
   /**
@@ -87,7 +93,6 @@ describe('Traduccion del token a identidad verificada', () => {
 describe('JwtAuthGuard', () => {
   const identity: VerifiedIdentity = {
     subject: 'sujeto-1',
-    email: 'ana@nexus.test',
     roles: new Set([Role.Player]),
   }
 
@@ -184,7 +189,6 @@ describe('CurrentIdentity', () => {
   it('devuelve la identidad que dejo el guard', () => {
     const identity: VerifiedIdentity = {
       subject: 'sujeto-1',
-      email: null,
       roles: new Set([Role.Player]),
     }
 
@@ -199,7 +203,6 @@ describe('CurrentIdentity', () => {
 describe('RolesGuard', () => {
   const identityWith = (...roles: readonly Role[]): VerifiedIdentity => ({
     subject: 's',
-    email: null,
     roles: new Set(roles),
   })
 

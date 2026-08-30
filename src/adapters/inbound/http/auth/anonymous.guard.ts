@@ -21,7 +21,6 @@ import type { RequestWithIdentity } from './decorators'
  */
 export const ANONYMOUS_IDENTITY: VerifiedIdentity = {
   subject: 'anonymous',
-  email: null,
   roles: new Set(ALL_ROLES),
 }
 
