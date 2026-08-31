@@ -18,12 +18,15 @@ Account **no posee credenciales**. No almacena contraseñas, hashes, sales, toke
 
 ```text
 +-------------------------------------------------------------+
-|  adapters/inbound/http   AccountsController, SessionsController,|
+|  adapters/inbound/http   AccountsController, MfaController,   |
+|                          PasswordController, SessionsController,|
 |                          HealthController                    |
 +-------------------------------------------------------------+
 |  application             RegisterAccount, GetAccount,        |
-|                          VerifyAccount, LoginAccount,         |
-|                          CompleteSecondFactor, ports/         |
+|                          GetOwnAccount, UpdateOwnAccount,     |
+|                          ChangeOwnPassword, VerifyAccount,    |
+|                          LoginAccount, CompleteSecondFactor,  |
+|                          ports/                               |
 +-------------------------------------------------------------+
 |  domain                  Account, Role, RolePolicy,          |
 |                          EmailAddress, DisplayName, eventos  |
@@ -34,8 +37,8 @@ Account **no posee credenciales**. No almacena contraseñas, hashes, sales, toke
 |                          CognitoTokenVerifier,                 |
 |                          InMemoryRoleDirectory,                |
 |                          CognitoRoleDirectory,                 |
-|                          InMemoryVerifiedEmailDirectory,       |
-|                          CognitoVerifiedEmailDirectory,        |
+|                          InMemoryPasswordChange,               |
+|                          CognitoPasswordChange,                |
 |                          LoggingNotificationRequester,        |
 |                          LocalAvatarStorage,                   |
 |                          SystemClock, UuidGenerator          |
@@ -53,8 +56,9 @@ Las dependencias apuntan siempre hacia el dominio. El dominio no conoce ninguna 
 | ----------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `AccountRepositoryPort`       | Persistir y recuperar el agregado, incluida la busqueda por apodo (HU-02)                                | `InMemoryAccountRepository` / `PostgresAccountRepository`                                           |
 | `AuthenticationProviderPort`  | Verificacion de contrasena y segundo factor (HU-02)                                                      | `FakeAuthenticationProvider` / `CognitoAuthenticationProvider`, elegido por `AUTHENTICATION_DRIVER` |
+| `PasswordChangePort`          | Cambio de contrasena self-service (HU-05) sobre el testimonio del usuario; la credencial no toca Account | `InMemoryPasswordChange` / `CognitoPasswordChange`, segun haya proveedor configurado                |
 | `RoleDirectoryPort`           | Refleja en el proveedor el rol que este servicio decide. Direccion unica: Account decide, el pool recoge | `InMemoryRoleDirectory` / `CognitoRoleDirectory`, segun haya proveedor configurado                  |
-| `VerifiedEmailDirectoryPort`  | Consulta el correo que el proveedor verifico para el sujeto; no confia en el formulario ni en el token   | `InMemoryVerifiedEmailDirectory` / `CognitoVerifiedEmailDirectory`                                  |
+| `TotpEnrollmentPort`          | Inscripcion TOTP self-service (HU-02) sobre el testimonio del usuario                                    | `InMemoryTotpEnrollment` / `CognitoTotpEnrollment`, segun haya proveedor configurado                |
 | `AvatarStoragePort`           | Guardar y borrar bytes de avatar                                                                         | `LocalAvatarStorage` (AWS sustituye el adaptador)                                                   |
 | `NicknameBlacklistPort`       | Consultar la lista negra vigente de apodos                                                               | `InMemoryNicknameBlacklist` / `PostgresNicknameBlacklist`                                           |
 | `SecurityQuestionCatalogPort` | Catálogo activo de preguntas de seguridad                                                                | En memoria / `PostgresSecurityQuestionCatalog`                                                      |
@@ -85,22 +89,22 @@ No se aplica CQRS ni Event Sourcing: el contexto no tiene un modelo de lectura d
    respuestas y avatar                         -> falla temprano, sin efectos
 2. Comprobar unicidad de correo y apodo        -> falla temprano, sin efectos
 3. Consultar lista negra vigente               -> falla temprano, sin efectos
-4. Consultar por sujeto el correo verificado   -> AdminGetUser; si falla,
-                                                 responde 503 sin efectos
-5. Almacenar avatar                            -> primer efecto externo
-6. Crear el agregado                           -> ACTIVE solo si ambos correos
-                                                 coinciden normalizados; si no,
-                                                 PENDING_VERIFICATION
+4. Crear la identidad en el proveedor (signUp) -> devuelve el sujeto y Cognito
+   (ADR-004, "Alta server-side")                 envía el código al correo;
+                                                 "correo ya existe" => 409
+5. Almacenar avatar                            -> primer efecto propio
+6. Crear el agregado                           -> siempre PENDING_VERIFICATION;
+                                                 el correo se confirma después
 7. Reflejar el rol en el proveedor             -> antes de persistir; si falla,
                                                  se compensa el avatar
 8. Persistir cuenta, roles y hashes            -> transaccion PostgreSQL;
                                                  si falla, se borra el avatar
-9. Solicitar el correo                         -> no compensa: la cuenta ya es valida
+9. Solicitar el correo de bienvenida           -> no compensa: la cuenta ya es valida
 ```
 
 El paso 9 no participa de la compensación de forma deliberada. Si la solicitud de notificación falla, la cuenta existe y es correcta; deshacer el registro por no haber podido enviar un correo de bienvenida sería peor que reintentar la notificación. El error se propaga para que quede registrado, pero no revierte nada.
 
-El access token se conserva para autorización y RBAC: contiene `sub` y `cognito:groups`, no los atributos de perfil `email`/`email_verified`. Por eso el correo verificado se obtiene mediante `AdminGetUser` y se compara normalizado con el correo validado del formulario. Una respuesta sin correo verificado produce `PENDING_VERIFICATION`; una caída del proveedor falla cerrada y no crea la cuenta.
+La identidad se crea en el proveedor con `signUp` (ADR-004, «Alta server-side»), no con `AdminCreateUser`: así Cognito envía el código de confirmación al correo con su emisor por defecto y la verificación del buzón sigue siendo real. La cuenta nace `PENDING_VERIFICATION` y pasa a `ACTIVE` cuando quien registra confirma el código en `POST /api/accounts/confirmation` (`ConfirmRegistration` → `confirmSignUp`). La contraseña viaja a `signUp` y no se persiste en Account. La identidad que crea `signUp` **no** se compensa ante un fallo posterior —haría falta `AdminDeleteUser`—; la ventana se minimiza validando todo lo validable antes de llamarla.
 
 ## Estados de la cuenta
 
@@ -205,13 +209,23 @@ Toda cuenta nace con el rol `PLAYER`, que no puede retirarse: garantiza que ning
 
 Los roles nunca se aceptan desde la petición de registro ni desde la de login. El contrato HTTP rechaza campos no declarados, de modo que un cliente no puede autoconcederse privilegios; el rol que decide la autorización se lee siempre de la cuenta ya persistida.
 
-**HU-02 solo LEE el rol vigente; no lo asigna.** La asignación y modificación de roles es HU-39 (`Nexus-Battle-Management#27`), todavía no implementada. `SUPER_ADMINISTRATOR` es una cuenta raíz única: no se crea mediante HU-01, no se recupera mediante HU-04 y no existe una operación pública que la genere.
+**HU-02 solo LEE el rol vigente; no lo asigna.** La asignación y retirada de roles es HU-39, y ya está implementada: `AssignRole` (`POST /api/accounts/:id/roles`) y `RevokeRole` (`DELETE /api/accounts/:id/roles/:role`), ambas restringidas a `SUPER_ADMINISTRATOR`. `SUPER_ADMINISTRATOR` es una cuenta raíz única: no se crea mediante HU-01, no se recupera mediante HU-04 y no existe una operación pública que la genere (tampoco `AssignRole`, que rechaza ese rol).
 
-`RolePolicy.canManageRoles` sigue concediendo la gestión de roles a `ADMINISTRATOR`, lo que la HU-39 vigente contradice (solo `SUPER_ADMINISTRATOR` debería poder hacerlo). `grantRole`/`revokeRole` no los invoca ningún caso de uso hoy, así que no hay una vulnerabilidad activa; la inconsistencia queda documentada en el propio archivo de `RolePolicy` y corresponde corregirla a HU-39, no a HU-02.
+`RolePolicy.canManageRoles` concede la gestión de roles **solo a `SUPER_ADMINISTRATOR`**. `Account.grantRole`/`Account.revokeRole` aplican esa política y los invocan `AssignRole`/`RevokeRole`; conceder un rol administrativo exige además que la cuenta destino tenga TOTP confirmado, y retirarlo cierra sus sesiones en el proveedor.
 
 ## Contrato HTTP
 
 La especificación OpenAPI se genera desde el código con `@nestjs/swagger` y se expone en `/api/docs` cuando la documentación está habilitada. En producción permanece deshabilitada salvo decisión explícita.
+
+### Mi Cuenta (HU-05)
+
+Las operaciones sobre la cuenta propia derivan la cuenta del sujeto del testimonio, nunca de un identificador del cuerpo. No existe `PATCH /api/accounts/:id`.
+
+| Ruta                             | Uso                                                                                                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/accounts/me`           | Consulta. Contrato público, sin `subject` ni credenciales.                                                                                                          |
+| `PATCH /api/accounts/me`         | Actualiza información personal. Hoy solo `displayName`, con las reglas de unicidad y lista negra del registro. `forbidNonWhitelisted` rechaza cualquier otro campo. |
+| `POST /api/accounts/me/password` | Cambio de contraseña vía `PasswordChangePort`. La contraseña actúa sobre el testimonio de acceso y no toca `Account` ni PostgreSQL. Responde `204`.                 |
 
 Eventos de dominio emitidos:
 
@@ -235,10 +249,11 @@ El correo electrónico es un dato personal: la observabilidad registra el **domi
 
 - ~~El alta de identidad (HU-01) sigue simulada en local.~~ **Superado el 2026-08-29**: este servicio no da de alta identidades y `IdentityProviderPort` se eliminó. El alta ocurre en la pantalla del proveedor, de modo que quien llega a `POST /api/accounts` ya tiene con qué autenticarse.
 - `CognitoAuthenticationProvider` no está confirmado contra la configuración real: usa `AdminInitiateAuth`/`AdminRespondToAuthChallenge` (`ADMIN_USER_PASSWORD_AUTH`), que exige permiso IAM en el rol de ejecución del runtime y `ALLOW_ADMIN_USER_PASSWORD_AUTH` en `ExplicitAuthFlows`. ADR-004 no confirma ninguno de los dos. Si faltan, el login real falla (no las pruebas, que usan `FakeAuthenticationProvider`).
-- `CognitoVerifiedEmailDirectory` exige `cognito-idp:AdminGetUser` acotado al ARN del pool. El rol de instancia actual solo enumera autenticación y reflejo de grupos; desplegar este cambio antes de ampliar Infrastructure hace que el registro falle cerrado con 503.
 - El segundo factor administrativo (HU-02) usa el reto que el proveedor emita, pero el mecanismo aprobado por el cliente (correo) no coincide con el aprovisionado en el pool (TOTP): el correo exige SES, decisión todavía pendiente. Ver ADR-004 en Nexus-Battle-Infrastructure.
 - Los bytes del avatar viven fuera de PostgreSQL (`AvatarStoragePort`). En local se usa disco; AWS sustituye el adaptador.
 - Las solicitudes de notificación se registran en la observabilidad con la forma exacta del mensaje, pero no se publican en una cola. Depende de ADR-006.
-- La asignación y modificación de roles (`HU-39`) no forma parte de este alcance: HU-02 solo lee el rol vigente.
+- **Mi Cuenta (HU-05):** `PATCH /api/accounts/me` edita hoy **solo el apodo** (`displayName`). `firstNames`, `lastNames`, `email` y `avatar` no se editan porque HU-05 no enumera aquí una lista definitiva de campos editables (y `changeEmail` reabriría la verificación del correo).
+- **Preferencias (HU-05):** idioma y apariencia no están implementadas. No existe en el repositorio un vocabulario aprobado de valores; modelarlas con valores inventados sería peor que declarar el bloqueo. `PATCH /api/accounts/me` está preparado para extenderse sin reescribirse.
+- **Suscripciones y métodos de pago (HU-05):** sin operaciones funcionales aprobadas ni ownership definido para `Account`. Fuera del alcance implementable.
 
 Estas limitaciones están declaradas de forma explícita para que la arquitectura de demo no se confunda con la arquitectura objetivo, documentada en `docs/architecture/target-scale-deployment.md` de Nexus-Battle-Infrastructure.

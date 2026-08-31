@@ -3,6 +3,7 @@ import { APP_GUARD, Reflector } from '@nestjs/core'
 
 import { AccountsController } from '../../adapters/inbound/http/accounts.controller'
 import { MfaController } from '../../adapters/inbound/http/mfa.controller'
+import { PasswordController } from '../../adapters/inbound/http/password.controller'
 import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
 import { HealthController } from '../../adapters/inbound/http/health.controller'
 import {
@@ -10,6 +11,8 @@ import {
   COMPLETE_SECOND_FACTOR,
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
+  UPDATE_OWN_ACCOUNT,
+  CHANGE_OWN_PASSWORD,
   LOGIN_ACCOUNT,
   REGISTER_ACCOUNT,
   VERIFY_ACCOUNT,
@@ -29,6 +32,8 @@ import { EnrollTotp } from '../../application/use-cases/EnrollTotp'
 import { ConfirmTotpEnrollment } from '../../application/use-cases/ConfirmTotpEnrollment'
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
+import { UpdateOwnAccount } from '../../application/use-cases/UpdateOwnAccount'
+import { ChangeOwnPassword } from '../../application/use-cases/ChangeOwnPassword'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
 import { LoginAccount } from '../../application/use-cases/LoginAccount'
 import { LogoutAccount } from '../../application/use-cases/LogoutAccount'
@@ -53,6 +58,10 @@ import {
   SESSION_REVOCATION,
   type SessionRevocationPort,
 } from '../../application/ports/SessionRevocationPort'
+import {
+  PASSWORD_CHANGE,
+  type PasswordChangePort,
+} from '../../application/ports/PasswordChangePort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
 import { CLOCK } from '../../application/ports/ClockPort'
 import { ID_GENERATOR } from '../../application/ports/IdGeneratorPort'
@@ -97,6 +106,8 @@ import { CognitoMfaStatus } from '../../adapters/outbound/identity/CognitoMfaSta
 import { InMemoryMfaStatus } from '../../adapters/outbound/identity/InMemoryMfaStatus'
 import { CognitoSessionRevocation } from '../../adapters/outbound/identity/CognitoSessionRevocation'
 import { InMemorySessionRevocation } from '../../adapters/outbound/identity/InMemorySessionRevocation'
+import { CognitoPasswordChange } from '../../adapters/outbound/identity/CognitoPasswordChange'
+import { InMemoryPasswordChange } from '../../adapters/outbound/identity/InMemoryPasswordChange'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
@@ -124,7 +135,13 @@ export const DATABASE = Symbol('Database')
  * framework y podria ejecutarse fuera de el sin cambios.
  */
 @Module({
-  controllers: [AccountsController, MfaController, SessionsController, HealthController],
+  controllers: [
+    AccountsController,
+    MfaController,
+    PasswordController,
+    SessionsController,
+    HealthController,
+  ],
   providers: [
     {
       provide: APP_CONFIG,
@@ -382,6 +399,27 @@ export const DATABASE = Symbol('Database')
       inject: [APP_CONFIG, LOGGER],
     },
     {
+      // Cambio de contrasena self-service (HU-05). Actua sobre el testimonio del
+      // usuario, no sobre credenciales de AWS; sin proveedor configurado, el
+      // doble en memoria reproduce el contrato (actual correcta -> cambiada).
+      provide: PASSWORD_CHANGE,
+      useFactory: (config: AppConfig, logger: Logger): PasswordChangePort => {
+        if (config.cognito === null) {
+          logger.warn('password_change', {
+            driver: 'memoria',
+            detail: 'Sin proveedor de identidad: el cambio de contrasena no llega a Cognito.',
+          })
+
+          return new InMemoryPasswordChange()
+        }
+
+        logger.info('password_change', { driver: 'cognito' })
+
+        return new CognitoPasswordChange({ userPoolId: config.cognito.userPoolId })
+      },
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
       provide: ENROLL_TOTP,
       useFactory: (
         totpEnrollment: TotpEnrollmentPort,
@@ -473,6 +511,20 @@ export const DATABASE = Symbol('Database')
       provide: GET_OWN_ACCOUNT,
       useFactory: (accounts: AccountRepositoryPort): GetOwnAccount => new GetOwnAccount(accounts),
       inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: UPDATE_OWN_ACCOUNT,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        blacklist: NicknameBlacklistPort,
+      ): UpdateOwnAccount => new UpdateOwnAccount(accounts, blacklist),
+      inject: [ACCOUNT_REPOSITORY, NICKNAME_BLACKLIST],
+    },
+    {
+      provide: CHANGE_OWN_PASSWORD,
+      useFactory: (passwords: PasswordChangePort): ChangeOwnPassword =>
+        new ChangeOwnPassword({ passwords }),
+      inject: [PASSWORD_CHANGE],
     },
     {
       provide: VERIFY_ACCOUNT,

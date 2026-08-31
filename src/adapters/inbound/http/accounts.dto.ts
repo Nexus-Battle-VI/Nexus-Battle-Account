@@ -12,6 +12,7 @@ import {
 } from 'class-validator'
 
 import { Role, type Role as RoleValue } from '../../../domain/entities/Role'
+import { DisplayName } from '../../../domain/value-objects/DisplayName'
 
 /**
  * Contrato de entrada del registro (multipart/form-data).
@@ -101,6 +102,28 @@ export class AccountResponse {
   readonly roles!: readonly string[]
 }
 
+/**
+ * Contrato de la actualizacion self-service de la cuenta propia (HU-05).
+ *
+ * Declara EXCLUSIVAMENTE los campos que hoy se implementan. Con
+ * `forbidNonWhitelisted` en el ValidationPipe global, cualquier otro campo
+ * -`id`, `accountId`, `subject`, `status`, `roles`, `termsAccepted`...- hace que
+ * la peticion se rechace con 400. La cuenta se resuelve por el testimonio, no
+ * por el cuerpo.
+ */
+export class UpdateOwnAccountRequest {
+  @ApiProperty({
+    example: 'Ana Ramirez',
+    description: 'Nuevo apodo (display_name).',
+    minLength: DisplayName.MIN_LENGTH,
+    maxLength: DisplayName.MAX_LENGTH,
+  })
+  @IsString()
+  @MinLength(DisplayName.MIN_LENGTH)
+  @MaxLength(DisplayName.MAX_LENGTH)
+  displayName!: string
+}
+
 export class FindAccountByEmailQuery {
   @ApiProperty({ example: 'jugador@nexus.test' })
   @IsEmail({}, { message: 'El correo debe tener un formato valido.' })
@@ -155,4 +178,35 @@ export class ConfirmTotpRequest {
   @IsString()
   @Matches(/^\d{6}$/u, { message: 'El codigo debe tener exactamente seis digitos.' })
   code!: string
+}
+
+/**
+ * Contrato del cambio de contrasena de la cuenta propia (HU-05).
+ *
+ * La identidad se toma del testimonio, no del cuerpo: no acepta `accountId`,
+ * `email`, `subject`, `username` ni `role`. Las contrasenas NO se registran ni
+ * se devuelven; los ejemplos son ficticios.
+ *
+ * La validacion aqui es solo de FORMA (cadena, no vacia). La politica de
+ * fortaleza -longitud, complejidad- la aplica el proveedor de identidad, que es
+ * la autoridad vigente del sistema, igual que en el alta. No se declara un
+ * minimo local: seria una segunda politica, sin fuente funcional que la respalde
+ * y capaz de divergir del pool.
+ */
+export class ChangePasswordRequest {
+  @ApiProperty({
+    example: 'Contrasena-Actual-Ficticia-1',
+    description: 'Contrasena vigente. Nunca se registra ni se devuelve.',
+  })
+  @IsString()
+  @MinLength(1)
+  currentPassword!: string
+
+  @ApiProperty({
+    example: 'Contrasena-Nueva-Ficticia-1',
+    description: 'Contrasena nueva. La politica de fortaleza la aplica el proveedor de identidad.',
+  })
+  @IsString()
+  @MinLength(1)
+  newPassword!: string
 }
