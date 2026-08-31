@@ -37,6 +37,7 @@ import {
   VERIFY_RECOVERY_ANSWERS,
   VERIFY_RECOVERY_CODE,
   LIST_ADMIN_ACCOUNTS,
+  EXPORT_ADMIN_ACCOUNTS,
 } from '../../adapters/inbound/http/tokens'
 import { READINESS_CHECKS, VERSION_REPORT } from '../../adapters/inbound/http/tokens.health'
 
@@ -60,12 +61,17 @@ import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecond
 import { AssignRole } from '../../application/use-cases/AssignRole'
 import { FindAccountByEmail } from '../../application/use-cases/FindAccountByEmail'
 import { ListAdminAccounts } from '../../application/use-cases/ListAdminAccounts'
+import { ExportAdminAccounts } from '../../application/use-cases/ExportAdminAccounts'
 import { RevokeRole } from '../../application/use-cases/RevokeRole'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import {
   ADMIN_ACCOUNT_QUERY,
   type AdminAccountQueryPort,
 } from '../../application/ports/AdminAccountQueryPort'
+import {
+  ADMIN_ACCOUNT_EXPORT,
+  type AdminAccountExportPort,
+} from '../../application/ports/AdminAccountExportPort'
 import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
 import { ROLE_DIRECTORY, type RoleDirectoryPort } from '../../application/ports/RoleDirectoryPort'
 import {
@@ -122,6 +128,7 @@ import { PostgresNicknameBlacklist } from '../../adapters/outbound/persistence/P
 import { InMemorySecurityQuestionCatalog } from '../../adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
 import { PostgresSecurityQuestionCatalog } from '../../adapters/outbound/persistence/PostgresSecurityQuestionCatalog'
 import { LocalAvatarStorage } from '../../adapters/outbound/storage/LocalAvatarStorage'
+import { JsonAdminAccountExportAdapter } from '../../adapters/outbound/export/JsonAdminAccountExportAdapter'
 import { createDatabase } from '../persistence/database'
 import type { Database } from '../../adapters/outbound/persistence/schema'
 import type { Kysely } from 'kysely'
@@ -226,6 +233,10 @@ export const DATABASE = Symbol('Database')
     {
       provide: ADMIN_ACCOUNT_QUERY,
       useExisting: ACCOUNT_REPOSITORY,
+    },
+    {
+      provide: ADMIN_ACCOUNT_EXPORT,
+      useFactory: (): AdminAccountExportPort => new JsonAdminAccountExportAdapter(),
     },
     {
       provide: NICKNAME_BLACKLIST,
@@ -566,6 +577,14 @@ export const DATABASE = Symbol('Database')
       useFactory: (accounts: AdminAccountQueryPort): ListAdminAccounts =>
         new ListAdminAccounts(accounts),
       inject: [ADMIN_ACCOUNT_QUERY],
+    },
+    {
+      provide: EXPORT_ADMIN_ACCOUNTS,
+      useFactory: (
+        listAdminAccounts: ListAdminAccounts,
+        exporter: AdminAccountExportPort,
+      ): ExportAdminAccounts => new ExportAdminAccounts(listAdminAccounts, exporter),
+      inject: [LIST_ADMIN_ACCOUNTS, ADMIN_ACCOUNT_EXPORT],
     },
     {
       provide: ASSIGN_ROLE,

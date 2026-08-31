@@ -20,6 +20,8 @@ import { defaultAvatarMetadata } from '../support/account-factory'
 import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
 import { ListAdminAccounts } from '../../src/application/use-cases/ListAdminAccounts'
 import type { AdminAccountQueryCriteria } from '../../src/application/dto/AdminAccountQueryCriteria'
+import { ExportAdminAccounts } from '../../src/application/use-cases/ExportAdminAccounts'
+import { JsonAdminAccountExportAdapter } from '../../src/adapters/outbound/export/JsonAdminAccountExportAdapter'
 
 /**
  * Adaptador de PostgreSQL contra un motor REAL, en contenedor.
@@ -116,6 +118,21 @@ describe('PostgresAccountRepository', () => {
       status: seed.status,
       roles: seed.roles,
     })
+
+  const seedAdminQueryAccounts = async (memory?: InMemoryAccountRepository): Promise<void> => {
+    await db.deleteFrom('accounts').execute()
+
+    for (const seed of ADMIN_QUERY_SEEDS) {
+      const account = buildAdminQueryAccount(seed)
+      await memory?.save(account)
+      await repository.save(account)
+      await db
+        .updateTable('accounts')
+        .set({ created_at: seed.registeredAt, updated_at: seed.registeredAt })
+        .where('id', '=', seed.id)
+        .execute()
+    }
+  }
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:17-alpine').start()
@@ -281,23 +298,12 @@ describe('PostgresAccountRepository', () => {
   })
 
   it('mantiene paridad con memoria para los filtros administrativos soportados', async () => {
-    await db.deleteFrom('accounts').execute()
-
     let nextDate = 0
     const memory = new InMemoryAccountRepository(
       () => ADMIN_QUERY_SEEDS[nextDate++]?.registeredAt ?? new Date('2026-08-31T00:00:00.000Z'),
     )
 
-    for (const seed of ADMIN_QUERY_SEEDS) {
-      const account = buildAdminQueryAccount(seed)
-      await memory.save(account)
-      await repository.save(account)
-      await db
-        .updateTable('accounts')
-        .set({ created_at: seed.registeredAt, updated_at: seed.registeredAt })
-        .where('id', '=', seed.id)
-        .execute()
-    }
+    await seedAdminQueryAccounts(memory)
 
     const criteria: readonly AdminAccountQueryCriteria[] = [
       {},
@@ -319,6 +325,51 @@ describe('PostgresAccountRepository', () => {
         await memoryUseCase.execute(criterion),
       )
     }
+  })
+
+  it('exporta desde PostgreSQL el mismo resultado producido por ListAdminAccounts', async () => {
+    await seedAdminQueryAccounts()
+
+    const criteria: AdminAccountQueryCriteria = {
+      role: Role.Player,
+      status: AccountStatus.Active,
+    }
+    const listAdminAccounts = new ListAdminAccounts(repository)
+    const exportAdminAccounts = new ExportAdminAccounts(
+      listAdminAccounts,
+      new JsonAdminAccountExportAdapter(),
+    )
+    const accountsBefore = await db
+      .selectFrom('accounts')
+      .select(['id', 'email', 'display_name', 'first_names', 'last_names', 'status', 'updated_at'])
+      .orderBy('id')
+      .execute()
+    const rolesBefore = await db
+      .selectFrom('account_roles')
+      .select(['account_id', 'role'])
+      .orderBy('account_id')
+      .orderBy('role')
+      .execute()
+
+    const listed = await listAdminAccounts.execute(criteria)
+    const file = await exportAdminAccounts.execute(criteria)
+    const exported = JSON.parse(file.content) as unknown
+    const accountsAfter = await db
+      .selectFrom('accounts')
+      .select(['id', 'email', 'display_name', 'first_names', 'last_names', 'status', 'updated_at'])
+      .orderBy('id')
+      .execute()
+    const rolesAfter = await db
+      .selectFrom('account_roles')
+      .select(['account_id', 'role'])
+      .orderBy('account_id')
+      .orderBy('role')
+      .execute()
+
+    expect(exported).toEqual(listed.items)
+    expect(listed.items.map((item) => item.id)).toEqual(['acc-query-admin'])
+    expect(accountsAfter).toEqual(accountsBefore)
+    expect(rolesAfter).toEqual(rolesBefore)
   })
 
   describe('Las restricciones viven en el motor, no solo en el codigo', () => {
