@@ -1,7 +1,8 @@
 import {
   Body,
-  ForbiddenException,
   Controller,
+  Delete,
+  ForbiddenException,
   HttpCode,
   HttpStatus,
   Inject,
@@ -9,13 +10,21 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common'
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 
 import type { LoginOutcome } from '../../../application/dto/LoginResult'
 import { CompleteSecondFactor } from '../../../application/use-cases/CompleteSecondFactor'
 import { LoginAccount } from '../../../application/use-cases/LoginAccount'
-import { Public } from './auth/decorators'
-import { CHOOSE_SECOND_FACTOR, COMPLETE_SECOND_FACTOR, LOGIN_ACCOUNT } from './tokens'
+import { LogoutAccount } from '../../../application/use-cases/LogoutAccount'
+import { CurrentIdentity, Public } from './auth/decorators'
+import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
+import { SessionRevocationError } from '../../../application/ports/SessionRevocationPort'
+import {
+  CHOOSE_SECOND_FACTOR,
+  COMPLETE_SECOND_FACTOR,
+  LOGIN_ACCOUNT,
+  LOGOUT_ACCOUNT,
+} from './tokens'
 import { ChooseSecondFactor } from '../../../application/use-cases/ChooseSecondFactor'
 import {
   LoginRequest,
@@ -25,16 +34,14 @@ import {
 } from './sessions.dto'
 
 /**
- * Sesiones (HU-02).
+ * Sesiones (HU-02, HU-03).
  *
- * Ambas rutas son publicas (`@Public()`): pedirlas exigiria ya tener una
- * sesion, lo cual es precisamente lo que todavia no existe en este punto.
+ * Las rutas de login (`POST`, `POST second-factor*`) son publicas (`@Public()`):
+ * pedirlas exigiria ya tener una sesion, lo cual es precisamente lo que todavia
+ * no existe en ese punto.
  *
- * No hay traduccion de errores de dominio aqui como en `AccountsController`:
- * `LoginAccount`/`CompleteSecondFactor` devuelven un resultado explicito
- * (`LoginOutcome`) en lugar de lanzar excepciones para sus fallos esperados
- * -ver `application/dto/LoginResult.ts` para la justificacion-, asi que este
- * controlador solo traduce ESE resultado a HTTP con un `switch` exhaustivo.
+ * La ruta de logout (`DELETE`) exige una sesion activa autenticada: la identidad
+ * se obtiene del testimonio verificado en el contexto de seguridad (HU-03).
  */
 @ApiTags('sessions')
 @Controller('sessions')
@@ -43,7 +50,29 @@ export class SessionsController {
     @Inject(LOGIN_ACCOUNT) private readonly loginAccount: LoginAccount,
     @Inject(COMPLETE_SECOND_FACTOR) private readonly completeSecondFactor: CompleteSecondFactor,
     @Inject(CHOOSE_SECOND_FACTOR) private readonly chooseSecondFactor: ChooseSecondFactor,
+    @Inject(LOGOUT_ACCOUNT) private readonly logoutAccount: LogoutAccount,
   ) {}
+
+  @ApiBearerAuth()
+  @Delete()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Cierra la sesion activa del usuario autenticado (HU-03)' })
+  @ApiResponse({
+    status: 204,
+    description: 'Sesion cerrada y revocada exitosamente.',
+  })
+  @ApiResponse({ status: 401, description: 'No autenticado o token invalido' })
+  @ApiResponse({ status: 503, description: 'El proveedor de identidad no esta disponible' })
+  async logout(@CurrentIdentity() identity: VerifiedIdentity): Promise<void> {
+    try {
+      await this.logoutAccount.execute({ subject: identity.subject })
+    } catch (error: unknown) {
+      if (error instanceof SessionRevocationError) {
+        throw new ServiceUnavailableException('El proveedor de identidad no esta disponible.')
+      }
+      throw error
+    }
+  }
 
   @Public()
   @Post()
