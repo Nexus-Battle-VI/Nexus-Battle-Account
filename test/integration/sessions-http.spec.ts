@@ -20,17 +20,23 @@ import { ROLE_DIRECTORY } from '../../src/application/ports/RoleDirectoryPort'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
 import { InMemoryIdentitySignUp } from '../../src/adapters/outbound/identity/InMemoryIdentitySignUp'
 import { IDENTITY_SIGN_UP } from '../../src/application/ports/IdentitySignUpPort'
+import {
+  SESSION_REVOCATION,
+  SessionRevocationError,
+} from '../../src/application/ports/SessionRevocationPort'
+import { InMemorySessionRevocation } from '../../src/adapters/outbound/identity/InMemorySessionRevocation'
 import { registerAccountRequest } from '../support/http-register'
 import { VALID_PASSWORD, buildActiveAccount } from '../support/account-factory'
 
 /**
- * Integracion HTTP de HU-02 (Nexus-Battle-Management#11 / task #90).
+ * Integracion HTTP de HU-02 y HU-03 (Nexus-Battle-Management#11, #12 / tasks #90, #104).
  *
  * Sigue el mismo patron que `auth-http.spec.ts`: se activa `AUTH_MODE=jwt` de
  * verdad -para que `SessionsController` conviva con los guards reales- y solo
  * se sustituye lo que exigiria una red o un pool de Cognito real:
- * `TOKEN_VERIFIER` (verificacion de testimonios ya emitidos) y
- * `AUTHENTICATION_PROVIDER` (verificacion de contrasena y segundo factor).
+ * `TOKEN_VERIFIER` (verificacion de testimonios ya emitidos),
+ * `AUTHENTICATION_PROVIDER` (verificacion de contrasena y segundo factor),
+ * y `SESSION_REVOCATION` (revocacion global en Cognito).
  *
  * `dynamicIdentities` es el puente entre ambos dobles: `FakeAuthenticationProvider`
  * emite testimonios reales (no predecibles de antemano), y este mapa deja que
@@ -61,10 +67,11 @@ const stubVerifier: TokenVerifierPort = {
   },
 }
 
-describe('API de sesiones (HU-02)', () => {
+describe('API de sesiones (HU-02, HU-03)', () => {
   let app: INestApplication
   let previousEnv: Record<string, string | undefined>
   let authProvider: FakeAuthenticationProvider
+  let sessionRevocation: InMemorySessionRevocation
 
   beforeAll(async () => {
     previousEnv = {
@@ -77,6 +84,8 @@ describe('API de sesiones (HU-02)', () => {
     process.env.COGNITO_USER_POOL_ID = 'us-east-1_pruebas'
     process.env.COGNITO_CLIENT_ID = 'cliente-de-pruebas'
 
+    sessionRevocation = new InMemorySessionRevocation()
+
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(TOKEN_VERIFIER)
       .useValue(stubVerifier)
@@ -88,6 +97,8 @@ describe('API de sesiones (HU-02)', () => {
       .useValue(new InMemoryRoleDirectory())
       .overrideProvider(IDENTITY_SIGN_UP)
       .useValue(new InMemoryIdentitySignUp())
+      .overrideProvider(SESSION_REVOCATION)
+      .useValue(sessionRevocation)
       .compile()
 
     app = moduleRef.createNestApplication()
@@ -352,5 +363,62 @@ describe('API de sesiones (HU-02)', () => {
     })
 
     expect(response.status).toBe(401)
+  })
+
+  describe('Cierre de sesion (HU-03)', () => {
+    it('CA-01, CA-02: DELETE /api/sessions con token valido invalida la sesion y responde 204 No Content', async () => {
+      const email = 'logout-jugador@nexus.test'
+      const { subject } = await givenActivePlayer(email, 'JugadorLogout')
+
+      const login = await request(app.getHttpServer())
+        .post('/api/sessions')
+        .send({ identifier: email, password: VALID_PASSWORD })
+
+      expect(login.status).toBe(200)
+      const token = (login.body as { accessToken: string }).accessToken
+      expect(typeof token).toBe('string')
+
+      // Registramos la identidad dinamica para que el guard reconozca el token emitido
+      dynamicIdentities.set(token, { subject, roles: new Set([Role.Player]) })
+
+      const response = await request(app.getHttpServer())
+        .delete('/api/sessions')
+        .set('Authorization', `Bearer ${token}`)
+
+      expect(response.status).toBe(204)
+      expect(sessionRevocation.wasSignedOut(subject)).toBe(true)
+    })
+
+    it('DELETE /api/sessions sin testimonio de autorizacion responde 401 Unauthorized', async () => {
+      const response = await request(app.getHttpServer()).delete('/api/sessions')
+
+      expect(response.status).toBe(401)
+    })
+
+    it('DELETE /api/sessions con token desconocido o invalido responde 401 Unauthorized', async () => {
+      const response = await request(app.getHttpServer())
+        .delete('/api/sessions')
+        .set('Authorization', 'Bearer token-invalido-o-expirado')
+
+      expect(response.status).toBe(401)
+    })
+
+    it('DELETE /api/sessions responde 503 Service Unavailable cuando falla el proveedor de revocacion', async () => {
+      const subject = 'sujeto-fallo-proveedor'
+      const token = 'token-fallo-proveedor'
+      dynamicIdentities.set(token, { subject, roles: new Set([Role.Player]) })
+
+      const spy = jest
+        .spyOn(sessionRevocation, 'globalSignOut')
+        .mockRejectedValueOnce(new SessionRevocationError('Cognito unavailable'))
+
+      const response = await request(app.getHttpServer())
+        .delete('/api/sessions')
+        .set('Authorization', `Bearer ${token}`)
+
+      expect(response.status).toBe(503)
+      expect(response.body.message).toContain('El proveedor de identidad no esta disponible')
+      spy.mockRestore()
+    })
   })
 })
