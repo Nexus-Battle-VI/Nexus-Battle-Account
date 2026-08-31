@@ -10,6 +10,7 @@ import {
   Inject,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   ServiceUnavailableException,
@@ -40,6 +41,7 @@ import { RegisterAccount } from '../../../application/use-cases/RegisterAccount'
 import { ConfirmRegistration } from '../../../application/use-cases/ConfirmRegistration'
 import { GetAccount } from '../../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
+import { UpdateOwnAccount } from '../../../application/use-cases/UpdateOwnAccount'
 import { VerifyAccount } from '../../../application/use-cases/VerifyAccount'
 import { AssignRole } from '../../../application/use-cases/AssignRole'
 import { FindAccountByEmail } from '../../../application/use-cases/FindAccountByEmail'
@@ -51,6 +53,7 @@ import {
   REGISTER_ACCOUNT,
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
+  UPDATE_OWN_ACCOUNT,
   VERIFY_ACCOUNT,
   CONFIRM_REGISTRATION,
   FIND_ACCOUNT_BY_EMAIL,
@@ -64,6 +67,7 @@ import {
   FindAccountByEmailQuery,
   ManagedAccountResponse,
   RegisterAccountRequest,
+  UpdateOwnAccountRequest,
 } from './accounts.dto'
 
 interface UploadedAvatar {
@@ -81,6 +85,7 @@ export class AccountsController {
     @Inject(REGISTER_ACCOUNT) private readonly registerAccount: RegisterAccount,
     @Inject(GET_ACCOUNT) private readonly getAccount: GetAccount,
     @Inject(GET_OWN_ACCOUNT) private readonly getOwnAccount: GetOwnAccount,
+    @Inject(UPDATE_OWN_ACCOUNT) private readonly updateOwnAccount: UpdateOwnAccount,
     @Inject(VERIFY_ACCOUNT) private readonly verifyAccount: VerifyAccount,
     @Inject(CONFIRM_REGISTRATION) private readonly confirmRegistration: ConfirmRegistration,
     @Inject(FIND_ACCOUNT_BY_EMAIL) private readonly findAccountByEmail: FindAccountByEmail,
@@ -180,6 +185,32 @@ export class AccountsController {
   async findOwn(@CurrentIdentity() identity: VerifiedIdentity): Promise<AccountResponse> {
     try {
       return await this.getOwnAccount.execute(identity.subject)
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  /**
+   * Self-service: la cuenta se resuelve por el sujeto del testimonio, nunca por
+   * un identificador del cuerpo. El contrato solo declara los campos editables,
+   * y `forbidNonWhitelisted` rechaza cualquier otro con 400.
+   */
+  @Patch('me')
+  @ApiOperation({ summary: 'Actualiza la informacion personal de la cuenta propia (HU-05)' })
+  @ApiResponse({ status: 200, description: 'Cuenta actualizada', type: AccountResponse })
+  @ApiResponse({ status: 400, description: 'Datos invalidos o apodo no permitido' })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
+  @ApiResponse({ status: 404, description: 'El sujeto no tiene cuenta en este servicio' })
+  @ApiResponse({ status: 409, description: 'El apodo ya esta en uso por otra cuenta' })
+  async updateOwn(
+    @CurrentIdentity() identity: VerifiedIdentity,
+    @Body() body: UpdateOwnAccountRequest,
+  ): Promise<AccountResponse> {
+    try {
+      return await this.updateOwnAccount.execute({
+        subject: identity.subject,
+        displayName: body.displayName,
+      })
     } catch (error: unknown) {
       throw AccountsController.translate(error)
     }
