@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger'
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Transform, Type } from 'class-transformer'
 import {
   Allow,
@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsEmail,
   IsIn,
+  IsOptional,
   IsString,
   Matches,
   MaxLength,
@@ -13,8 +14,15 @@ import {
   ValidateNested,
 } from 'class-validator'
 
+import {
+  AccountStatus,
+  type AccountStatus as AccountStatusValue,
+} from '../../../domain/entities/AccountStatus'
 import { Role, type Role as RoleValue } from '../../../domain/entities/Role'
 import { DisplayName } from '../../../domain/value-objects/DisplayName'
+import type { AdminAccountStatusCountsDto } from '../../../application/dto/AdminAccountSummaryDto'
+
+const ACCOUNT_STATUS_VALUES = Object.values(AccountStatus)
 
 /**
  * Contrato de entrada del registro (multipart/form-data).
@@ -148,6 +156,95 @@ export class ManagedAccountResponse extends AccountResponse {
     description: 'Indica si Cognito confirma SOFTWARE_TOKEN_MFA para la cuenta.',
   })
   readonly mfaEnrolled!: boolean
+}
+
+export class ListAdminAccountsQuery {
+  @ApiPropertyOptional({ example: 'acc-123' })
+  @IsOptional()
+  @IsString()
+  id?: string
+
+  @ApiPropertyOptional({ example: 'jugador@nexus.test' })
+  @IsOptional()
+  @IsEmail({}, { message: 'El correo debe tener un formato valido.' })
+  @MaxLength(254)
+  email?: string
+
+  @ApiPropertyOptional({ example: 'Ana' })
+  @IsOptional()
+  @IsString()
+  firstNames?: string
+
+  @ApiPropertyOptional({ example: 'Ramirez' })
+  @IsOptional()
+  @IsString()
+  lastNames?: string
+
+  @ApiPropertyOptional({ example: 'Ana Ramirez', description: 'Apodo (display_name)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  nickname?: string
+
+  @ApiPropertyOptional({ enum: Role, example: Role.Administrator })
+  @IsOptional()
+  @IsString()
+  @IsIn(Object.values(Role), { message: 'El rol indicado no existe.' })
+  role?: RoleValue
+
+  @ApiPropertyOptional({ enum: ACCOUNT_STATUS_VALUES, example: AccountStatus.Active })
+  @IsOptional()
+  @IsString()
+  @IsIn(ACCOUNT_STATUS_VALUES, { message: 'El estado indicado no existe.' })
+  status?: AccountStatusValue
+}
+
+export class AdminAccountSummaryResponse {
+  @ApiProperty({ example: '0b1d5b0e-3f6a-4a1e-9a1a-4a5c6f2b8e10' })
+  readonly id!: string
+
+  @ApiProperty({ example: 'jugador@nexus.test' })
+  readonly email!: string
+
+  @ApiProperty({ example: 'Ana Ramirez' })
+  readonly displayName!: string
+
+  @ApiProperty({ example: 'Ana' })
+  readonly firstNames!: string
+
+  @ApiProperty({ example: 'Ramirez' })
+  readonly lastNames!: string
+
+  @ApiProperty({
+    example: 'PENDING_VERIFICATION',
+    enum: ACCOUNT_STATUS_VALUES,
+  })
+  readonly status!: AccountStatusValue
+
+  @ApiProperty({ example: ['PLAYER'], isArray: true, type: String })
+  readonly roles!: readonly RoleValue[]
+
+  @ApiProperty({ example: '2026-08-01T10:00:00.000Z' })
+  readonly registeredAt!: string
+}
+
+export class AdminAccountStatusCountsResponse implements AdminAccountStatusCountsDto {
+  @ApiProperty({ example: 1 })
+  readonly pendingVerification!: number
+
+  @ApiProperty({ example: 10 })
+  readonly active!: number
+
+  @ApiProperty({ example: 2 })
+  readonly suspended!: number
+}
+
+export class AdminAccountsResponse {
+  @ApiProperty({ type: [AdminAccountSummaryResponse] })
+  readonly items!: readonly AdminAccountSummaryResponse[]
+
+  @ApiProperty({ type: AdminAccountStatusCountsResponse })
+  readonly statusCounts!: AdminAccountStatusCountsResponse
 }
 
 export class ConfirmRegistrationRequest {

@@ -36,6 +36,7 @@ import {
   START_PASSWORD_RECOVERY,
   VERIFY_RECOVERY_ANSWERS,
   VERIFY_RECOVERY_CODE,
+  LIST_ADMIN_ACCOUNTS,
 } from '../../adapters/inbound/http/tokens'
 import { READINESS_CHECKS, VERSION_REPORT } from '../../adapters/inbound/http/tokens.health'
 
@@ -58,8 +59,13 @@ import { ChooseSecondFactor } from '../../application/use-cases/ChooseSecondFact
 import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecondFactor'
 import { AssignRole } from '../../application/use-cases/AssignRole'
 import { FindAccountByEmail } from '../../application/use-cases/FindAccountByEmail'
+import { ListAdminAccounts } from '../../application/use-cases/ListAdminAccounts'
 import { RevokeRole } from '../../application/use-cases/RevokeRole'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
+import {
+  ADMIN_ACCOUNT_QUERY,
+  type AdminAccountQueryPort,
+} from '../../application/ports/AdminAccountQueryPort'
 import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
 import { ROLE_DIRECTORY, type RoleDirectoryPort } from '../../application/ports/RoleDirectoryPort'
 import {
@@ -216,6 +222,10 @@ export const DATABASE = Symbol('Database')
       useFactory: (db: Kysely<Database> | null): AccountRepositoryPort =>
         db === null ? new InMemoryAccountRepository() : new PostgresAccountRepository(db),
       inject: [DATABASE],
+    },
+    {
+      provide: ADMIN_ACCOUNT_QUERY,
+      useExisting: ACCOUNT_REPOSITORY,
     },
     {
       provide: NICKNAME_BLACKLIST,
@@ -550,6 +560,12 @@ export const DATABASE = Symbol('Database')
       useFactory: (accounts: AccountRepositoryPort, mfaStatus: MfaStatusPort): FindAccountByEmail =>
         new FindAccountByEmail(accounts, mfaStatus),
       inject: [ACCOUNT_REPOSITORY, MFA_STATUS],
+    },
+    {
+      provide: LIST_ADMIN_ACCOUNTS,
+      useFactory: (accounts: AdminAccountQueryPort): ListAdminAccounts =>
+        new ListAdminAccounts(accounts),
+      inject: [ADMIN_ACCOUNT_QUERY],
     },
     {
       provide: ASSIGN_ROLE,

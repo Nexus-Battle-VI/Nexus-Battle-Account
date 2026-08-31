@@ -17,6 +17,9 @@ import { PersonName } from '../../src/domain/value-objects/PersonName'
 import { Role } from '../../src/domain/entities/Role'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { defaultAvatarMetadata } from '../support/account-factory'
+import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
+import { ListAdminAccounts } from '../../src/application/use-cases/ListAdminAccounts'
+import type { AdminAccountQueryCriteria } from '../../src/application/dto/AdminAccountQueryCriteria'
 
 /**
  * Adaptador de PostgreSQL contra un motor REAL, en contenedor.
@@ -51,6 +54,68 @@ describe('PostgresAccountRepository', () => {
       occurredAt: AT,
     })
   }
+
+  interface AdminQuerySeed {
+    readonly id: string
+    readonly subject: string
+    readonly email: string
+    readonly displayName: string
+    readonly firstNames: string
+    readonly lastNames: string
+    readonly status: AccountStatus
+    readonly roles: readonly Role[]
+    readonly registeredAt: Date
+  }
+
+  const ADMIN_QUERY_SEEDS: readonly AdminQuerySeed[] = [
+    {
+      id: 'acc-query-admin',
+      subject: 'subject-query-admin',
+      email: 'query.admin@nexus.test',
+      displayName: 'Capitana Query',
+      firstNames: 'Ada',
+      lastNames: 'Lovelace',
+      status: AccountStatus.Active,
+      roles: [Role.Player, Role.Administrator],
+      registeredAt: new Date('2026-08-10T10:00:00.000Z'),
+    },
+    {
+      id: 'acc-query-super',
+      subject: 'subject-query-super',
+      email: 'query.super@nexus.test',
+      displayName: 'Raiz Query',
+      firstNames: 'Grace',
+      lastNames: 'Hopper',
+      status: AccountStatus.Active,
+      roles: [Role.SuperAdministrator],
+      registeredAt: new Date('2026-08-11T10:00:00.000Z'),
+    },
+    {
+      id: 'acc-query-suspended',
+      subject: 'subject-query-suspended',
+      email: 'query.suspended@nexus.test',
+      displayName: 'Moderadora Query',
+      firstNames: 'Katherine',
+      lastNames: 'Johnson',
+      status: AccountStatus.Suspended,
+      roles: [Role.Player, Role.Moderator],
+      registeredAt: new Date('2026-08-12T10:00:00.000Z'),
+    },
+  ]
+
+  const buildAdminQueryAccount = (seed: AdminQuerySeed): Account =>
+    Account.restore({
+      id: AccountId.create(seed.id),
+      subject: seed.subject,
+      email: EmailAddress.create(seed.email),
+      displayName: DisplayName.create(seed.displayName),
+      firstNames: PersonName.create(seed.firstNames, 'Los nombres'),
+      lastNames: PersonName.create(seed.lastNames, 'Los apellidos'),
+      termsAccepted: true,
+      avatar: defaultAvatarMetadata(seed.id),
+      status: seed.status,
+      roles: seed.roles,
+    })
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:17-alpine').start()
@@ -213,6 +278,47 @@ describe('PostgresAccountRepository', () => {
       .execute()
 
     expect(roles.map((r) => r.role)).toEqual([Role.Player])
+  })
+
+  it('mantiene paridad con memoria para los filtros administrativos soportados', async () => {
+    await db.deleteFrom('accounts').execute()
+
+    let nextDate = 0
+    const memory = new InMemoryAccountRepository(
+      () => ADMIN_QUERY_SEEDS[nextDate++]?.registeredAt ?? new Date('2026-08-31T00:00:00.000Z'),
+    )
+
+    for (const seed of ADMIN_QUERY_SEEDS) {
+      const account = buildAdminQueryAccount(seed)
+      await memory.save(account)
+      await repository.save(account)
+      await db
+        .updateTable('accounts')
+        .set({ created_at: seed.registeredAt, updated_at: seed.registeredAt })
+        .where('id', '=', seed.id)
+        .execute()
+    }
+
+    const criteria: readonly AdminAccountQueryCriteria[] = [
+      {},
+      { id: 'acc-query-admin' },
+      { email: 'QUERY.ADMIN@NEXUS.TEST' },
+      { firstNames: 'ada' },
+      { lastNames: 'hopper' },
+      { displayName: 'raiz query' },
+      { role: Role.SuperAdministrator },
+      { status: AccountStatus.Suspended },
+      { role: Role.Player, status: AccountStatus.Active },
+    ]
+
+    const memoryUseCase = new ListAdminAccounts(memory)
+    const postgresUseCase = new ListAdminAccounts(repository)
+
+    for (const criterion of criteria) {
+      await expect(postgresUseCase.execute(criterion)).resolves.toEqual(
+        await memoryUseCase.execute(criterion),
+      )
+    }
   })
 
   describe('Las restricciones viven en el motor, no solo en el codigo', () => {
