@@ -22,6 +22,7 @@ import {
   FIND_ACCOUNT_BY_EMAIL,
   ASSIGN_ROLE,
   REVOKE_ROLE,
+  LOGOUT_ACCOUNT,
 } from '../../adapters/inbound/http/tokens'
 import { READINESS_CHECKS, VERSION_REPORT } from '../../adapters/inbound/http/tokens.health'
 
@@ -35,6 +36,7 @@ import { UpdateOwnAccount } from '../../application/use-cases/UpdateOwnAccount'
 import { ChangeOwnPassword } from '../../application/use-cases/ChangeOwnPassword'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
 import { LoginAccount } from '../../application/use-cases/LoginAccount'
+import { LogoutAccount } from '../../application/use-cases/LogoutAccount'
 import { ChooseSecondFactor } from '../../application/use-cases/ChooseSecondFactor'
 import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecondFactor'
 import { AssignRole } from '../../application/use-cases/AssignRole'
@@ -553,6 +555,12 @@ export const DATABASE = Symbol('Database')
         authenticationProvider: AuthenticationProviderPort,
       ): ChooseSecondFactor => new ChooseSecondFactor({ accounts, authenticationProvider }),
       inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
+    },
+    {
+      provide: LOGOUT_ACCOUNT,
+      useFactory: (sessionRevocation: SessionRevocationPort): LogoutAccount =>
+        new LogoutAccount(sessionRevocation),
+      inject: [SESSION_REVOCATION],
     },
     {
       provide: READINESS_CHECKS,
