@@ -52,6 +52,9 @@ export interface AccountRepositoryPort {
    * paso coherente. Las implementaciones PostgreSQL lo hacen en transaccion.
    */
   saveRegistration(account: Account, answers: readonly HashedSecurityAnswer[]): Promise<void>
+
+  /** Hashes de las respuestas de HU-01. Vacio si la cuenta no las tiene. */
+  findSecurityAnswers(id: AccountId): Promise<readonly HashedSecurityAnswer[]>
 }
 
 export const ACCOUNT_REPOSITORY = Symbol('AccountRepositoryPort')
