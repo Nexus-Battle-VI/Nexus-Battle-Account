@@ -341,7 +341,16 @@ describe('PostgresAccountRepository', () => {
     )
     const accountsBefore = await db
       .selectFrom('accounts')
-      .select(['id', 'email', 'display_name', 'first_names', 'last_names', 'status', 'updated_at'])
+      .select([
+        'id',
+        'email',
+        'display_name',
+        'first_names',
+        'last_names',
+        'status',
+        'created_at',
+        'updated_at',
+      ])
       .orderBy('id')
       .execute()
     const rolesBefore = await db
@@ -356,7 +365,16 @@ describe('PostgresAccountRepository', () => {
     const exported = JSON.parse(file.content) as unknown
     const accountsAfter = await db
       .selectFrom('accounts')
-      .select(['id', 'email', 'display_name', 'first_names', 'last_names', 'status', 'updated_at'])
+      .select([
+        'id',
+        'email',
+        'display_name',
+        'first_names',
+        'last_names',
+        'status',
+        'created_at',
+        'updated_at',
+      ])
       .orderBy('id')
       .execute()
     const rolesAfter = await db
