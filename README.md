@@ -29,15 +29,17 @@ El servicio comprueba el testimonio que acompaña a cada petición contra el JWK
 
 La comprobación de firma la hace [`aws-jwt-verify`](https://github.com/awslabs/aws-jwt-verify). **No se implementa verificación criptográfica a mano**: es la clase de código donde un error sutil no falla, sino que acepta tokens falsificados en silencio.
 
-| Ruta                                  | Protección                                              |
-| ------------------------------------- | ------------------------------------------------------- |
-| `POST /api/accounts`                  | Testimonio válido. La cuenta queda vinculada a su `sub` |
-| `GET /api/accounts/me`                | Testimonio válido. Resuelve **la propia cuenta**        |
-| `GET /api/accounts/:id`               | Rol **`ADMINISTRATOR`**                                 |
-| `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                 |
-| `POST /api/sessions`                  | **Pública.** Pedirla ya exigiría la sesión que crea     |
-| `POST /api/sessions/second-factor`    | **Pública.** Continúa el login administrativo (HU-02)   |
-| `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio         |
+| Ruta                                  | Protección                                                      |
+| ------------------------------------- | --------------------------------------------------------------- |
+| `POST /api/accounts`                  | Testimonio válido. La cuenta queda vinculada a su `sub`         |
+| `GET /api/accounts/me`                | Testimonio válido. Resuelve **la propia cuenta**                |
+| `PATCH /api/accounts/me`              | Testimonio válido. Edita **la propia cuenta** (apodo, HU-05)    |
+| `POST /api/accounts/me/password`      | Testimonio válido. Cambia la contraseña en el proveedor (HU-05) |
+| `GET /api/accounts/:id`               | Rol **`ADMINISTRATOR`**                                         |
+| `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                         |
+| `POST /api/sessions`                  | **Pública.** Pedirla ya exigiría la sesión que crea             |
+| `POST /api/sessions/second-factor`    | **Pública.** Continúa el login administrativo (HU-02)           |
+| `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio                 |
 
 ### El registro exige testimonio, y no es arbitrario
 
@@ -187,17 +189,19 @@ Documentación interactiva de la API en `http://localhost:3000/api/docs`.
 
 ## API
 
-| Método | Ruta                             | Descripción                                                    |
-| ------ | -------------------------------- | -------------------------------------------------------------- |
-| `POST` | `/api/accounts`                  | Registra una cuenta de jugador (`multipart/form-data`, HU-01)  |
-| `GET`  | `/api/accounts/me`               | Recupera la cuenta del testimonio                              |
-| `GET`  | `/api/accounts/:id`              | Recupera una cuenta                                            |
-| `POST` | `/api/accounts/:id/verification` | Marca la cuenta como verificada                                |
-| `POST` | `/api/sessions`                  | Inicia sesion con correo/apodo + contrasena (HU-02)            |
-| `POST` | `/api/sessions/second-factor`    | Completa el segundo factor administrativo (HU-02)              |
-| `GET`  | `/api/health/live`               | El proceso responde. No consulta dependencias                  |
-| `GET`  | `/api/health/ready`              | Evalúa las dependencias reales. Responde `503` si alguna falla |
-| `GET`  | `/api/version`                   | Servicio, versión y entorno                                    |
+| Método  | Ruta                             | Descripción                                                          |
+| ------- | -------------------------------- | -------------------------------------------------------------------- |
+| `POST`  | `/api/accounts`                  | Registra una cuenta de jugador (`multipart/form-data`, HU-01)        |
+| `GET`   | `/api/accounts/me`               | Recupera la cuenta del testimonio                                    |
+| `PATCH` | `/api/accounts/me`               | Actualiza la información personal de la cuenta propia (apodo, HU-05) |
+| `POST`  | `/api/accounts/me/password`      | Cambia la contraseña de la cuenta propia (HU-05)                     |
+| `GET`   | `/api/accounts/:id`              | Recupera una cuenta                                                  |
+| `POST`  | `/api/accounts/:id/verification` | Marca la cuenta como verificada                                      |
+| `POST`  | `/api/sessions`                  | Inicia sesion con correo/apodo + contrasena (HU-02)                  |
+| `POST`  | `/api/sessions/second-factor`    | Completa el segundo factor administrativo (HU-02)                    |
+| `GET`   | `/api/health/live`               | El proceso responde. No consulta dependencias                        |
+| `GET`   | `/api/health/ready`              | Evalúa las dependencias reales. Responde `503` si alguna falla       |
+| `GET`   | `/api/version`                   | Servicio, versión y entorno                                          |
 
 ## Inicio de sesion y RBAC (HU-02)
 
@@ -210,10 +214,11 @@ de puertos). El contrato NO
 acepta un campo `role`: el rol siempre se lee de la cuenta ya persistida.
 
 Roles reconocidos: `PLAYER`, `MODERATOR`, `ADMINISTRATOR` y
-`SUPER_ADMINISTRATOR`. Esta rama solo LEE el rol vigente; asignarlo es HU-39,
-todavia no implementada. No existe una API publica que cree un
-`SUPER_ADMINISTRATOR`: es una cuenta raiz unica, fuera del alcance de HU-01 y
-HU-04.
+`SUPER_ADMINISTRATOR`. El login solo LEE el rol vigente; asignarlo y retirarlo
+es HU-39, ya implementada (`POST /api/accounts/:id/roles` y
+`DELETE /api/accounts/:id/roles/:role`, solo `SUPER_ADMINISTRATOR`). No existe
+una API publica que cree un `SUPER_ADMINISTRATOR`: es una cuenta raiz unica,
+fuera del alcance de HU-01 y HU-04.
 
 Para `ADMINISTRATOR`/`SUPER_ADMINISTRATOR`, una contrasena correcta nunca
 basta: `POST /api/sessions` responde `SECOND_FACTOR_REQUIRED` en lugar de
@@ -277,6 +282,42 @@ una cuenta cuyo rol no viaja en el testimonio, e irreparable por reintento porqu
 el segundo intento chocaria con el correo ya registrado. Si el proveedor no
 responde, el registro falla cerrado con **503** y la cuenta no se crea.
 
+## Mi Cuenta (HU-05)
+
+Las operaciones sobre la cuenta propia son **self-service**: la cuenta se resuelve
+siempre desde el sujeto del testimonio (`@CurrentIdentity()`), nunca desde un
+identificador del cuerpo. No existe `PATCH /api/accounts/:id`.
+
+- **`GET /api/accounts/me`** — consulta. Devuelve el contrato público
+  (`id`, `email`, `displayName`, `firstNames`, `lastNames`, `status`, `roles`).
+  El `subject` es un vínculo interno con el proveedor y **no** sale del servicio.
+- **`PATCH /api/accounts/me`** — actualización de información personal. Hoy admite
+  **únicamente `displayName`** (apodo), reutilizando las reglas ya aprobadas en el
+  registro: formato de `DisplayName`, unicidad insensible a mayúsculas y lista
+  negra vigente. El `ValidationPipe` global (`forbidNonWhitelisted`) rechaza con
+  400 cualquier campo no declarado, de modo que no se puede tocar `status`,
+  `roles`, `subject` ni ninguna propiedad interna. Editar el apodo al **mismo**
+  valor es idempotente y no se trata como colisión consigo mismo.
+- **`POST /api/accounts/me/password`** — cambio de contraseña. La contraseña
+  **no** pertenece al agregado `Account` ni a PostgreSQL: la operación actúa
+  sobre el testimonio de acceso de quien llama (`ChangePassword` de Cognito,
+  igual que la inscripción TOTP), sin credenciales de AWS ni permiso IAM. La
+  política de complejidad la aplica el proveedor, como en el alta. La contraseña
+  no se persiste, no se registra y no se devuelve; la respuesta es `204`.
+
+### Pendiente de definición funcional
+
+- **Campos editables adicionales** (`firstNames`, `lastNames`, `email`, `avatar`):
+  HU-05 no enumera en este repositorio una lista definitiva. `email` además
+  devolvería la cuenta a `PENDING_VERIFICATION`. No se implementan hasta que la
+  fuente funcional los apruebe.
+- **Preferencias** (idioma, apariencia): no hay en el repositorio un vocabulario
+  aprobado de valores. No se implementa hasta disponer de esa lista; `PATCH
+/api/accounts/me` está preparado para extenderse sin reescribirse.
+- **Suscripciones**: sin operaciones funcionales aprobadas. Bloqueado.
+- **Métodos de pago**: sin ownership definido para `Account` ni operaciones
+  simuladas aprobadas. Fuera del alcance implementable.
+
 ## Estructura
 
 ```text
@@ -321,7 +362,6 @@ La imagen es multi-etapa, se ejecuta con el usuario sin privilegios `node`, incl
 - **El mecanismo de segundo factor aprobado (correo) no coincide con lo aprovisionado (TOTP).** El pool de Cognito exige SES para MFA por correo, todavía no decidido. Ver ADR-004 en Nexus-Battle-Infrastructure.
 - **El avatar se guarda en disco local.** `LocalAvatarStorage` escribe bajo `AVATAR_STORAGE_PATH`, que la imagen define en `/var/lib/nexus/avatars`. En el despliegue hay un volumen montado ahí; sin él los avatares vivirían en la capa de escritura del contenedor y desaparecerían en cada despliegue. Si la instancia se reemplaza, se pierden: sacarlos de la máquina exigiría S3, que el alcance actual no autoriza. Un adaptador AWS sustituye ese puerto sin tocar `RegisterAccount`.
 - **Las solicitudes de notificación no se publican en una cola.** Se registran con la forma exacta del mensaje que consumirá Notifications; la publicación real depende de ADR-006.
-- La asignación y modificación de roles (`HU-39`) no forma parte de este alcance: HU-02 solo lee el rol vigente de la cuenta.
 
 ## Contribución
 

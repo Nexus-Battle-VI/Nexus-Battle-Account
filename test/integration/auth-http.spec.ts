@@ -362,6 +362,33 @@ describe('API de cuentas con autenticacion activa', () => {
     })
 
     /**
+     * El contrato de "Mi Cuenta": exactamente estos campos, y ninguno interno o
+     * sensible. El `subject` es un vinculo con el proveedor y NO sale del
+     * servicio; tampoco hay testimonios, contrasenas ni hashes en la respuesta.
+     */
+    it('expone solo el contrato publico y ningun dato interno o sensible', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/accounts/me')
+        .set('Authorization', bearer('token-jugador'))
+
+      expect(response.status).toBe(200)
+      expect(Object.keys(response.body).sort()).toEqual([
+        'displayName',
+        'email',
+        'firstNames',
+        'id',
+        'lastNames',
+        'roles',
+        'status',
+      ])
+      expect(response.body).not.toHaveProperty('subject')
+
+      const serialized = JSON.stringify(response.body)
+      expect(serialized).not.toContain('sub:ana@nexus.test')
+      expect(serialized).not.toMatch(/password|passwordHash|hash|secret|accessToken/i)
+    })
+
+    /**
      * Este es el arreglo, expresado como prueba: un testimonio valido de OTRA
      * persona no alcanza la cuenta de la primera. Antes, cualquier testimonio
      * valido servia para leer cualquier cuenta.
