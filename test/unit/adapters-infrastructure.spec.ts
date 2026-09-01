@@ -6,6 +6,7 @@ import {
 } from '../../src/adapters/outbound/persistence/nickname-blacklist-seed'
 import { FakeAuthenticationProvider } from '../../src/adapters/outbound/identity/FakeAuthenticationProvider'
 import { LoggingNotificationRequester } from '../../src/adapters/outbound/messaging/LoggingNotificationRequester'
+import { HttpNotificationRequester } from '../../src/adapters/outbound/messaging/HttpNotificationRequester'
 import { SystemClock } from '../../src/adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../src/adapters/outbound/system/UuidGenerator'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
@@ -298,6 +299,45 @@ describe('LoggingNotificationRequester', () => {
   })
 })
 
+describe('HttpNotificationRequester', () => {
+  const originalFetch = globalThis.fetch
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it('publica la solicitud al ingest sin exponer el correo completo', async () => {
+    const lines: string[] = []
+    const fetchImpl = jest.fn().mockResolvedValue(new Response(null, { status: 202 }))
+    globalThis.fetch = fetchImpl
+
+    await new HttpNotificationRequester({
+      ingestUrl: 'http://127.0.0.1:3001/dev/enqueue',
+      logger: createLogger({
+        level: 'info',
+        service: 'account',
+        version: '0.1.0',
+        sink: (line) => lines.push(line),
+      }),
+    }).request({
+      notificationId: 'n-1',
+      recipient: 'qfue11481@gmail.com',
+      templateId: 'account-password-recovery-code',
+      variables: { code: '000000' },
+    })
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:3001/dev/enqueue',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(lines[0]).not.toContain('qfue11481@gmail.com')
+    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({
+      templateId: 'account-password-recovery-code',
+      recipientDomain: 'gmail.com',
+    })
+  })
+})
+
 describe('LocalAvatarStorage', () => {
   it('escribe y elimina el archivo bajo la ruta configurada', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'avatars-'))
@@ -348,7 +388,15 @@ describe('loadConfig', () => {
       cognito: null,
       avatarStoragePath: './data/avatars',
       corsOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+      notificationsIngestUrl: null,
     })
+  })
+
+  it('lee el ingest local de Notifications cuando esta informado', () => {
+    expect(
+      loadConfig({ NOTIFICATIONS_INGEST_URL: 'http://127.0.0.1:3001/dev/enqueue' })
+        .notificationsIngestUrl,
+    ).toBe('http://127.0.0.1:3001/dev/enqueue')
   })
 
   // Produccion exige autenticacion configurada: `loadConfig` rechaza arrancar

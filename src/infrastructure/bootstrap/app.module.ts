@@ -2,7 +2,9 @@ import { Module, type CanActivate } from '@nestjs/common'
 import { APP_GUARD, Reflector } from '@nestjs/core'
 
 import { AccountsController } from '../../adapters/inbound/http/accounts.controller'
+import { RecoveryController } from '../../adapters/inbound/http/recovery.controller'
 import { MfaController } from '../../adapters/inbound/http/mfa.controller'
+import { PasswordController } from '../../adapters/inbound/http/password.controller'
 import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
 import { HealthController } from '../../adapters/inbound/http/health.controller'
 import {
@@ -10,6 +12,8 @@ import {
   COMPLETE_SECOND_FACTOR,
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
+  UPDATE_OWN_ACCOUNT,
+  CHANGE_OWN_PASSWORD,
   LOGIN_ACCOUNT,
   REGISTER_ACCOUNT,
   VERIFY_ACCOUNT,
@@ -20,6 +24,10 @@ import {
   ASSIGN_ROLE,
   REVOKE_ROLE,
   LOGOUT_ACCOUNT,
+  RESET_RECOVERY_PASSWORD,
+  START_PASSWORD_RECOVERY,
+  VERIFY_RECOVERY_ANSWERS,
+  VERIFY_RECOVERY_CODE,
 } from '../../adapters/inbound/http/tokens'
 import { READINESS_CHECKS, VERSION_REPORT } from '../../adapters/inbound/http/tokens.health'
 
@@ -29,9 +37,15 @@ import { EnrollTotp } from '../../application/use-cases/EnrollTotp'
 import { ConfirmTotpEnrollment } from '../../application/use-cases/ConfirmTotpEnrollment'
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
+import { UpdateOwnAccount } from '../../application/use-cases/UpdateOwnAccount'
+import { ChangeOwnPassword } from '../../application/use-cases/ChangeOwnPassword'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
 import { LoginAccount } from '../../application/use-cases/LoginAccount'
 import { LogoutAccount } from '../../application/use-cases/LogoutAccount'
+import { StartPasswordRecovery } from '../../application/use-cases/StartPasswordRecovery'
+import { VerifyRecoveryAnswers } from '../../application/use-cases/VerifyRecoveryAnswers'
+import { VerifyRecoveryCode } from '../../application/use-cases/VerifyRecoveryCode'
+import { ResetRecoveryPassword } from '../../application/use-cases/ResetRecoveryPassword'
 import { ChooseSecondFactor } from '../../application/use-cases/ChooseSecondFactor'
 import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecondFactor'
 import { AssignRole } from '../../application/use-cases/AssignRole'
@@ -53,7 +67,19 @@ import {
   SESSION_REVOCATION,
   type SessionRevocationPort,
 } from '../../application/ports/SessionRevocationPort'
+import {
+  PASSWORD_CHANGE,
+  type PasswordChangePort,
+} from '../../application/ports/PasswordChangePort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
+import {
+  IDENTITY_PASSWORD_RESET,
+  type IdentityPasswordResetPort,
+} from '../../application/ports/IdentityPasswordResetPort'
+import { RECOVERY_CHALLENGE_REPOSITORY } from '../../application/ports/RecoveryChallengeRepositoryPort'
+import type { RecoveryChallengeRepositoryPort } from '../../application/ports/RecoveryChallengeRepositoryPort'
+import { RECOVERY_OTP } from '../../application/ports/RecoveryOtpPort'
+import type { RecoveryOtpPort } from '../../application/ports/RecoveryOtpPort'
 import { CLOCK } from '../../application/ports/ClockPort'
 import { ID_GENERATOR } from '../../application/ports/IdGeneratorPort'
 import { AVATAR_STORAGE } from '../../application/ports/AvatarStoragePort'
@@ -97,7 +123,15 @@ import { CognitoMfaStatus } from '../../adapters/outbound/identity/CognitoMfaSta
 import { InMemoryMfaStatus } from '../../adapters/outbound/identity/InMemoryMfaStatus'
 import { CognitoSessionRevocation } from '../../adapters/outbound/identity/CognitoSessionRevocation'
 import { InMemorySessionRevocation } from '../../adapters/outbound/identity/InMemorySessionRevocation'
+import { CognitoPasswordChange } from '../../adapters/outbound/identity/CognitoPasswordChange'
+import { InMemoryPasswordChange } from '../../adapters/outbound/identity/InMemoryPasswordChange'
 import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/LoggingNotificationRequester'
+import { HttpNotificationRequester } from '../../adapters/outbound/messaging/HttpNotificationRequester'
+import { InMemoryRecoveryChallengeRepository } from '../../adapters/outbound/persistence/InMemoryRecoveryChallengeRepository'
+import { PostgresRecoveryChallengeRepository } from '../../adapters/outbound/persistence/PostgresRecoveryChallengeRepository'
+import { FixedRecoveryOtp } from '../../adapters/outbound/identity/FixedRecoveryOtp'
+import { RandomRecoveryOtp } from '../../adapters/outbound/identity/RandomRecoveryOtp'
+import { CognitoIdentityPasswordReset } from '../../adapters/outbound/identity/CognitoIdentityPasswordReset'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
 
@@ -124,7 +158,14 @@ export const DATABASE = Symbol('Database')
  * framework y podria ejecutarse fuera de el sin cambios.
  */
 @Module({
-  controllers: [AccountsController, MfaController, SessionsController, HealthController],
+  controllers: [
+    AccountsController,
+    RecoveryController,
+    MfaController,
+    PasswordController,
+    SessionsController,
+    HealthController,
+  ],
   providers: [
     {
       provide: APP_CONFIG,
@@ -276,9 +317,14 @@ export const DATABASE = Symbol('Database')
     },
     {
       provide: NOTIFICATION_REQUEST,
-      useFactory: (logger: Logger): NotificationRequestPort =>
-        new LoggingNotificationRequester(logger),
-      inject: [LOGGER],
+      useFactory: (config: AppConfig, logger: Logger): NotificationRequestPort =>
+        config.notificationsIngestUrl === null
+          ? new LoggingNotificationRequester(logger)
+          : new HttpNotificationRequester({
+              ingestUrl: config.notificationsIngestUrl,
+              logger,
+            }),
+      inject: [APP_CONFIG, LOGGER],
     },
     {
       provide: CLOCK,
@@ -382,6 +428,27 @@ export const DATABASE = Symbol('Database')
       inject: [APP_CONFIG, LOGGER],
     },
     {
+      // Cambio de contrasena self-service (HU-05). Actua sobre el testimonio del
+      // usuario, no sobre credenciales de AWS; sin proveedor configurado, el
+      // doble en memoria reproduce el contrato (actual correcta -> cambiada).
+      provide: PASSWORD_CHANGE,
+      useFactory: (config: AppConfig, logger: Logger): PasswordChangePort => {
+        if (config.cognito === null) {
+          logger.warn('password_change', {
+            driver: 'memoria',
+            detail: 'Sin proveedor de identidad: el cambio de contrasena no llega a Cognito.',
+          })
+
+          return new InMemoryPasswordChange()
+        }
+
+        logger.info('password_change', { driver: 'cognito' })
+
+        return new CognitoPasswordChange({ userPoolId: config.cognito.userPoolId })
+      },
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
       provide: ENROLL_TOTP,
       useFactory: (
         totpEnrollment: TotpEnrollmentPort,
@@ -475,6 +542,20 @@ export const DATABASE = Symbol('Database')
       inject: [ACCOUNT_REPOSITORY],
     },
     {
+      provide: UPDATE_OWN_ACCOUNT,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        blacklist: NicknameBlacklistPort,
+      ): UpdateOwnAccount => new UpdateOwnAccount(accounts, blacklist),
+      inject: [ACCOUNT_REPOSITORY, NICKNAME_BLACKLIST],
+    },
+    {
+      provide: CHANGE_OWN_PASSWORD,
+      useFactory: (passwords: PasswordChangePort): ChangeOwnPassword =>
+        new ChangeOwnPassword({ passwords }),
+      inject: [PASSWORD_CHANGE],
+    },
+    {
       provide: VERIFY_ACCOUNT,
       useFactory: (accounts: AccountRepositoryPort, clock: ClockPort): VerifyAccount =>
         new VerifyAccount({ accounts, clock }),
@@ -503,6 +584,116 @@ export const DATABASE = Symbol('Database')
         authenticationProvider: AuthenticationProviderPort,
       ): ChooseSecondFactor => new ChooseSecondFactor({ accounts, authenticationProvider }),
       inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
+    },
+    {
+      provide: RECOVERY_CHALLENGE_REPOSITORY,
+      useFactory: (db: Kysely<Database> | null): RecoveryChallengeRepositoryPort =>
+        db === null
+          ? new InMemoryRecoveryChallengeRepository()
+          : new PostgresRecoveryChallengeRepository(db),
+      inject: [DATABASE],
+    },
+    {
+      // Con proveedor de identidad real, el codigo debe ser impredecible
+      // (`RandomRecoveryOtp`): uno fijo en produccion seria adivinable por
+      // construccion. Sin proveedor configurado se mantiene el fijo `000000`,
+      // igual que la confirmacion de HU-01.
+      provide: RECOVERY_OTP,
+      useFactory: (config: AppConfig, logger: Logger): RecoveryOtpPort => {
+        if (config.cognito === null) {
+          logger.warn('recovery_otp', {
+            driver: 'fijo',
+            detail: 'Sin proveedor de identidad: el codigo de recuperacion es fijo (000000).',
+          })
+
+          return new FixedRecoveryOtp()
+        }
+
+        logger.info('recovery_otp', { driver: 'aleatorio' })
+
+        return new RandomRecoveryOtp()
+      },
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
+      provide: IDENTITY_PASSWORD_RESET,
+      useFactory: (
+        authentication: AuthenticationProviderPort,
+        config: AppConfig,
+        logger: Logger,
+      ): IdentityPasswordResetPort => {
+        if (authentication instanceof FakeAuthenticationProvider) {
+          return authentication
+        }
+
+        if (config.cognito === null) {
+          logger.warn('identity_password_reset', {
+            driver: 'ninguno',
+            detail: 'Sin proveedor de identidad configurado: el restablecimiento siempre falla.',
+          })
+
+          return {
+            setPassword: (): Promise<{ kind: 'failed' }> => Promise.resolve({ kind: 'failed' }),
+          }
+        }
+
+        logger.info('identity_password_reset', { driver: 'cognito' })
+
+        return new CognitoIdentityPasswordReset({ userPoolId: config.cognito.userPoolId })
+      },
+      inject: [AUTHENTICATION_PROVIDER, APP_CONFIG, LOGGER],
+    },
+    {
+      provide: START_PASSWORD_RECOVERY,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        challenges: RecoveryChallengeRepositoryPort,
+        questions: SecurityQuestionCatalogPort,
+        ids: IdGeneratorPort,
+        clock: ClockPort,
+      ): StartPasswordRecovery =>
+        new StartPasswordRecovery({ accounts, challenges, questions, ids, clock }),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        RECOVERY_CHALLENGE_REPOSITORY,
+        SECURITY_QUESTION_CATALOG,
+        ID_GENERATOR,
+        CLOCK,
+      ],
+    },
+    {
+      provide: VERIFY_RECOVERY_ANSWERS,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        challenges: RecoveryChallengeRepositoryPort,
+        otp: RecoveryOtpPort,
+        notifications: NotificationRequestPort,
+        logger: Logger,
+      ): VerifyRecoveryAnswers =>
+        new VerifyRecoveryAnswers({ accounts, challenges, otp, notifications, logger }),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        RECOVERY_CHALLENGE_REPOSITORY,
+        RECOVERY_OTP,
+        NOTIFICATION_REQUEST,
+        LOGGER,
+      ],
+    },
+    {
+      provide: VERIFY_RECOVERY_CODE,
+      useFactory: (challenges: RecoveryChallengeRepositoryPort): VerifyRecoveryCode =>
+        new VerifyRecoveryCode(challenges),
+      inject: [RECOVERY_CHALLENGE_REPOSITORY],
+    },
+    {
+      provide: RESET_RECOVERY_PASSWORD,
+      useFactory: (
+        challenges: RecoveryChallengeRepositoryPort,
+        passwords: IdentityPasswordResetPort,
+        notifications: NotificationRequestPort,
+      ): ResetRecoveryPassword =>
+        new ResetRecoveryPassword({ challenges, passwords, notifications }),
+      inject: [RECOVERY_CHALLENGE_REPOSITORY, IDENTITY_PASSWORD_RESET, NOTIFICATION_REQUEST],
     },
     {
       provide: LOGOUT_ACCOUNT,

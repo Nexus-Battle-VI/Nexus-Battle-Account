@@ -103,6 +103,19 @@ export class PostgresAccountRepository implements AccountRepositoryPort {
     return found !== undefined
   }
 
+  async findSecurityAnswers(id: AccountId): Promise<readonly HashedSecurityAnswer[]> {
+    const rows = await this.db
+      .selectFrom('account_security_answers')
+      .select(['question_id', 'answer_hash'])
+      .where('account_id', '=', id.value)
+      .execute()
+
+    return rows.map((row) => ({
+      questionId: row.question_id,
+      answerHash: row.answer_hash,
+    }))
+  }
+
   async existsByDisplayName(displayName: DisplayName): Promise<boolean> {
     const found = await this.db
       .selectFrom('accounts')

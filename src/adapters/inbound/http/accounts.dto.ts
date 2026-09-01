@@ -1,7 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger'
-import { Transform } from 'class-transformer'
+import { Transform, Type } from 'class-transformer'
 import {
   Allow,
+  IsArray,
   IsBoolean,
   IsEmail,
   IsIn,
@@ -9,9 +10,11 @@ import {
   Matches,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator'
 
 import { Role, type Role as RoleValue } from '../../../domain/entities/Role'
+import { DisplayName } from '../../../domain/value-objects/DisplayName'
 
 /**
  * Contrato de entrada del registro (multipart/form-data).
@@ -101,6 +104,28 @@ export class AccountResponse {
   readonly roles!: readonly string[]
 }
 
+/**
+ * Contrato de la actualizacion self-service de la cuenta propia (HU-05).
+ *
+ * Declara EXCLUSIVAMENTE los campos que hoy se implementan. Con
+ * `forbidNonWhitelisted` en el ValidationPipe global, cualquier otro campo
+ * -`id`, `accountId`, `subject`, `status`, `roles`, `termsAccepted`...- hace que
+ * la peticion se rechace con 400. La cuenta se resuelve por el testimonio, no
+ * por el cuerpo.
+ */
+export class UpdateOwnAccountRequest {
+  @ApiProperty({
+    example: 'Ana Ramirez',
+    description: 'Nuevo apodo (display_name).',
+    minLength: DisplayName.MIN_LENGTH,
+    maxLength: DisplayName.MAX_LENGTH,
+  })
+  @IsString()
+  @MinLength(DisplayName.MIN_LENGTH)
+  @MaxLength(DisplayName.MAX_LENGTH)
+  displayName!: string
+}
+
 export class FindAccountByEmailQuery {
   @ApiProperty({ example: 'jugador@nexus.test' })
   @IsEmail({}, { message: 'El correo debe tener un formato valido.' })
@@ -150,9 +175,115 @@ export class TotpEnrollmentResponse {
   readonly secret!: string
 }
 
+export class StartRecoveryRequest {
+  @ApiProperty({ example: 'jugador@nexus.test' })
+  @IsEmail({}, { message: 'El correo debe tener un formato valido.' })
+  @MaxLength(254)
+  email!: string
+}
+
+export class RecoveryAnswerItem {
+  @ApiProperty({ example: 'sq-01' })
+  @IsString()
+  questionId!: string
+
+  @ApiProperty({ example: 'luna' })
+  @IsString()
+  answer!: string
+}
+
+export class VerifyRecoveryAnswersRequest {
+  @ApiProperty()
+  @IsString()
+  challengeToken!: string
+
+  @ApiProperty({ type: [RecoveryAnswerItem] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RecoveryAnswerItem)
+  answers!: RecoveryAnswerItem[]
+}
+
+export class VerifyRecoveryCodeRequest {
+  @ApiProperty()
+  @IsString()
+  challengeToken!: string
+
+  @ApiProperty({ example: '000000' })
+  @IsString()
+  code!: string
+}
+
+export class ResetRecoveryPasswordRequest {
+  @ApiProperty()
+  @IsString()
+  challengeToken!: string
+
+  @ApiProperty({ example: 'Abcdefg1!' })
+  @IsString()
+  password!: string
+}
+
+export class RecoveryQuestionResponse {
+  @ApiProperty({ example: 'sq-01' })
+  readonly id!: string
+
+  @ApiProperty({ example: '¿Cuál era el nombre de tu primera mascota?' })
+  readonly statement!: string
+}
+
+export class StartRecoveryResponse {
+  @ApiProperty()
+  readonly challengeToken!: string
+
+  @ApiProperty({ type: [RecoveryQuestionResponse] })
+  readonly questions!: readonly RecoveryQuestionResponse[]
+}
+
+export class RecoveryChallengeResponse {
+  @ApiProperty()
+  readonly challengeToken!: string
+}
+
+export class RecoveryResetResponse {
+  @ApiProperty({ example: 'RESET' })
+  readonly status!: 'RESET'
+}
+
 export class ConfirmTotpRequest {
   @ApiProperty({ example: '123456', description: 'Codigo de seis digitos del autenticador.' })
   @IsString()
   @Matches(/^\d{6}$/u, { message: 'El codigo debe tener exactamente seis digitos.' })
   code!: string
+}
+
+/**
+ * Contrato del cambio de contrasena de la cuenta propia (HU-05).
+ *
+ * La identidad se toma del testimonio, no del cuerpo: no acepta `accountId`,
+ * `email`, `subject`, `username` ni `role`. Las contrasenas NO se registran ni
+ * se devuelven; los ejemplos son ficticios.
+ *
+ * La validacion aqui es solo de FORMA (cadena, no vacia). La politica de
+ * fortaleza -longitud, complejidad- la aplica el proveedor de identidad, que es
+ * la autoridad vigente del sistema, igual que en el alta. No se declara un
+ * minimo local: seria una segunda politica, sin fuente funcional que la respalde
+ * y capaz de divergir del pool.
+ */
+export class ChangePasswordRequest {
+  @ApiProperty({
+    example: 'Contrasena-Actual-Ficticia-1',
+    description: 'Contrasena vigente. Nunca se registra ni se devuelve.',
+  })
+  @IsString()
+  @MinLength(1)
+  currentPassword!: string
+
+  @ApiProperty({
+    example: 'Contrasena-Nueva-Ficticia-1',
+    description: 'Contrasena nueva. La politica de fortaleza la aplica el proveedor de identidad.',
+  })
+  @IsString()
+  @MinLength(1)
+  newPassword!: string
 }

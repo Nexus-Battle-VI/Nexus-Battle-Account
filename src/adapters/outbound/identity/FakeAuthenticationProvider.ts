@@ -10,6 +10,10 @@ import type {
   SecondFactorOutcome,
   SecondFactorVerification,
 } from '../../../application/ports/AuthenticationProviderPort'
+import type {
+  IdentityPasswordResetPort,
+  PasswordResetOutcome,
+} from '../../../application/ports/IdentityPasswordResetPort'
 
 export interface SeededCredential {
   readonly email: string
@@ -46,7 +50,9 @@ const FAKE_EXPIRES_IN_SECONDS = 3600
  * fakes angostos y sin estado compartido, tal como los dos puertos que
  * implementan.
  */
-export class FakeAuthenticationProvider implements AuthenticationProviderPort {
+export class FakeAuthenticationProvider
+  implements AuthenticationProviderPort, IdentityPasswordResetPort
+{
   private readonly credentials = new Map<string, StoredCredential>()
   private readonly pendingChallenges = new Map<string, PendingChallenge>()
   private readonly nextToken: () => string
@@ -61,6 +67,19 @@ export class FakeAuthenticationProvider implements AuthenticationProviderPort {
   constructor(nextToken: () => string, secondFactorMethod?: SecondFactorMethod) {
     this.nextToken = nextToken
     this.secondFactorMethod = secondFactorMethod ?? SecondFactorMethod.AuthenticatorApp
+  }
+
+  setPassword(email: string, password: string): Promise<PasswordResetOutcome> {
+    const normalized = email.trim().toLowerCase()
+    const previous = this.credentials.get(normalized)
+
+    this.credentials.set(normalized, {
+      password,
+      requiresSecondFactor: previous?.requiresSecondFactor ?? false,
+      secondFactorCode: previous?.secondFactorCode ?? '000000',
+    })
+
+    return Promise.resolve({ kind: 'updated' })
   }
 
   seed(credential: SeededCredential): void {

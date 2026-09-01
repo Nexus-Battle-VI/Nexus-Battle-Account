@@ -82,10 +82,29 @@ export interface NicknameBlacklistEntriesTable {
   readonly updated_at: Generated<Date>
 }
 
+/**
+ * Proceso temporal de recuperacion de contrasena (HU-04, TASK HU-04.2).
+ *
+ * `account_id` es nullable a proposito: `StartPasswordRecovery` crea el
+ * desafio exista o no la cuenta, para no permitir enumerar correos
+ * registrados por la respuesta del primer paso. `code_hash` tambien es
+ * nullable: el desafio nace en `IDENTIFIED`, antes de que exista un codigo
+ * que resumir. El codigo en claro nunca tiene columna: no se persiste.
+ */
+export interface RecoveryChallengesTable {
+  readonly token: string
+  readonly email: string
+  readonly account_id: string | null
+  readonly stage: string
+  readonly code_hash: string | null
+  readonly created_at: Generated<Date>
+}
+
 export interface Database {
   readonly accounts: AccountsTable
   readonly account_roles: AccountRolesTable
   readonly security_questions: SecurityQuestionsTable
   readonly account_security_answers: AccountSecurityAnswersTable
   readonly nickname_blacklist_entries: NicknameBlacklistEntriesTable
+  readonly recovery_challenges: RecoveryChallengesTable
 }

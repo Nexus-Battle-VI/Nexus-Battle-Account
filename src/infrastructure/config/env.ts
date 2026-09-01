@@ -84,6 +84,8 @@ export interface AppConfig {
   readonly cognito: CognitoConfig | null
   readonly avatarStoragePath: string
   readonly corsOrigins: readonly string[]
+  /** Ingest local de Notifications (`POST /dev/enqueue`). Vacio = solo log. */
+  readonly notificationsIngestUrl: string | null
 }
 
 type RawEnv = Readonly<Record<string, string | undefined>>
@@ -276,5 +278,6 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     cognito: needsCognito ? { userPoolId, clientId } : null,
     avatarStoragePath: readString(env, 'AVATAR_STORAGE_PATH', './data/avatars'),
     corsOrigins: readCorsOrigins(env, nodeEnv),
+    notificationsIngestUrl: readString(env, 'NOTIFICATIONS_INGEST_URL', '') || null,
   }
 }

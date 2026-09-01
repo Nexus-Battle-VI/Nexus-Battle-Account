@@ -86,6 +86,10 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
     return Promise.resolve(false)
   }
 
+  findSecurityAnswers(id: AccountId): Promise<readonly HashedSecurityAnswer[]> {
+    return Promise.resolve(this.answersByAccount.get(id.value) ?? [])
+  }
+
   answersOf(accountId: string): readonly HashedSecurityAnswer[] {
     return this.answersByAccount.get(accountId) ?? []
   }
