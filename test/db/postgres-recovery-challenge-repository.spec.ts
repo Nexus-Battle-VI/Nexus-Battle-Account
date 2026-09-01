@@ -5,9 +5,11 @@ import type { Kysely } from 'kysely'
 
 import { describeError } from '../../src/infrastructure/observability/describe-error'
 import { createDatabase, migrateToLatest } from '../../src/infrastructure/persistence/database'
+import { PostgresAccountRepository } from '../../src/adapters/outbound/persistence/PostgresAccountRepository'
 import { PostgresRecoveryChallengeRepository } from '../../src/adapters/outbound/persistence/PostgresRecoveryChallengeRepository'
 import type { Database } from '../../src/adapters/outbound/persistence/schema'
 import { RecoveryChallenge } from '../../src/domain/entities/RecoveryChallenge'
+import { buildAccount } from '../support/account-factory'
 
 /**
  * Adaptador de PostgreSQL contra un motor REAL, en contenedor.
@@ -40,6 +42,22 @@ describe('PostgresRecoveryChallengeRepository', () => {
     if (error !== undefined) {
       throw new Error(`Las migraciones fallaron: ${describeError(error)}`)
     }
+
+    const accounts = new PostgresAccountRepository(db)
+    await accounts.save(
+      buildAccount({
+        id: 'acc-1',
+        email: 'jugador@nexus.test',
+        displayName: 'Jugador Uno',
+      }),
+    )
+    await accounts.save(
+      buildAccount({
+        id: 'acc-2',
+        email: 'jugador2@nexus.test',
+        displayName: 'Jugador Dos',
+      }),
+    )
   }, 120_000)
 
   afterAll(async () => {
@@ -89,7 +107,7 @@ describe('PostgresRecoveryChallengeRepository', () => {
     const token = nextToken()
     const challenge = RecoveryChallenge.start({
       token,
-      email: 'jugador@nexus.test',
+      email: 'jugador2@nexus.test',
       accountId: 'acc-2',
       occurredAt: AT,
     })

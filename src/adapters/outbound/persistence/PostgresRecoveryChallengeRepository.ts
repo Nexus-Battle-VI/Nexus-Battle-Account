@@ -22,6 +22,7 @@ export class PostgresRecoveryChallengeRepository implements RecoveryChallengeRep
         account_id: snapshot.accountId,
         stage: snapshot.stage,
         code_hash: snapshot.codeHash,
+        created_at: new Date(snapshot.createdAt),
       })
       .onConflict((oc) =>
         oc.column('token').doUpdateSet({
