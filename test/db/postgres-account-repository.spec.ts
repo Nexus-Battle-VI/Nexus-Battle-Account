@@ -168,6 +168,33 @@ describe('PostgresAccountRepository', () => {
   })
 
   /**
+   * HU-05 / CA-07: la unica edicion de "Mi Cuenta" es el apodo. Esta prueba
+   * cierra el ciclo contra el motor REAL: `account.rename(...)` ->
+   * `repository.save(account)` -> relectura desde PostgreSQL -> `display_name`
+   * actualizado, tanto en el agregado rehidratado como en la columna cruda.
+   * Un doble en memoria no demuestra que el `onConflict ... doUpdateSet` incluya
+   * de verdad `display_name`.
+   */
+  it('persiste el nuevo apodo tras rename y lo devuelve en una relectura (HU-05/CA-07)', async () => {
+    const account = buildAccount()
+    await repository.save(account)
+
+    account.rename(DisplayName.create('Apodo Renombrado'))
+    await repository.save(account)
+
+    const reread = await repository.findById(account.id)
+    expect(reread?.currentDisplayName.value).toBe('Apodo Renombrado')
+
+    const row = await db
+      .selectFrom('accounts')
+      .select('display_name')
+      .where('id', '=', account.id.value)
+      .executeTakeFirstOrThrow()
+
+    expect(row.display_name).toBe('Apodo Renombrado')
+  })
+
+  /**
    * Los roles se reemplazan por completo: el agregado es la autoridad sobre su
    * conjunto. Retirar uno tiene que borrarlo de verdad, no dejarlo huerfano.
    */
