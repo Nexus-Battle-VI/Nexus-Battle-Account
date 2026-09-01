@@ -1,7 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger'
-import { Transform } from 'class-transformer'
+import { Transform, Type } from 'class-transformer'
 import {
   Allow,
+  IsArray,
   IsBoolean,
   IsEmail,
   IsIn,
@@ -9,6 +10,7 @@ import {
   Matches,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator'
 
 import { Role, type Role as RoleValue } from '../../../domain/entities/Role'
@@ -148,6 +150,81 @@ export class TotpEnrollmentResponse {
     description: 'Clave base32 para introducir a mano si no se escanea el QR.',
   })
   readonly secret!: string
+}
+
+export class StartRecoveryRequest {
+  @ApiProperty({ example: 'jugador@nexus.test' })
+  @IsEmail({}, { message: 'El correo debe tener un formato valido.' })
+  @MaxLength(254)
+  email!: string
+}
+
+export class RecoveryAnswerItem {
+  @ApiProperty({ example: 'sq-01' })
+  @IsString()
+  questionId!: string
+
+  @ApiProperty({ example: 'luna' })
+  @IsString()
+  answer!: string
+}
+
+export class VerifyRecoveryAnswersRequest {
+  @ApiProperty()
+  @IsString()
+  challengeToken!: string
+
+  @ApiProperty({ type: [RecoveryAnswerItem] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RecoveryAnswerItem)
+  answers!: RecoveryAnswerItem[]
+}
+
+export class VerifyRecoveryCodeRequest {
+  @ApiProperty()
+  @IsString()
+  challengeToken!: string
+
+  @ApiProperty({ example: '000000' })
+  @IsString()
+  code!: string
+}
+
+export class ResetRecoveryPasswordRequest {
+  @ApiProperty()
+  @IsString()
+  challengeToken!: string
+
+  @ApiProperty({ example: 'Abcdefg1!' })
+  @IsString()
+  password!: string
+}
+
+export class RecoveryQuestionResponse {
+  @ApiProperty({ example: 'sq-01' })
+  readonly id!: string
+
+  @ApiProperty({ example: '¿Cuál era el nombre de tu primera mascota?' })
+  readonly statement!: string
+}
+
+export class StartRecoveryResponse {
+  @ApiProperty()
+  readonly challengeToken!: string
+
+  @ApiProperty({ type: [RecoveryQuestionResponse] })
+  readonly questions!: readonly RecoveryQuestionResponse[]
+}
+
+export class RecoveryChallengeResponse {
+  @ApiProperty()
+  readonly challengeToken!: string
+}
+
+export class RecoveryResetResponse {
+  @ApiProperty({ example: 'RESET' })
+  readonly status!: 'RESET'
 }
 
 export class ConfirmTotpRequest {
