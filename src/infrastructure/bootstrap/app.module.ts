@@ -6,6 +6,14 @@ import { RecoveryController } from '../../adapters/inbound/http/recovery.control
 import { MfaController } from '../../adapters/inbound/http/mfa.controller'
 import { PasswordController } from '../../adapters/inbound/http/password.controller'
 import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
+import { InternalMfaEvidenceController } from '../../adapters/inbound/http/internal-mfa-evidence.controller'
+import { InternalServiceGuard } from '../../adapters/inbound/http/auth/internal-service.guard'
+import { VerifyMfaEvidence } from '../../application/use-cases/VerifyMfaEvidence'
+import { MFA_EVIDENCE_REPOSITORY } from '../../application/ports/MfaEvidenceRepositoryPort'
+import type { MfaEvidenceRepositoryPort } from '../../application/ports/MfaEvidenceRepositoryPort'
+import { InMemoryMfaEvidenceRepository } from '../../adapters/outbound/persistence/InMemoryMfaEvidenceRepository'
+import { PostgresMfaEvidenceRepository } from '../../adapters/outbound/persistence/PostgresMfaEvidenceRepository'
+import { VERIFY_MFA_EVIDENCE } from '../../adapters/inbound/http/tokens'
 import { HealthController } from '../../adapters/inbound/http/health.controller'
 import {
   CHOOSE_SECOND_FACTOR,
@@ -164,6 +172,7 @@ export const DATABASE = Symbol('Database')
     MfaController,
     PasswordController,
     SessionsController,
+    InternalMfaEvidenceController,
     HealthController,
   ],
   providers: [
@@ -289,6 +298,30 @@ export const DATABASE = Symbol('Database')
         return new CognitoTokenVerifier(config.cognito)
       },
       inject: [APP_CONFIG, LOGGER],
+    },
+    // El contrato interno se comprueba ANTES que la identidad de usuario: sus
+    // rutas no llevan testimonio y no tienen nada que hacer en los guards
+    // siguientes. Solo actua sobre las marcadas con `@InternalOnly()`.
+    //
+    // A diferencia de los otros dos, este se registra HAYA O NO proveedor de
+    // identidad: la proteccion del contrato interno no depende de como se
+    // autentiquen las personas.
+    {
+      provide: APP_GUARD,
+      useFactory: (
+        config: AppConfig,
+        reflector: Reflector,
+        clock: ClockPort,
+        logger: Logger,
+      ): CanActivate =>
+        new InternalServiceGuard({
+          reflector,
+          secret: config.internalServiceAuthSecret,
+          allowedServices: config.internalServiceAllowed,
+          clock,
+          logger,
+        }),
+      inject: [APP_CONFIG, Reflector, CLOCK, LOGGER],
     },
     // Los guards se registran de forma global SOLO cuando hay proveedor. El
     // orden importa: JwtAuthGuard deja la identidad verificada en la peticion y
@@ -574,8 +607,40 @@ export const DATABASE = Symbol('Database')
       useFactory: (
         accounts: AccountRepositoryPort,
         authenticationProvider: AuthenticationProviderPort,
-      ): CompleteSecondFactor => new CompleteSecondFactor({ accounts, authenticationProvider }),
-      inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
+        tokenVerifier: TokenVerifierPort,
+        mfaEvidence: MfaEvidenceRepositoryPort,
+        clock: ClockPort,
+        logger: Logger,
+      ): CompleteSecondFactor =>
+        new CompleteSecondFactor({
+          accounts,
+          authenticationProvider,
+          tokenVerifier,
+          mfaEvidence,
+          clock,
+          logger,
+        }),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        AUTHENTICATION_PROVIDER,
+        TOKEN_VERIFIER,
+        MFA_EVIDENCE_REPOSITORY,
+        CLOCK,
+        LOGGER,
+      ],
+    },
+    {
+      // La evidencia acompana a la cuenta: mismo motor, misma transaccionalidad.
+      provide: MFA_EVIDENCE_REPOSITORY,
+      useFactory: (db: Kysely<Database> | null): MfaEvidenceRepositoryPort =>
+        db === null ? new InMemoryMfaEvidenceRepository() : new PostgresMfaEvidenceRepository(db),
+      inject: [DATABASE],
+    },
+    {
+      provide: VERIFY_MFA_EVIDENCE,
+      useFactory: (mfaEvidence: MfaEvidenceRepositoryPort, clock: ClockPort): VerifyMfaEvidence =>
+        new VerifyMfaEvidence({ mfaEvidence, clock }),
+      inject: [MFA_EVIDENCE_REPOSITORY, CLOCK],
     },
     {
       provide: CHOOSE_SECOND_FACTOR,

@@ -14,6 +14,13 @@ import type { NotificationRequest } from '../../src/application/ports/Notificati
 import type { NotificationRequestPort } from '../../src/application/ports/NotificationRequestPort'
 import type { AccountRepositoryPort } from '../../src/application/ports/AccountRepositoryPort'
 import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
+import { InMemoryMfaEvidenceRepository } from '../../src/adapters/outbound/persistence/InMemoryMfaEvidenceRepository'
+import type { MfaEvidenceRepositoryPort } from '../../src/application/ports/MfaEvidenceRepositoryPort'
+import type {
+  TokenVerifierPort,
+  VerifiedIdentity,
+} from '../../src/application/ports/TokenVerifierPort'
+import type { LoginOutcome } from '../../src/application/dto/LoginResult'
 import { InMemoryNicknameBlacklist } from '../../src/adapters/outbound/persistence/InMemoryNicknameBlacklist'
 import { InMemorySecurityQuestionCatalog } from '../../src/adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
 import { FakeAuthenticationProvider } from '../../src/adapters/outbound/identity/FakeAuthenticationProvider'
@@ -525,19 +532,74 @@ describe('GetOwnAccount', () => {
 interface LoginHarness {
   accounts: InMemoryAccountRepository
   authProvider: FakeAuthenticationProvider
+  mfaEvidence: InMemoryMfaEvidenceRepository
   loginAccount: LoginAccount
   completeSecondFactor: CompleteSecondFactor
+  avisos: string[]
 }
 
-const buildLoginHarness = (): LoginHarness => {
+const AHORA = new Date('2026-09-02T12:00:00.000Z')
+const CADUCA = new Date(AHORA.getTime() + 900_000)
+
+/**
+ * Verificador de testimonios para pruebas.
+ *
+ * Devuelve el sujeto que se le indique, con un `jti` distinto por token, para
+ * poder ejercitar la evidencia sin firmar JWT reales. La comprobacion de firma
+ * la cubren las pruebas del verificador de Cognito.
+ */
+const verificadorDePruebas = (
+  subject: () => string,
+  overrides: { jti?: string | null; expiresAt?: Date | null } = {},
+): TokenVerifierPort => ({
+  verify: (token: string): Promise<VerifiedIdentity> =>
+    Promise.resolve({
+      subject: subject(),
+      roles: new Set([Role.Player]),
+      jti: overrides.jti === undefined ? `jti-${token}` : overrides.jti,
+      expiresAt: overrides.expiresAt === undefined ? CADUCA : overrides.expiresAt,
+    }),
+})
+
+const buildLoginHarness = (
+  options: {
+    tokenVerifier?: TokenVerifierPort
+    mfaEvidence?: MfaEvidenceRepositoryPort
+  } = {},
+): LoginHarness => {
   const accounts = new InMemoryAccountRepository()
   const authProvider = new FakeAuthenticationProvider(sequence('token'))
-  const deps = { accounts, authenticationProvider: authProvider }
+  const mfaEvidence = new InMemoryMfaEvidenceRepository()
+  const avisos: string[] = []
+  let ultimoSujeto = ''
+
+  // El doble del verificador devuelve el sujeto de la cuenta que se acaba de
+  // autenticar, que es lo que hace un proveedor real.
+  const original = accounts.save.bind(accounts)
+  accounts.save = async (account): Promise<void> => {
+    ultimoSujeto = account.subject
+    await original(account)
+  }
+
+  const deps = {
+    accounts,
+    authenticationProvider: authProvider,
+    tokenVerifier: options.tokenVerifier ?? verificadorDePruebas(() => ultimoSujeto),
+    mfaEvidence: options.mfaEvidence ?? mfaEvidence,
+    clock: { now: (): Date => AHORA },
+    logger: {
+      warn: (message: string): void => {
+        avisos.push(message)
+      },
+    },
+  }
 
   return {
     accounts,
     authProvider,
-    loginAccount: new LoginAccount(deps),
+    mfaEvidence,
+    avisos,
+    loginAccount: new LoginAccount({ accounts, authenticationProvider: authProvider }),
     completeSecondFactor: new CompleteSecondFactor(deps),
   }
 }
@@ -758,6 +820,24 @@ describe('CompleteSecondFactor', () => {
     })
   }
 
+  /** Recorre las dos etapas y devuelve el resultado de la segunda. */
+  const completar = async (harness: LoginHarness): Promise<LoginOutcome> => {
+    const challenge = await harness.loginAccount.execute({
+      identifier: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    if (challenge.kind !== 'secondFactorRequired') {
+      throw new Error('se esperaba un reto de segundo factor')
+    }
+
+    return await harness.completeSecondFactor.execute({
+      identifier: 'jugador@nexus.test',
+      challengeToken: challenge.challengeToken,
+      code: '123456',
+    })
+  }
+
   it('completa la autenticacion administrativa con el codigo correcto (CA-07)', async () => {
     const harness = buildLoginHarness()
     await seedAdmin(harness)
@@ -778,6 +858,89 @@ describe('CompleteSecondFactor', () => {
     })
 
     expect(outcome).toMatchObject({ kind: 'authenticated' })
+  })
+
+  /**
+   * ENDURECIMIENTO POSTERIOR A EN-002.
+   *
+   * Un access token de Cognito no dice como se obtuvo, asi que un servicio que
+   * solo lee el rol no puede distinguir un testimonio nacido tras el segundo
+   * factor de otro nacido sin el. Account deja constancia, ligada al `jti` del
+   * testimonio concreto.
+   */
+  it('deja evidencia del segundo factor ligada al testimonio entregado', async () => {
+    const harness = buildLoginHarness()
+    await seedAdmin(harness)
+
+    const outcome = await completar(harness)
+
+    if (outcome.kind !== 'authenticated') {
+      throw new Error('se esperaba una sesion autenticada')
+    }
+
+    await expect(
+      harness.mfaEvidence.isValidFor(outcome.subject, `jti-${outcome.accessToken}`, AHORA),
+    ).resolves.toBe(true)
+  })
+
+  /**
+   * EL ORDEN IMPORTA. Entregar el testimonio y persistir despues dejaria
+   * sesiones administrativas sin evidencia, indistinguibles de las que nunca
+   * superaron el segundo factor. Si la escritura falla, no se entrega nada.
+   */
+  it('NO entrega el testimonio si la evidencia no se puede persistir', async () => {
+    const harness = buildLoginHarness({
+      mfaEvidence: {
+        save: (): Promise<void> => Promise.reject(new Error('motor caido')),
+        isValidFor: (): Promise<boolean> => Promise.resolve(false),
+      },
+    })
+    await seedAdmin(harness)
+
+    const outcome = await completar(harness)
+
+    expect(outcome.kind).toBe('providerUnavailable')
+    expect(harness.avisos).toContain('mfa_evidence_no_persistida')
+  })
+
+  /**
+   * El sujeto que afirma el testimonio debe ser el de la cuenta recien
+   * autenticada. Sin esta comprobacion, un desajuste entre proveedor y cuenta
+   * registraria la evidencia a nombre de otro sujeto.
+   */
+  it('NO entrega el testimonio si el sujeto del token no es el de la cuenta', async () => {
+    const harness = buildLoginHarness({
+      tokenVerifier: verificadorDePruebas(() => 'sujeto-de-otra-persona'),
+    })
+    await seedAdmin(harness)
+
+    const outcome = await completar(harness)
+
+    expect(outcome.kind).toBe('providerUnavailable')
+    expect(harness.avisos).toContain('mfa_evidence_sujeto_discrepante')
+  })
+
+  /**
+   * Sin `jti` la evidencia no podria ligarse a este testimonio. Guardar algo
+   * inventado aparentaria una prueba que no describe ningun token.
+   */
+  it('NO entrega el testimonio si el token no trae identificador', async () => {
+    const cuenta = buildActiveAccount({ roles: [Role.Player, Role.Administrator] })
+    const harness = buildLoginHarness({
+      tokenVerifier: verificadorDePruebas(() => cuenta.subject, { jti: null }),
+    })
+    await harness.accounts.save(cuenta)
+    harness.authProvider.seed({
+      email: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+      requiresSecondFactor: true,
+      secondFactorCode: '123456',
+    })
+
+    const outcome = await completar(harness)
+
+    expect(outcome.kind).toBe('providerUnavailable')
+    expect(harness.avisos).toContain('mfa_evidence_token_sin_identificador')
   })
 
   it('no completa la sesion administrativa con un codigo incorrecto (CA-08)', async () => {

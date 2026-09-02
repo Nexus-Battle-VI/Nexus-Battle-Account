@@ -22,6 +22,10 @@ import type { RequestWithIdentity } from './decorators'
 export const ANONYMOUS_IDENTITY: VerifiedIdentity = {
   subject: 'anonymous',
   roles: new Set(ALL_ROLES),
+  // Sin testimonio no hay `jti` ni `exp` que extraer, y fingirlos permitiria
+  // registrar evidencia de un segundo factor que nadie supero.
+  jti: null,
+  expiresAt: null,
 }
 
 /**
