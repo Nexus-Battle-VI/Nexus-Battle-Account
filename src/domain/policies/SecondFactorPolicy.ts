@@ -1,5 +1,5 @@
 import { isAdministrativeRole, type Role } from '../entities/Role'
-import { SecondFactorMethod } from '../../application/ports/AuthenticationProviderPort'
+import { SecondFactorMethod } from '../entities/SecondFactorMethod'
 
 /**
  * Que segundo factor admite cada clase de cuenta.

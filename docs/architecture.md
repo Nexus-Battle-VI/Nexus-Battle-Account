@@ -195,13 +195,33 @@ segundo factor. Cualquier otro -`NEW_PASSWORD_REQUIRED`, `MFA_SETUP`,
 `SELECT_MFA_TYPE`- falla cerrado como `AuthenticationProviderError`: fingir
 que un formulario de código los resuelve inventaría un flujo no aprobado.
 
+### Evidencia de segundo factor para operaciones internas
+
+Cognito no incluye en el access token una afirmación que demuestre qué segundo
+factor se completó. Por eso Account registra, al finalizar el reto, una
+evidencia efímera formada por `subject`, `jti`, `method`, `verifiedAt` y
+`expiresAt`. La evidencia vence exactamente con el token y nunca se consulta
+solo por sujeto.
+
+Los retos del proveedor se normalizan sin perder su significado:
+`SOFTWARE_TOKEN_MFA` se registra como `AUTHENTICATOR_APP`, `SMS_MFA` como `SMS`
+y `EMAIL_OTP` como `EMAIL`. El contrato interno firmado consulta las tres
+piezas `subject`, `jti` y `method`; por tanto, una evidencia de SMS o correo no
+autoriza una operación que exige aplicación autenticadora. La creación
+administrativa de productos en Catalog exige `AUTHENTICATOR_APP` y falla
+cerrado si Account, la firma interna o la evidencia no están disponibles.
+
+Las evidencias creadas antes de persistir el método se invalidan durante la
+migración. No es posible clasificarlas de manera segura y su naturaleza
+efímera permite solicitar nuevamente el segundo factor.
+
 Pendiente de confirmar con Infrastructure: el permiso IAM
 (`cognito-idp:AdminInitiateAuth`/`AdminRespondToAuthChallenge`, acotado al
 ARN del pool) sobre el rol de ejecución del runtime, que
 `ALLOW_ADMIN_USER_PASSWORD_AUTH` esté en `ExplicitAuthFlows` del cliente de
-Terraform, y el desajuste entre el segundo factor aprobado (correo) y el
-aprovisionado (TOTP). Ver el reporte de la task de integración de Cognito
-para el detalle de los tres blockers.
+Terraform. Para la creación administrativa de productos, el uso de TOTP por
+aplicación autenticadora ya fue confirmado; otros métodos requieren una
+decisión funcional explícita por cada operación consumidora.
 
 ## Roles
 

@@ -33,6 +33,7 @@ interface StoredCredential {
 interface PendingChallenge {
   readonly email: string
   readonly code: string
+  readonly method: SecondFactorMethod
 }
 
 /** Vigencia arbitraria del token de prueba: una hora, como un access token tipico de Cognito. */
@@ -103,6 +104,7 @@ export class FakeAuthenticationProvider
       this.pendingChallenges.set(challengeToken, {
         email: normalized,
         code: stored.secondFactorCode,
+        method: this.secondFactorMethod,
       })
 
       // El doble declara el metodo igual que el adaptador real: si no, una
@@ -129,11 +131,18 @@ export class FakeAuthenticationProvider
    * inicio de sesion al activar el segundo factor por correo.
    */
   chooseSecondFactor(input: SecondFactorSelection): Promise<AuthenticationOutcome> {
-    if (!this.pendingChallenges.has(input.challengeToken)) {
+    const pending = this.pendingChallenges.get(input.challengeToken)
+
+    if (pending === undefined) {
       return Promise.reject(
         new AuthenticationProviderError('No hay una seleccion de factor pendiente.'),
       )
     }
+
+    this.pendingChallenges.set(input.challengeToken, {
+      ...pending,
+      method: input.method,
+    })
 
     return Promise.resolve({
       kind: 'challengeRequired',
@@ -160,6 +169,7 @@ export class FakeAuthenticationProvider
       kind: 'verified',
       accessToken: this.issueAccessToken(),
       expiresIn: FAKE_EXPIRES_IN_SECONDS,
+      method: pending.method,
     })
   }
 

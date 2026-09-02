@@ -1,4 +1,5 @@
 import type { Generated } from 'kysely'
+import type { SecondFactorMethod } from '../../../domain/entities/SecondFactorMethod'
 
 /**
  * Esquema de la base de datos de Account, tipado para Kysely.
@@ -100,6 +101,18 @@ export interface RecoveryChallengesTable {
   readonly created_at: Generated<Date>
 }
 
+/**
+ * Evidencia de que un testimonio de acceso concreto nacio de un segundo factor.
+ * La clave es `(subject, jti)`: la prueba muere con el testimonio que la origino.
+ */
+export interface MfaEvidencesTable {
+  readonly subject: string
+  readonly jti: string
+  readonly method: SecondFactorMethod
+  readonly expires_at: Date
+  readonly verified_at: Generated<Date>
+}
+
 export interface Database {
   readonly accounts: AccountsTable
   readonly account_roles: AccountRolesTable
@@ -107,4 +120,5 @@ export interface Database {
   readonly account_security_answers: AccountSecurityAnswersTable
   readonly nickname_blacklist_entries: NicknameBlacklistEntriesTable
   readonly recovery_challenges: RecoveryChallengesTable
+  readonly mfa_evidences: MfaEvidencesTable
 }

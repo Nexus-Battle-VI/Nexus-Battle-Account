@@ -27,7 +27,12 @@ import { InMemoryTotpEnrollment } from '../../src/adapters/outbound/identity/InM
  * y elevar despues.
  */
 const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
-  'token-jugador': { subject: 'sub:jugador@nexus.test', roles: new Set([Role.Player]) },
+  'token-jugador': {
+    subject: 'sub:jugador@nexus.test',
+    roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
+  },
 }
 
 const stubVerifier: TokenVerifierPort = {
