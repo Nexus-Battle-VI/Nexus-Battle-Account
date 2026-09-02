@@ -45,18 +45,26 @@ const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
   'token-jugador': {
     subject: 'sub:ana@nexus.test',
     roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
   },
   'token-moderador': {
     subject: 'sujeto-moderador',
     roles: new Set([Role.Player, Role.Moderator]),
+    jti: null,
+    expiresAt: null,
   },
   'token-administrador': {
     subject: 'sujeto-administrador',
     roles: new Set([Role.Player, Role.Administrator]),
+    jti: null,
+    expiresAt: null,
   },
   'token-super-administrador': {
     subject: 'sujeto-super-administrador',
     roles: new Set([Role.Player, Role.SuperAdministrator]),
+    jti: null,
+    expiresAt: null,
   },
 }
 

@@ -1,3 +1,7 @@
+import type { SecondFactorMethod } from '../../domain/entities/SecondFactorMethod'
+
+export { SecondFactorMethod } from '../../domain/entities/SecondFactorMethod'
+
 /**
  * Puerto de verificacion de credenciales (HU-02).
  *
@@ -51,14 +55,6 @@ export interface AuthenticationCredentials {
  * El `challengeToken` sigue siendo OPACO: el metodo se declara aparte
  * precisamente para que nadie tenga que destriparlo para saberlo.
  */
-export const SecondFactorMethod = {
-  AuthenticatorApp: 'AUTHENTICATOR_APP',
-  Email: 'EMAIL',
-  Sms: 'SMS',
-} as const
-
-export type SecondFactorMethod = (typeof SecondFactorMethod)[keyof typeof SecondFactorMethod]
-
 export type AuthenticationOutcome =
   | { readonly kind: 'authenticated'; readonly accessToken: string; readonly expiresIn: number }
   | {
@@ -100,7 +96,13 @@ export interface SecondFactorVerification {
 }
 
 export type SecondFactorOutcome =
-  | { readonly kind: 'verified'; readonly accessToken: string; readonly expiresIn: number }
+  | {
+      readonly kind: 'verified'
+      readonly accessToken: string
+      readonly expiresIn: number
+      /** Derivado por el adaptador del reto que el proveedor acaba de aceptar. */
+      readonly method: SecondFactorMethod
+    }
   | { readonly kind: 'invalidCode' }
   | { readonly kind: 'challengeExpired' }
 

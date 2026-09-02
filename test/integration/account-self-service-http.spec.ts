@@ -42,12 +42,27 @@ const CURRENT_PASSWORD_B = 'Contrasena-Actual-Ficticia-B-1'
 const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
   // El sujeto es el que deriva el alta (`sub:<correo>`), para que /me encuentre
   // la cuenta de 'ana@nexus.test' creada en beforeAll.
-  'token-jugador': { subject: 'sub:ana@nexus.test', roles: new Set([Role.Player]) },
+  'token-jugador': {
+    subject: 'sub:ana@nexus.test',
+    roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
+  },
   // Usuario B para las pruebas de aislamiento entre titulares (CA-08): su cuenta
   // tambien se crea en beforeAll y su credencial se siembra por separado.
-  'token-jugador-b': { subject: 'sub:beatriz@nexus.test', roles: new Set([Role.Player]) },
+  'token-jugador-b': {
+    subject: 'sub:beatriz@nexus.test',
+    roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
+  },
   // Titular de una cuenta suspendida, para la evidencia de CA-01 en GET /me.
-  'token-suspendida': { subject: 'sub:carla@nexus.test', roles: new Set([Role.Player]) },
+  'token-suspendida': {
+    subject: 'sub:carla@nexus.test',
+    roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
+  },
 }
 
 const stubVerifier: TokenVerifierPort = {
