@@ -1,11 +1,15 @@
 import { Body, Controller, HttpCode, HttpStatus, Inject, Post } from '@nestjs/common'
 import { ApiExcludeController, ApiOperation, ApiResponse } from '@nestjs/swagger'
-import { IsString, MaxLength, MinLength } from 'class-validator'
+import { IsEnum, IsString, MaxLength, MinLength } from 'class-validator'
 import { ApiProperty } from '@nestjs/swagger'
 
 import type { VerifyMfaEvidence } from '../../../application/use-cases/VerifyMfaEvidence'
 import { InternalOnly, Public } from './auth/decorators'
 import { VERIFY_MFA_EVIDENCE } from './tokens'
+import {
+  SecondFactorMethod,
+  type SecondFactorMethod as SecondFactorMethodValue,
+} from '../../../domain/entities/SecondFactorMethod'
 
 export class VerifyMfaEvidenceRequest {
   @ApiProperty({ description: 'Sujeto (`sub`) del testimonio a comprobar.' })
@@ -19,10 +23,19 @@ export class VerifyMfaEvidenceRequest {
   @MinLength(1)
   @MaxLength(256)
   jti!: string
+
+  @ApiProperty({
+    enum: SecondFactorMethod,
+    description: 'Metodo de segundo factor que la operacion exige comprobar.',
+  })
+  @IsEnum(SecondFactorMethod)
+  method!: SecondFactorMethodValue
 }
 
 export class VerifyMfaEvidenceResponse {
-  @ApiProperty({ description: 'Cierto solo si existe evidencia vigente para ese sujeto y `jti`.' })
+  @ApiProperty({
+    description: 'Cierto solo si sujeto, `jti`, metodo y vigencia coinciden.',
+  })
   valid!: boolean
 }
 
@@ -58,6 +71,12 @@ export class InternalMfaEvidenceController {
   @ApiResponse({ status: 401, description: 'Peticion interna no autorizada' })
   @ApiResponse({ status: 503, description: 'El contrato interno no esta configurado' })
   async verify(@Body() body: VerifyMfaEvidenceRequest): Promise<VerifyMfaEvidenceResponse> {
-    return { valid: await this.verifyMfaEvidence.execute({ subject: body.subject, jti: body.jti }) }
+    return {
+      valid: await this.verifyMfaEvidence.execute({
+        subject: body.subject,
+        jti: body.jti,
+        method: body.method,
+      }),
+    }
   }
 }

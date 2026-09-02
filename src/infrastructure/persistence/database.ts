@@ -14,6 +14,7 @@ import * as migrationHu02BlacklistSeed from '../../adapters/outbound/persistence
 import * as migrationHu03SuperAdmin from '../../adapters/outbound/persistence/migrations/hu03-super-administrator-role'
 import * as migrationHu04RecoveryChallenges from '../../adapters/outbound/persistence/migrations/hu04-recovery-challenges'
 import * as migrationHardeningMfaEvidence from '../../adapters/outbound/persistence/migrations/hardening-mfa-evidence'
+import * as migrationHardeningMfaEvidenceMethod from '../../adapters/outbound/persistence/migrations/hardening-mfa-evidence-method'
 
 export interface DatabaseOptions {
   readonly connectionString: string
@@ -59,6 +60,7 @@ const migrations: MigrationProvider = {
       'hu03-super-administrator-role': migrationHu03SuperAdmin,
       'hu04-recovery-challenges': migrationHu04RecoveryChallenges,
       'hardening-mfa-evidence': migrationHardeningMfaEvidence,
+      'hardening-mfa-evidence-method': migrationHardeningMfaEvidenceMethod,
     }),
 }
 

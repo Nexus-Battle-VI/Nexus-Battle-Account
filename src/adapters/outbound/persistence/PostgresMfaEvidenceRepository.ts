@@ -1,6 +1,7 @@
 import type { Kysely } from 'kysely'
 
 import type { MfaEvidence } from '../../../domain/entities/MfaEvidence'
+import type { SecondFactorMethod } from '../../../domain/entities/SecondFactorMethod'
 import type { MfaEvidenceRepositoryPort } from '../../../application/ports/MfaEvidenceRepositoryPort'
 import type { Database } from './schema'
 
@@ -26,11 +27,13 @@ export class PostgresMfaEvidenceRepository implements MfaEvidenceRepositoryPort 
       .values({
         subject: snapshot.subject,
         jti: snapshot.jti,
+        method: snapshot.method,
         expires_at: snapshot.expiresAt,
         verified_at: snapshot.verifiedAt,
       })
       .onConflict((oc) =>
         oc.columns(['subject', 'jti']).doUpdateSet({
+          method: snapshot.method,
           expires_at: snapshot.expiresAt,
           verified_at: snapshot.verifiedAt,
         }),
@@ -45,12 +48,18 @@ export class PostgresMfaEvidenceRepository implements MfaEvidenceRepositoryPort 
    * pregunta, y de paso no hace falta un proceso que borre filas vencidas: una
    * fila caducada deja de responder que si en el mismo instante en que expira.
    */
-  async isValidFor(subject: string, jti: string, now: Date): Promise<boolean> {
+  async isValidFor(
+    subject: string,
+    jti: string,
+    method: SecondFactorMethod,
+    now: Date,
+  ): Promise<boolean> {
     const row = await this.db
       .selectFrom('mfa_evidences')
       .select('subject')
       .where('subject', '=', subject)
       .where('jti', '=', jti)
+      .where('method', '=', method)
       .where('expires_at', '>', now)
       .executeTakeFirst()
 

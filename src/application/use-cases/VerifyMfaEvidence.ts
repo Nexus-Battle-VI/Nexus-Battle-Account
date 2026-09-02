@@ -1,9 +1,14 @@
 import type { ClockPort } from '../ports/ClockPort'
 import type { MfaEvidenceRepositoryPort } from '../ports/MfaEvidenceRepositoryPort'
+import {
+  isSecondFactorMethod,
+  type SecondFactorMethod,
+} from '../../domain/entities/SecondFactorMethod'
 
 export interface VerifyMfaEvidenceQuery {
   readonly subject: string
   readonly jti: string
+  readonly method: SecondFactorMethod
 }
 
 export interface VerifyMfaEvidenceDependencies {
@@ -19,9 +24,10 @@ export interface VerifyMfaEvidenceDependencies {
  * a que cuenta pertenece seria filtrar informacion de autenticacion fuera del
  * contexto que la posee, sin que nadie la necesite.
  *
- * EXIGE LAS DOS PARTES DE LA CLAVE. Comprobar solo el sujeto convertiria la
- * evidencia de un testimonio en un permiso permanente de la persona: cualquier
- * token posterior, nacido sin segundo factor, pasaria la comprobacion.
+ * EXIGE SUJETO, JTI Y METODO. Comprobar solo el sujeto convertiria la evidencia
+ * de un testimonio en un permiso permanente de la persona: cualquier token
+ * posterior, nacido sin segundo factor, pasaria la comprobacion. Omitir el
+ * metodo confundiria TOTP con SMS o correo.
  */
 export class VerifyMfaEvidence {
   private readonly deps: VerifyMfaEvidenceDependencies
@@ -35,7 +41,11 @@ export class VerifyMfaEvidence {
     // caso de uso decide una autorizacion, y un 500 por un campo ausente seria
     // un fallo mas ruidoso que util. Ante una consulta incompleta, la respuesta
     // honesta es que no hay evidencia.
-    if (typeof query.subject !== 'string' || typeof query.jti !== 'string') {
+    if (
+      typeof query.subject !== 'string' ||
+      typeof query.jti !== 'string' ||
+      !isSecondFactorMethod(query.method)
+    ) {
       return false
     }
 
@@ -43,6 +53,11 @@ export class VerifyMfaEvidence {
       return false
     }
 
-    return await this.deps.mfaEvidence.isValidFor(query.subject, query.jti, this.deps.clock.now())
+    return await this.deps.mfaEvidence.isValidFor(
+      query.subject,
+      query.jti,
+      query.method,
+      this.deps.clock.now(),
+    )
   }
 }

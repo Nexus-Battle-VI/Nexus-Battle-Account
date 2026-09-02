@@ -11,7 +11,10 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider'
 
 import { CognitoAuthenticationProvider } from '../../src/adapters/outbound/identity/CognitoAuthenticationProvider'
-import { AuthenticationProviderError } from '../../src/application/ports/AuthenticationProviderPort'
+import {
+  AuthenticationProviderError,
+  SecondFactorMethod,
+} from '../../src/application/ports/AuthenticationProviderPort'
 
 /**
  * `AdminInitiateAuth`/`AdminRespondToAuthChallenge` SI llevan SigV4 (a
@@ -220,8 +223,31 @@ describe('CognitoAuthenticationProvider', () => {
         code: '123456',
       })
 
-      expect(outcome).toEqual({ kind: 'verified', accessToken: 'token-admin', expiresIn: 3600 })
+      expect(outcome).toEqual({
+        kind: 'verified',
+        accessToken: 'token-admin',
+        expiresIn: 3600,
+        method: SecondFactorMethod.AuthenticatorApp,
+      })
       expect(send).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([
+      [ChallengeNameType.SOFTWARE_TOKEN_MFA, SecondFactorMethod.AuthenticatorApp],
+      [ChallengeNameType.SMS_MFA, SecondFactorMethod.Sms],
+      [ChallengeNameType.EMAIL_OTP, SecondFactorMethod.Email],
+    ])('deriva %s como metodo %s del reto verificado', async (challengeName, method) => {
+      withMockedSend(() =>
+        Promise.resolve({ AuthenticationResult: { AccessToken: 'token', ExpiresIn: 900 } }),
+      )
+
+      const outcome = await buildProvider().verifySecondFactor({
+        email: 'admin@nexus.test',
+        challengeToken: `${challengeName}:sesion-cognito`,
+        code: '123456',
+      })
+
+      expect(outcome).toMatchObject({ kind: 'verified', method })
     })
 
     it('el accessToken y el expiresIn de verified provienen literalmente de Cognito', async () => {

@@ -1,4 +1,5 @@
 import type { MfaEvidence } from '../../domain/entities/MfaEvidence'
+import type { SecondFactorMethod } from '../../domain/entities/SecondFactorMethod'
 
 /**
  * Puerto de persistencia de la evidencia de segundo factor.
@@ -9,14 +10,15 @@ import type { MfaEvidence } from '../../domain/entities/MfaEvidence'
  * los que nunca superaron el segundo factor.
  *
  * `isValidFor` responde la unica pregunta que necesita el contrato interno, y
- * la responde entera: exige coincidencia de sujeto Y de identificador de
- * testimonio, y que la evidencia siga vigente. No se expone un `find` que
- * devuelva la evidencia: quien pregunta no necesita su contenido, solo si vale.
+ * la responde entera: exige coincidencia de sujeto, identificador de testimonio
+ * Y metodo, y que la evidencia siga vigente. Omitir el metodo permitiria aceptar
+ * SMS o correo donde el consumidor exige aplicacion autenticadora. No se expone
+ * un `find`: quien pregunta no necesita el contenido, solo si vale.
  */
 export interface MfaEvidenceRepositoryPort {
   save(evidence: MfaEvidence): Promise<void>
 
-  isValidFor(subject: string, jti: string, now: Date): Promise<boolean>
+  isValidFor(subject: string, jti: string, method: SecondFactorMethod, now: Date): Promise<boolean>
 }
 
 export const MFA_EVIDENCE_REPOSITORY = Symbol('MfaEvidenceRepositoryPort')

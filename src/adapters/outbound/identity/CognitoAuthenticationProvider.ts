@@ -217,10 +217,11 @@ export class CognitoAuthenticationProvider implements AuthenticationProviderPort
     // esta suite nunca emitio -por ejemplo, uno construido a mano- no debe
     // llegar a llamar a Cognito con un `ChallengeResponses` inventado.
     const codeParameter = CHALLENGE_CODE_PARAMETER[unpacked.challengeName]
+    const method = CHALLENGE_METHOD[unpacked.challengeName]
 
-    if (codeParameter === undefined) {
+    if (codeParameter === undefined || method === undefined) {
       throw new AuthenticationProviderError(
-        `El reto "${unpacked.challengeName}" no tiene un parametro de codigo conocido por este adaptador.`,
+        `El reto "${unpacked.challengeName}" no tiene codigo y metodo conocidos por este adaptador.`,
       )
     }
 
@@ -248,7 +249,7 @@ export class CognitoAuthenticationProvider implements AuthenticationProviderPort
       response.AuthenticationResult,
     )
 
-    return { kind: 'verified', accessToken, expiresIn }
+    return { kind: 'verified', accessToken, expiresIn, method }
   }
 
   /**

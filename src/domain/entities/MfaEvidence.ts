@@ -11,16 +11,21 @@
  * persona convertiria una prueba de sesion en un atributo duradero de la cuenta:
  * un testimonio posterior, nacido sin segundo factor, heredaria la evidencia del
  * anterior. Con `jti` la prueba muere con el testimonio que la origino, que es
- * justo lo que se quiere.
+ * justo lo que se quiere. El metodo tambien forma parte de la comprobacion:
+ * completar SMS o correo no satisface una operacion que exige TOTP mediante la
+ * aplicacion autenticadora.
  *
  * LA VIGENCIA SE TOMA DEL `exp` DEL TESTIMONIO, nunca de una constante. Hoy
  * Cognito emite tokens de quince minutos, asi que codificar ese numero
  * ACERTARIA — y se desincronizaria en silencio el dia que la configuracion
  * cambie, dejando evidencias vivas mas alla del testimonio que describen.
  */
+import { isSecondFactorMethod, type SecondFactorMethod } from './SecondFactorMethod'
+
 export interface MfaEvidenceSnapshot {
   readonly subject: string
   readonly jti: string
+  readonly method: SecondFactorMethod
   readonly expiresAt: Date
   readonly verifiedAt: Date
 }
@@ -29,6 +34,7 @@ export class MfaEvidence {
   private constructor(
     readonly subject: string,
     readonly jti: string,
+    readonly method: SecondFactorMethod,
     readonly expiresAt: Date,
     readonly verifiedAt: Date,
   ) {}
@@ -42,7 +48,17 @@ export class MfaEvidence {
       throw new Error('La evidencia de segundo factor exige el identificador del testimonio.')
     }
 
-    return new MfaEvidence(input.subject, input.jti, input.expiresAt, input.verifiedAt)
+    if (!isSecondFactorMethod(input.method)) {
+      throw new Error('La evidencia de segundo factor exige un metodo reconocido.')
+    }
+
+    return new MfaEvidence(
+      input.subject,
+      input.jti,
+      input.method,
+      input.expiresAt,
+      input.verifiedAt,
+    )
   }
 
   /**
@@ -59,6 +75,7 @@ export class MfaEvidence {
     return {
       subject: this.subject,
       jti: this.jti,
+      method: this.method,
       expiresAt: this.expiresAt,
       verifiedAt: this.verifiedAt,
     }

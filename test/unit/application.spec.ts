@@ -34,7 +34,10 @@ import {
   RoleDirectoryError,
   type RoleDirectoryPort,
 } from '../../src/application/ports/RoleDirectoryPort'
-import { AuthenticationProviderError } from '../../src/application/ports/AuthenticationProviderPort'
+import {
+  AuthenticationProviderError,
+  SecondFactorMethod,
+} from '../../src/application/ports/AuthenticationProviderPort'
 import { InMemoryAvatarStorage } from '../../src/adapters/outbound/storage/InMemoryAvatarStorage'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { Role } from '../../src/domain/entities/Role'
@@ -879,8 +882,22 @@ describe('CompleteSecondFactor', () => {
     }
 
     await expect(
-      harness.mfaEvidence.isValidFor(outcome.subject, `jti-${outcome.accessToken}`, AHORA),
+      harness.mfaEvidence.isValidFor(
+        outcome.subject,
+        `jti-${outcome.accessToken}`,
+        SecondFactorMethod.AuthenticatorApp,
+        AHORA,
+      ),
     ).resolves.toBe(true)
+
+    await expect(
+      harness.mfaEvidence.isValidFor(
+        outcome.subject,
+        `jti-${outcome.accessToken}`,
+        SecondFactorMethod.Email,
+        AHORA,
+      ),
+    ).resolves.toBe(false)
   })
 
   /**

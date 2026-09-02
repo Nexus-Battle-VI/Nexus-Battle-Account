@@ -6,6 +6,7 @@ import { AppModule } from '../../src/infrastructure/bootstrap/app.module'
 import { MFA_EVIDENCE_REPOSITORY } from '../../src/application/ports/MfaEvidenceRepositoryPort'
 import type { MfaEvidenceRepositoryPort } from '../../src/application/ports/MfaEvidenceRepositoryPort'
 import { MfaEvidence } from '../../src/domain/entities/MfaEvidence'
+import { SecondFactorMethod } from '../../src/domain/entities/SecondFactorMethod'
 import {
   INTERNAL_SERVICE_HEADER,
   INTERNAL_SIGNATURE_HEADER,
@@ -18,6 +19,7 @@ const SECRETO = 'secreto-de-pruebas-no-usado-en-ningun-entorno'
 const RUTA = '/api/internal/mfa-evidence/verification'
 const SUJETO = 'sujeto-con-segundo-factor'
 const JTI = 'jti-del-testimonio'
+const METODO = SecondFactorMethod.AuthenticatorApp
 
 const firmar = (
   body: unknown,
@@ -73,6 +75,7 @@ describe('Contrato interno de evidencia de segundo factor', () => {
       MfaEvidence.create({
         subject: SUJETO,
         jti: JTI,
+        method: METODO,
         expiresAt: new Date(Date.now() + 900_000),
         verifiedAt: new Date(),
       }),
@@ -80,7 +83,7 @@ describe('Contrato interno de evidencia de segundo factor', () => {
   })
 
   it('responde valid=true con evidencia vigente y firma correcta', async () => {
-    const body = { subject: SUJETO, jti: JTI }
+    const body = { subject: SUJETO, jti: JTI, method: METODO }
 
     const response = await request(app.getHttpServer()).post(RUTA).set(firmar(body)).send(body)
 
@@ -97,12 +100,13 @@ describe('Contrato interno de evidencia de segundo factor', () => {
       MfaEvidence.create({
         subject: 'sujeto-caducado',
         jti: 'jti-caducado',
+        method: METODO,
         expiresAt: new Date(Date.now() - 1_000),
         verifiedAt: new Date(Date.now() - 900_000),
       }),
     )
 
-    const body = { subject: 'sujeto-caducado', jti: 'jti-caducado' }
+    const body = { subject: 'sujeto-caducado', jti: 'jti-caducado', method: METODO }
 
     const response = await request(app.getHttpServer()).post(RUTA).set(firmar(body)).send(body)
 
@@ -115,7 +119,7 @@ describe('Contrato interno de evidencia de segundo factor', () => {
    * testimonio posterior nacido sin segundo factor heredaria la evidencia.
    */
   it('responde valid=false para el mismo sujeto con otro jti', async () => {
-    const body = { subject: SUJETO, jti: 'jti-de-otro-testimonio' }
+    const body = { subject: SUJETO, jti: 'jti-de-otro-testimonio', method: METODO }
 
     const response = await request(app.getHttpServer()).post(RUTA).set(firmar(body)).send(body)
 
@@ -123,7 +127,7 @@ describe('Contrato interno de evidencia de segundo factor', () => {
   })
 
   it('responde valid=false para el mismo jti con otro sujeto', async () => {
-    const body = { subject: 'otro-sujeto', jti: JTI }
+    const body = { subject: 'otro-sujeto', jti: JTI, method: METODO }
 
     const response = await request(app.getHttpServer()).post(RUTA).set(firmar(body)).send(body)
 
@@ -133,13 +137,13 @@ describe('Contrato interno de evidencia de segundo factor', () => {
   it('rechaza una llamada sin autenticacion entre servicios', async () => {
     const response = await request(app.getHttpServer())
       .post(RUTA)
-      .send({ subject: SUJETO, jti: JTI })
+      .send({ subject: SUJETO, jti: JTI, method: METODO })
 
     expect(response.status).toBe(401)
   })
 
   it('rechaza una firma incorrecta', async () => {
-    const body = { subject: SUJETO, jti: JTI }
+    const body = { subject: SUJETO, jti: JTI, method: METODO }
 
     const response = await request(app.getHttpServer())
       .post(RUTA)
@@ -153,7 +157,7 @@ describe('Contrato interno de evidencia de segundo factor', () => {
    * Sin ventana de tiempo, una peticion firmada capturada valdria para siempre.
    */
   it('rechaza un sello de tiempo fuera de la ventana', async () => {
-    const body = { subject: SUJETO, jti: JTI }
+    const body = { subject: SUJETO, jti: JTI, method: METODO }
     const viejo = String(Date.now() - 600_000)
 
     const response = await request(app.getHttpServer())
@@ -165,7 +169,7 @@ describe('Contrato interno de evidencia de segundo factor', () => {
   })
 
   it('rechaza un servicio que no esta en la lista permitida', async () => {
-    const body = { subject: SUJETO, jti: JTI }
+    const body = { subject: SUJETO, jti: JTI, method: METODO }
 
     const response = await request(app.getHttpServer())
       .post(RUTA)
@@ -182,8 +186,8 @@ describe('Contrato interno de evidencia de segundo factor', () => {
    * podria reutilizar una firma legitima cambiando a quien consulta.
    */
   it('rechaza una firma valida para OTRO cuerpo', async () => {
-    const firmado = { subject: SUJETO, jti: JTI }
-    const enviado = { subject: 'sujeto-suplantado', jti: JTI }
+    const firmado = { subject: SUJETO, jti: JTI, method: METODO }
+    const enviado = { subject: 'sujeto-suplantado', jti: JTI, method: METODO }
 
     const response = await request(app.getHttpServer())
       .post(RUTA)
@@ -199,5 +203,34 @@ describe('Contrato interno de evidencia de segundo factor', () => {
     const response = await request(app.getHttpServer()).post(RUTA).set(firmar(body)).send(body)
 
     expect(response.status).toBe(400)
+  })
+
+  it('responde valid=false cuando el metodo no coincide con la evidencia', async () => {
+    const body = { subject: SUJETO, jti: JTI, method: SecondFactorMethod.Email }
+
+    const response = await request(app.getHttpServer()).post(RUTA).set(firmar(body)).send(body)
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ valid: false })
+  })
+
+  it('rechaza un metodo fuera del catalogo cerrado', async () => {
+    const body = { subject: SUJETO, jti: JTI, method: 'PUSH' }
+
+    const response = await request(app.getHttpServer()).post(RUTA).set(firmar(body)).send(body)
+
+    expect(response.status).toBe(400)
+  })
+
+  it('rechaza una firma valida para otro metodo', async () => {
+    const firmado = { subject: SUJETO, jti: JTI, method: METODO }
+    const enviado = { subject: SUJETO, jti: JTI, method: SecondFactorMethod.Email }
+
+    const response = await request(app.getHttpServer())
+      .post(RUTA)
+      .set(firmar(firmado))
+      .send(enviado)
+
+    expect(response.status).toBe(401)
   })
 })

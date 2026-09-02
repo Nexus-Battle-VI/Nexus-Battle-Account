@@ -1,4 +1,5 @@
 import { MfaEvidence } from '../../domain/entities/MfaEvidence'
+import type { SecondFactorMethod } from '../../domain/entities/SecondFactorMethod'
 import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
 import {
   AuthenticationProviderError,
@@ -87,7 +88,7 @@ export class CompleteSecondFactor {
       return { kind: 'secondFactorInvalid' }
     }
 
-    const recorded = await this.recordEvidence(outcome.accessToken, account.subject)
+    const recorded = await this.recordEvidence(outcome.accessToken, account.subject, outcome.method)
 
     if (!recorded) {
       return { kind: 'providerUnavailable' }
@@ -119,7 +120,11 @@ export class CompleteSecondFactor {
    * `providerUnavailable`, que es lo que es —no se pudo completar el inicio de
    * sesion de forma seria— y no un codigo invalido, que culparia a la persona.
    */
-  private async recordEvidence(accessToken: string, expectedSubject: string): Promise<boolean> {
+  private async recordEvidence(
+    accessToken: string,
+    expectedSubject: string,
+    method: SecondFactorMethod,
+  ): Promise<boolean> {
     let identity
 
     try {
@@ -152,6 +157,7 @@ export class CompleteSecondFactor {
         MfaEvidence.create({
           subject: identity.subject,
           jti: identity.jti,
+          method,
           expiresAt: identity.expiresAt,
           verifiedAt: this.deps.clock.now(),
         }),

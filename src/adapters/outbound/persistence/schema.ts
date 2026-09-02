@@ -1,4 +1,5 @@
 import type { Generated } from 'kysely'
+import type { SecondFactorMethod } from '../../../domain/entities/SecondFactorMethod'
 
 /**
  * Esquema de la base de datos de Account, tipado para Kysely.
@@ -107,6 +108,7 @@ export interface RecoveryChallengesTable {
 export interface MfaEvidencesTable {
   readonly subject: string
   readonly jti: string
+  readonly method: SecondFactorMethod
   readonly expires_at: Date
   readonly verified_at: Generated<Date>
 }
