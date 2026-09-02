@@ -8,6 +8,7 @@
 export const REGISTER_ACCOUNT = Symbol('RegisterAccount')
 export const GET_ACCOUNT = Symbol('GetAccount')
 export const GET_OWN_ACCOUNT = Symbol('GetOwnAccount')
+export const GET_OWN_PERSONAL_DATA = Symbol('GetOwnPersonalData')
 export const UPDATE_OWN_ACCOUNT = Symbol('UpdateOwnAccount')
 export const CHANGE_OWN_PASSWORD = Symbol('ChangeOwnPassword')
 export const VERIFY_ACCOUNT = Symbol('VerifyAccount')

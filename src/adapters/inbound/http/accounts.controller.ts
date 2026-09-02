@@ -45,10 +45,12 @@ import { MfaStatusError } from '../../../application/ports/MfaStatusPort'
 import { SessionRevocationError } from '../../../application/ports/SessionRevocationPort'
 import { IdentitySignUpError } from '../../../application/ports/IdentitySignUpPort'
 import type { RegisterSecurityAnswer } from '../../../application/dto/RegisterAccountCommand'
+import type { OwnPersonalDataDto } from '../../../application/dto/OwnPersonalDataDto'
 import { RegisterAccount } from '../../../application/use-cases/RegisterAccount'
 import { ConfirmRegistration } from '../../../application/use-cases/ConfirmRegistration'
 import { GetAccount } from '../../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
+import { GetOwnPersonalData } from '../../../application/use-cases/GetOwnPersonalData'
 import { UpdateOwnAccount } from '../../../application/use-cases/UpdateOwnAccount'
 import { ListAdminAccounts } from '../../../application/use-cases/ListAdminAccounts'
 import { ExportAdminAccounts } from '../../../application/use-cases/ExportAdminAccounts'
@@ -64,6 +66,7 @@ import {
   REGISTER_ACCOUNT,
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
+  GET_OWN_PERSONAL_DATA,
   UPDATE_OWN_ACCOUNT,
   VERIFY_ACCOUNT,
   CONFIRM_REGISTRATION,
@@ -82,6 +85,7 @@ import {
   FindAccountByEmailQuery,
   ListAdminAccountsQuery,
   ManagedAccountResponse,
+  OwnPersonalDataResponse,
   RegisterAccountRequest,
   UpdateOwnAccountRequest,
 } from './accounts.dto'
@@ -101,6 +105,7 @@ export class AccountsController {
     @Inject(REGISTER_ACCOUNT) private readonly registerAccount: RegisterAccount,
     @Inject(GET_ACCOUNT) private readonly getAccount: GetAccount,
     @Inject(GET_OWN_ACCOUNT) private readonly getOwnAccount: GetOwnAccount,
+    @Inject(GET_OWN_PERSONAL_DATA) private readonly getOwnPersonalData: GetOwnPersonalData,
     @Inject(UPDATE_OWN_ACCOUNT) private readonly updateOwnAccount: UpdateOwnAccount,
     @Inject(LIST_ADMIN_ACCOUNTS) private readonly listAdminAccounts: ListAdminAccounts,
     @Inject(EXPORT_ADMIN_ACCOUNTS) private readonly exportAdminAccounts: ExportAdminAccounts,
@@ -246,6 +251,25 @@ export class AccountsController {
   async findOwn(@CurrentIdentity() identity: VerifiedIdentity): Promise<AccountResponse> {
     try {
       return await this.getOwnAccount.execute(identity.subject)
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  @Get('me/privacy')
+  @ApiOperation({ summary: 'Consulta los datos personales del titular (HU-45.1)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Datos personales consultables por el titular',
+    type: OwnPersonalDataResponse,
+  })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
+  @ApiResponse({ status: 404, description: 'El sujeto no tiene cuenta en este servicio' })
+  async findOwnPersonalData(
+    @CurrentIdentity() identity: VerifiedIdentity,
+  ): Promise<OwnPersonalDataDto> {
+    try {
+      return await this.getOwnPersonalData.execute(identity.subject)
     } catch (error: unknown) {
       throw AccountsController.translate(error)
     }

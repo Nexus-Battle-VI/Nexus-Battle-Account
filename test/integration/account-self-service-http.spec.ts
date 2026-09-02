@@ -63,6 +63,14 @@ const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
     jti: null,
     expiresAt: null,
   },
+  // Testimonio valido sin cuenta local asociada: HU-45.1 debe cerrar con 404
+  // generico y sin filtrar el subject del proveedor de identidad.
+  'token-sin-cuenta': {
+    subject: 'sub:sin-cuenta@nexus.test',
+    roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
+  },
 }
 
 const stubVerifier: TokenVerifierPort = {
@@ -80,6 +88,7 @@ const bearer = (token: string): string => `Bearer ${token}`
 describe('API self-service de la cuenta propia (HU-05)', () => {
   let app: INestApplication
   let previousEnv: Record<string, string | undefined>
+  let beatrizAccountId: string
   const passwords = new InMemoryPasswordChange()
 
   beforeAll(async () => {
@@ -134,7 +143,11 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
 
     // Usuario B (CA-08): segunda cuenta poblada y autenticable, creada por el
     // mismo alta publica (`sub:beatriz@nexus.test`).
-    await registerAccountRequest(app, { email: 'beatriz@nexus.test', nickname: 'Beatriz Lopez' })
+    const beatriz = await registerAccountRequest(app, {
+      email: 'beatriz@nexus.test',
+      nickname: 'Beatriz Lopez',
+    })
+    beatrizAccountId = String(beatriz.body.id)
 
     // Cuenta SUSPENDIDA (CA-01): se restaura activa y se suspende a traves del
     // propio agregado, ya que no hay endpoint publico que suspenda.
@@ -167,6 +180,89 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
     request(app.getHttpServer())
       .get('/api/accounts/me')
       .set('authorization', bearer('token-jugador'))
+
+  const getOwnPrivacy = (token = 'token-jugador') =>
+    request(app.getHttpServer()).get('/api/accounts/me/privacy').set('authorization', bearer(token))
+
+  describe('GET /api/accounts/me/privacy', () => {
+    it('devuelve los datos personales permitidos del titular autenticado', async () => {
+      const response = await getOwnPrivacy()
+
+      expect(response.status).toBe(200)
+      expect(response.body).toEqual({
+        email: 'ana@nexus.test',
+        displayName: 'Ana Ramirez',
+        firstNames: 'Ana',
+        lastNames: 'Ramirez',
+        roles: [Role.Player],
+        termsAccepted: true,
+      })
+    })
+
+    it('responde 401 sin testimonio', async () => {
+      const response = await request(app.getHttpServer()).get('/api/accounts/me/privacy')
+
+      expect(response.status).toBe(401)
+    })
+
+    it('resuelve siempre la cuenta del subject del JWT y mantiene aislamiento A/B', async () => {
+      const a = await getOwnPrivacy('token-jugador')
+      const b = await getOwnPrivacy('token-jugador-b')
+
+      expect(a.status).toBe(200)
+      expect(b.status).toBe(200)
+      expect(a.body).toMatchObject({ email: 'ana@nexus.test' })
+      expect(b.body).toMatchObject({ email: 'beatriz@nexus.test' })
+      expect(JSON.stringify(a.body)).not.toContain('beatriz@nexus.test')
+      expect(JSON.stringify(b.body)).not.toContain('ana@nexus.test')
+    })
+
+    it('ignora accountId en query y no permite leer otra cuenta', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/accounts/me/privacy?accountId=${beatrizAccountId}`)
+        .set('authorization', bearer('token-jugador'))
+
+      expect(response.status).toBe(200)
+      expect(response.body).toMatchObject({ email: 'ana@nexus.test' })
+      expect(JSON.stringify(response.body)).not.toContain('beatriz@nexus.test')
+    })
+
+    it('no expone campos sensibles ni internos', async () => {
+      const response = await getOwnPrivacy()
+
+      expect(response.status).toBe(200)
+      expect(Object.keys(response.body).sort()).toEqual([
+        'displayName',
+        'email',
+        'firstNames',
+        'lastNames',
+        'roles',
+        'termsAccepted',
+      ])
+      for (const field of [
+        'id',
+        'subject',
+        'status',
+        'avatarStorageKey',
+        'password',
+        'token',
+        'secret',
+        'hash',
+        'credential',
+      ]) {
+        expect(response.body).not.toHaveProperty(field)
+      }
+    })
+
+    it('responde 404 sin filtrar el subject cuando el testimonio no tiene cuenta local', async () => {
+      const response = await getOwnPrivacy('token-sin-cuenta')
+
+      expect(response.status).toBe(404)
+      expect(JSON.stringify(response.body)).not.toContain('sub:sin-cuenta@nexus.test')
+      expect(JSON.stringify(response.body)).not.toContain('ana@nexus.test')
+      expect(JSON.stringify(response.body)).not.toContain('beatriz@nexus.test')
+    })
+  })
 
   describe('PATCH /api/accounts/me', () => {
     it('responde 401 sin testimonio', async () => {

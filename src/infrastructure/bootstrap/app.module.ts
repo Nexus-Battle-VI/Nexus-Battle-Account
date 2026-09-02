@@ -21,6 +21,7 @@ import {
   COMPLETE_SECOND_FACTOR,
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
+  GET_OWN_PERSONAL_DATA,
   UPDATE_OWN_ACCOUNT,
   CHANGE_OWN_PASSWORD,
   LOGIN_ACCOUNT,
@@ -50,6 +51,7 @@ import { EnrollTotp } from '../../application/use-cases/EnrollTotp'
 import { ConfirmTotpEnrollment } from '../../application/use-cases/ConfirmTotpEnrollment'
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
+import { GetOwnPersonalData } from '../../application/use-cases/GetOwnPersonalData'
 import { UpdateOwnAccount } from '../../application/use-cases/UpdateOwnAccount'
 import { ChangeOwnPassword } from '../../application/use-cases/ChangeOwnPassword'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
@@ -618,6 +620,12 @@ export const DATABASE = Symbol('Database')
     {
       provide: GET_OWN_ACCOUNT,
       useFactory: (accounts: AccountRepositoryPort): GetOwnAccount => new GetOwnAccount(accounts),
+      inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: GET_OWN_PERSONAL_DATA,
+      useFactory: (accounts: AccountRepositoryPort): GetOwnPersonalData =>
+        new GetOwnPersonalData(accounts),
       inject: [ACCOUNT_REPOSITORY],
     },
     {

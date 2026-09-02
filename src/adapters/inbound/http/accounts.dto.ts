@@ -21,6 +21,7 @@ import {
 import { Role, type Role as RoleValue } from '../../../domain/entities/Role'
 import { DisplayName } from '../../../domain/value-objects/DisplayName'
 import type { AdminAccountStatusCountsDto } from '../../../application/dto/AdminAccountSummaryDto'
+import type { OwnPersonalDataDto } from '../../../application/dto/OwnPersonalDataDto'
 
 const ACCOUNT_STATUS_VALUES = Object.values(AccountStatus)
 
@@ -110,6 +111,26 @@ export class AccountResponse {
 
   @ApiProperty({ example: ['PLAYER'], isArray: true, type: String })
   readonly roles!: readonly string[]
+}
+
+export class OwnPersonalDataResponse implements OwnPersonalDataDto {
+  @ApiProperty({ example: 'jugador@nexus.test' })
+  readonly email!: string
+
+  @ApiProperty({ example: 'Ana Ramirez' })
+  readonly displayName!: string
+
+  @ApiProperty({ example: 'Ana' })
+  readonly firstNames!: string
+
+  @ApiProperty({ example: 'Ramirez' })
+  readonly lastNames!: string
+
+  @ApiProperty({ example: ['PLAYER'], isArray: true, type: String })
+  readonly roles!: readonly string[]
+
+  @ApiProperty({ example: true })
+  readonly termsAccepted!: boolean
 }
 
 /**
