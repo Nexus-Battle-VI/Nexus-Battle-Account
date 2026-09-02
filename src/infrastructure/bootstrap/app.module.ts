@@ -639,7 +639,10 @@ export const DATABASE = Symbol('Database')
 
         logger.info('identity_password_reset', { driver: 'cognito' })
 
-        return new CognitoIdentityPasswordReset({ userPoolId: config.cognito.userPoolId })
+        return new CognitoIdentityPasswordReset({
+          userPoolId: config.cognito.userPoolId,
+          logger,
+        })
       },
       inject: [AUTHENTICATION_PROVIDER, APP_CONFIG, LOGGER],
     },
