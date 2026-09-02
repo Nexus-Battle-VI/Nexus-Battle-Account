@@ -9,6 +9,7 @@ import type { Role } from '../../../../domain/entities/Role'
 import type { VerifiedIdentity } from '../../../../application/ports/TokenVerifierPort'
 
 export const IS_PUBLIC = 'auth:public'
+export const IS_INTERNAL = 'auth:internal'
 export const REQUIRED_ROLES = 'auth:roles'
 
 /**
@@ -20,6 +21,15 @@ export const REQUIRED_ROLES = 'auth:roles'
  * olvido no falla ninguna prueba.
  */
 export const Public = (): MethodDecorator & ClassDecorator => SetMetadata(IS_PUBLIC, true)
+
+/**
+ * Marca una ruta como parte del contrato INTERNO entre servicios.
+ *
+ * No la invoca una persona: la invoca otro servicio, que lo demuestra firmando
+ * la peticion. Se combina con `@Public()`, que excluye la ruta del guard de
+ * testimonios de usuario; la proteccion la aporta `InternalServiceGuard`.
+ */
+export const InternalOnly = (): MethodDecorator & ClassDecorator => SetMetadata(IS_INTERNAL, true)
 
 /** Exige que el testimonio incluya al menos uno de los roles indicados. */
 export const Roles = (...roles: readonly Role[]): MethodDecorator & ClassDecorator =>

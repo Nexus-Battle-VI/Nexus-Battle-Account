@@ -86,9 +86,39 @@ export interface AppConfig {
   readonly corsOrigins: readonly string[]
   /** Ingest local de Notifications (`POST /dev/enqueue`). Vacio = solo log. */
   readonly notificationsIngestUrl: string | null
+  /**
+   * Secreto compartido del contrato interno entre servicios.
+   *
+   * Sin el, el guard interno NIEGA con 503 en lugar de dejar pasar: un
+   * despliegue incompleto no debe convertirse en un endpoint interno abierto.
+   */
+  readonly internalServiceAuthSecret: string | null
+  /** Servicios autorizados a invocar el contrato interno. */
+  readonly internalServiceAllowed: readonly string[]
 }
 
 type RawEnv = Readonly<Record<string, string | undefined>>
+
+/**
+ * Servicios autorizados a firmar peticiones internas.
+ *
+ * La lista por defecto contiene `catalog` porque es el unico consumidor
+ * previsto hoy. Declararla vacia por defecto obligaria a configurarla en todos
+ * los entornos para que el contrato funcionara, y el sintoma -401 sin motivo
+ * visible- seria dificil de atribuir.
+ */
+const readAllowedServices = (env: RawEnv): readonly string[] => {
+  const raw = env.INTERNAL_SERVICE_ALLOWED_SERVICES
+
+  if (raw === undefined || raw.trim().length === 0) {
+    return ['catalog']
+  }
+
+  return raw
+    .split(',')
+    .map((service) => service.trim().toLowerCase())
+    .filter((service) => service.length > 0)
+}
 
 const readEnum = <T extends string>(
   env: RawEnv,
@@ -279,5 +309,7 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     avatarStoragePath: readString(env, 'AVATAR_STORAGE_PATH', './data/avatars'),
     corsOrigins: readCorsOrigins(env, nodeEnv),
     notificationsIngestUrl: readString(env, 'NOTIFICATIONS_INGEST_URL', '') || null,
+    internalServiceAuthSecret: readString(env, 'INTERNAL_SERVICE_AUTH_SECRET', '') || null,
+    internalServiceAllowed: readAllowedServices(env),
   }
 }
