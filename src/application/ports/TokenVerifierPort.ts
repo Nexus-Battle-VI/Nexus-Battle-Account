@@ -17,6 +17,29 @@ export interface VerifiedIdentity {
 
   /** Roles reconocidos. Los grupos desconocidos se descartan. */
   readonly roles: ReadonlySet<Role>
+
+  /**
+   * `jti` del testimonio: identifica ESTE token, no a la persona.
+   *
+   * Es lo que permite ligar la evidencia de segundo factor a un testimonio
+   * concreto en lugar de a la cuenta. Ligarla a la cuenta convertiria una
+   * prueba de sesion en un atributo duradero, y un testimonio posterior nacido
+   * sin segundo factor heredaria la prueba del anterior.
+   *
+   * `null` cuando no hay testimonio del que extraerlo: es el caso de la
+   * identidad anonima, que solo existe sin proveedor configurado.
+   */
+  readonly jti: string | null
+
+  /**
+   * `exp` del testimonio, ya convertido a fecha.
+   *
+   * La evidencia de segundo factor toma de aqui su vigencia. NO se deriva de
+   * una constante: hoy Cognito emite tokens de quince minutos, asi que
+   * codificar ese numero acertaria y se desincronizaria en silencio el dia que
+   * la configuracion cambie.
+   */
+  readonly expiresAt: Date | null
 }
 
 export interface TokenVerifierPort {

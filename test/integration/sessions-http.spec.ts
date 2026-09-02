@@ -48,22 +48,52 @@ const FIXED_IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
   'token-registro': {
     subject: 'sujeto-registro',
     roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
   },
   'token-administrador-verificador': {
     subject: 'sujeto-admin-verificador',
     roles: new Set([Role.Player, Role.Administrator]),
+    jti: null,
+    expiresAt: null,
   },
 }
 
 const dynamicIdentities = new Map<string, VerifiedIdentity>()
 
+/**
+ * Sujeto al que pertenecen los testimonios que emite el proveedor falso.
+ *
+ * Lo fija el ayudante que siembra la cuenta administrativa. Existe porque el
+ * token lo acuna el proveedor DURANTE la peticion, asi que no puede registrarse
+ * de antemano en `dynamicIdentities`, y `CompleteSecondFactor` verifica ese
+ * mismo token para dejar evidencia del segundo factor.
+ */
+let sujetoEmisor: string | null = null
+
 const stubVerifier: TokenVerifierPort = {
   verify: (token: string): Promise<VerifiedIdentity> => {
     const identity = FIXED_IDENTITIES[token] ?? dynamicIdentities.get(token)
 
-    return identity === undefined
-      ? Promise.reject(new TokenVerificationError())
-      : Promise.resolve(identity)
+    if (identity !== undefined) {
+      return Promise.resolve(identity)
+    }
+
+    // SOLO los testimonios acunados por el proveedor falso. Un token cualquiera
+    // debe seguir siendo invalido: si el respaldo aceptara todo, la prueba de
+    // que un token desconocido responde 401 pasaria por construccion.
+    if (sujetoEmisor === null || !token.startsWith('fake-access-token-')) {
+      return Promise.reject(new TokenVerificationError())
+    }
+
+    // `jti` derivado del token: distinto por testimonio, que es la propiedad
+    // de la que depende la evidencia de segundo factor.
+    return Promise.resolve({
+      subject: sujetoEmisor,
+      roles: new Set([Role.Player, Role.Administrator]),
+      jti: `jti-${token}`,
+      expiresAt: new Date(Date.now() + 900_000),
+    })
   },
 }
 
@@ -166,6 +196,7 @@ describe('API de sesiones (HU-02, HU-03)', () => {
         roles: [Role.Player, role],
       }),
     )
+    sujetoEmisor = `sujeto-${email}`
     authProvider.seed({ email, password, requiresSecondFactor: true, secondFactorCode: '123456' })
   }
 
@@ -277,6 +308,8 @@ describe('API de sesiones (HU-02, HU-03)', () => {
     dynamicIdentities.set(accessToken, {
       subject,
       roles: new Set([Role.Player]),
+      jti: null,
+      expiresAt: null,
     })
 
     const own = await request(app.getHttpServer())
@@ -379,7 +412,12 @@ describe('API de sesiones (HU-02, HU-03)', () => {
       expect(typeof token).toBe('string')
 
       // Registramos la identidad dinamica para que el guard reconozca el token emitido
-      dynamicIdentities.set(token, { subject, roles: new Set([Role.Player]) })
+      dynamicIdentities.set(token, {
+        subject,
+        roles: new Set([Role.Player]),
+        jti: null,
+        expiresAt: null,
+      })
 
       const response = await request(app.getHttpServer())
         .delete('/api/sessions')
@@ -406,7 +444,12 @@ describe('API de sesiones (HU-02, HU-03)', () => {
     it('DELETE /api/sessions responde 503 Service Unavailable cuando falla el proveedor de revocacion', async () => {
       const subject = 'sujeto-fallo-proveedor'
       const token = 'token-fallo-proveedor'
-      dynamicIdentities.set(token, { subject, roles: new Set([Role.Player]) })
+      dynamicIdentities.set(token, {
+        subject,
+        roles: new Set([Role.Player]),
+        jti: null,
+        expiresAt: null,
+      })
 
       const spy = jest
         .spyOn(sessionRevocation, 'globalSignOut')

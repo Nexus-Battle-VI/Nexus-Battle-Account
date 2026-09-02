@@ -65,9 +65,18 @@ describe('Traduccion del token a identidad verificada', () => {
       scope: 'aws.cognito.signin.user.admin',
       username: 'sujeto-1',
       'cognito:groups': ['PLAYER'],
+      jti: 'jti-1',
+      exp: 1_700_000_000,
     })
 
-    expect(identity).toEqual({ subject: 'sujeto-1', roles: new Set([Role.Player]) })
+    expect(identity).toEqual({
+      subject: 'sujeto-1',
+      roles: new Set([Role.Player]),
+      jti: 'jti-1',
+      // `exp` es NumericDate en segundos: la conversion a milisegundos es
+      // obligatoria, y sin ella toda evidencia naceria caducada en 1970.
+      expiresAt: new Date(1_700_000_000_000),
+    })
   })
 
   /**
@@ -94,6 +103,8 @@ describe('JwtAuthGuard', () => {
   const identity: VerifiedIdentity = {
     subject: 'sujeto-1',
     roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
   }
 
   const verifier = (impl: TokenVerifierPort['verify']): TokenVerifierPort => ({ verify: impl })
@@ -190,6 +201,8 @@ describe('CurrentIdentity', () => {
     const identity: VerifiedIdentity = {
       subject: 'sujeto-1',
       roles: new Set([Role.Player]),
+      jti: null,
+      expiresAt: null,
     }
 
     expect(resolve({ headers: {}, identity })).toBe(identity)
@@ -204,6 +217,8 @@ describe('RolesGuard', () => {
   const identityWith = (...roles: readonly Role[]): VerifiedIdentity => ({
     subject: 's',
     roles: new Set(roles),
+    jti: null,
+    expiresAt: null,
   })
 
   it('deja pasar cuando la ruta no exige ningun rol', () => {

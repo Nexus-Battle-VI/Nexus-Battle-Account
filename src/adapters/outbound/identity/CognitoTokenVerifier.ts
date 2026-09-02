@@ -80,7 +80,35 @@ export const toVerifiedIdentity = (payload: Record<string, unknown>): VerifiedId
   return {
     subject,
     roles: readRoles(payload),
+    jti: readJti(payload),
+    expiresAt: readExpiry(payload),
   }
+}
+
+/**
+ * `jti` del testimonio. Ausente o mal formado se traduce a `null`, no a cadena
+ * vacia: una cadena vacia compartida por dos testimonios los haria equivalentes
+ * a ojos de la evidencia de segundo factor.
+ */
+const readJti = (payload: Record<string, unknown>): string | null => {
+  const jti = payload.jti
+
+  return typeof jti === 'string' && jti.length > 0 ? jti : null
+}
+
+/**
+ * `exp` viene como NumericDate: segundos desde la epoca, no milisegundos.
+ * Multiplicar es obligatorio; olvidarlo situaria toda expiracion en 1970 y
+ * cualquier evidencia naceria caducada.
+ */
+const readExpiry = (payload: Record<string, unknown>): Date | null => {
+  const exp = payload.exp
+
+  if (typeof exp !== 'number' || !Number.isFinite(exp)) {
+    return null
+  }
+
+  return new Date(exp * 1000)
 }
 
 /**
