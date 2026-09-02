@@ -5,11 +5,19 @@ import type {
 import type { Logger } from '../../../infrastructure/observability/logger'
 
 /**
- * Publica la solicitud de notificacion hacia el ingest local de Notifications.
+ * Publica la solicitud de notificacion hacia el ingest de Notifications.
  *
- * Solo para desarrollo: el worker no expone API de negocio en produccion.
- * Si el ingest no responde, se registra el fallo y no se interrumpe el caso
- * de uso (el codigo de recuperacion ya quedo emitido).
+ * El ingest existe desde que ADR-006 se resolvio a favor de la ingesta HTTP:
+ * Notifications levanta un servidor dedicado con `INGEST_ENABLED=true`, sin
+ * publicar puerto al anfitrion, de modo que solo es alcanzable desde la red
+ * interna. Se activa aqui definiendo `NOTIFICATIONS_INGEST_URL`; sin esa
+ * variable se sigue usando `LoggingNotificationRequester`.
+ *
+ * LOS FALLOS SE TRAGAN A PROPOSITO: si el ingest no responde, se registra y el
+ * caso de uso continua. Un registro no debe fracasar porque el correo falle, y
+ * el codigo de recuperacion ya quedo emitido y persistido. La contrapartida es
+ * que **un fallo de entrega no se ve en la respuesta HTTP**: se ve en el log,
+ * como `notification_ingest_rejected` o `notification_ingest_failed`.
  */
 export class HttpNotificationRequester implements NotificationRequestPort {
   constructor(
