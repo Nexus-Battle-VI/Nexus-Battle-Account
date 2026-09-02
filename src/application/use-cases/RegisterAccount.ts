@@ -5,8 +5,7 @@ import { DisplayName } from '../../domain/value-objects/DisplayName'
 import { EmailAddress } from '../../domain/value-objects/EmailAddress'
 import { PersonName } from '../../domain/value-objects/PersonName'
 import { DomainError } from '../../domain/errors/DomainError'
-import type { AccountRepositoryPort, PrivacyConsentRecord } from '../ports/AccountRepositoryPort'
-import type { ApplicablePrivacyPolicyPort } from '../ports/ApplicablePrivacyPolicyPort'
+import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
 import type { AvatarStoragePort } from '../ports/AvatarStoragePort'
 import type { ClockPort } from '../ports/ClockPort'
 import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
@@ -34,7 +33,6 @@ export interface RegisterAccountDependencies {
   readonly questions: SecurityQuestionCatalogPort
   readonly roleDirectory: RoleDirectoryPort
   readonly identitySignUp: IdentitySignUpPort
-  readonly applicablePrivacyPolicy: ApplicablePrivacyPolicyPort
 }
 
 /**
@@ -93,20 +91,6 @@ export class RegisterAccount {
       throw new DomainError('El registro exige aceptar los terminos y condiciones.')
     }
 
-    // EN-011, CA-02: la version que Web presento debe existir y ser
-    // reconocida como aplicable HOY (ver `ApplicablePrivacyPolicyPort`). No se
-    // acepta cualquier cadena que envie el cliente: Account decide, igual que
-    // decide el rol, no confia en lo que llega.
-    if (command.privacyPolicyVersion.length === 0) {
-      throw new DomainError('El registro exige indicar la version de la Politica aceptada.')
-    }
-
-    if (!this.deps.applicablePrivacyPolicy.isApplicable(command.privacyPolicyVersion)) {
-      throw new DomainError(
-        `La version de Politica "${command.privacyPolicyVersion}" no es la version aplicable.`,
-      )
-    }
-
     const hashedAnswers = await this.hashRequiredAnswers(command)
     const avatarUpload = command.avatar
 
@@ -136,10 +120,6 @@ export class RegisterAccount {
     const accountId = AccountId.create(this.deps.ids.generate())
     let storedKey: string | null = null
     let account: Account
-    // Un unico instante para la cuenta y para el consentimiento: son parte del
-    // mismo hecho de registro, y leer el reloj dos veces solo introduciria una
-    // diferencia de microsegundos sin ningun significado de negocio.
-    const registeredAt = this.deps.clock.now()
 
     try {
       const stored = await this.deps.avatars.store({
@@ -166,7 +146,7 @@ export class RegisterAccount {
           sizeBytes: stored.sizeBytes,
           originalName: avatarUpload.originalName,
         }),
-        occurredAt: registeredAt,
+        occurredAt: this.deps.clock.now(),
       })
 
       // El reflejo va ANTES de persistir, y el orden es la decision.
@@ -182,13 +162,7 @@ export class RegisterAccount {
       // reintento lo absorbe, porque `reflect` es idempotente.
       await this.deps.roleDirectory.reflect(subject, account.currentRoles)
 
-      const consent: PrivacyConsentRecord = {
-        id: this.deps.ids.generate(),
-        policyVersion: command.privacyPolicyVersion,
-        acceptedAt: registeredAt,
-      }
-
-      await this.deps.accounts.saveRegistration(account, hashedAnswers, consent)
+      await this.deps.accounts.saveRegistration(account, hashedAnswers)
     } catch (error: unknown) {
       if (storedKey !== null) {
         await this.deps.avatars.remove(storedKey)

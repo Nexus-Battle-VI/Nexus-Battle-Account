@@ -17,7 +17,6 @@ export const registerAccountRequest = (
     password: VALID_PASSWORD,
     nickname: 'Ana Ramirez',
     termsAccepted: 'true',
-    privacyPolicyVersion: 'v0.3',
     securityAnswers: JSON.stringify(FOUR_ANSWERS),
     ...fields,
   }

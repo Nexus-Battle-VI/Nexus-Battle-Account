@@ -24,7 +24,6 @@ const config: Config = {
       ...shared,
       displayName: 'integration',
       testMatch: ['<rootDir>/test/integration/**/*.spec.ts'],
-      setupFiles: ['<rootDir>/test/support/integration-env.ts'],
     },
   ],
   // El adaptador de PostgreSQL y su infraestructura NO los ejercita esta suite:

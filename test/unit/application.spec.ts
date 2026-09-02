@@ -29,13 +29,10 @@ import {
 } from '../../src/application/ports/RoleDirectoryPort'
 import { AuthenticationProviderError } from '../../src/application/ports/AuthenticationProviderPort'
 import { InMemoryAvatarStorage } from '../../src/adapters/outbound/storage/InMemoryAvatarStorage'
-import { ConfiguredPrivacyPolicyVersion } from '../../src/adapters/outbound/policy/ConfiguredPrivacyPolicyVersion'
-import type { ApplicablePrivacyPolicyPort } from '../../src/application/ports/ApplicablePrivacyPolicyPort'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { Role } from '../../src/domain/entities/Role'
 import { DomainError } from '../../src/domain/errors/DomainError'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
-import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { AVATAR_MAX_BYTES } from '../../src/domain/value-objects/AvatarMetadata'
 import { hashSecurityAnswer } from '../../src/application/security/hashSecurityAnswer'
 import {
@@ -74,7 +71,6 @@ const buildHarness = (
     accounts?: AccountRepositoryPort
     roleDirectory?: RoleDirectoryPort
     identitySignUp?: IdentitySignUpPort
-    applicablePrivacyPolicy?: ApplicablePrivacyPolicyPort
   } = {},
 ): Harness => {
   const accounts = new InMemoryAccountRepository()
@@ -104,11 +100,6 @@ const buildHarness = (
       questions: new InMemorySecurityQuestionCatalog(),
       roleDirectory: overrides.roleDirectory ?? roleDirectory,
       identitySignUp: overrides.identitySignUp ?? identitySignUp,
-      // "v0.3" es la version reconocida SOLO en este arnes de pruebas -no
-      // representa ninguna decision sobre si v0.3 es la Politica legal
-      // vigente-. Ver ConfiguredPrivacyPolicyVersion y el .env.example.
-      applicablePrivacyPolicy:
-        overrides.applicablePrivacyPolicy ?? new ConfiguredPrivacyPolicyVersion('v0.3'),
     }),
     getAccount: new GetAccount(repository),
     verifyAccount: new VerifyAccount({ accounts: repository, clock }),
@@ -369,88 +360,6 @@ describe('RegisterAccount', () => {
         }),
       ),
     ).rejects.toThrow(/no puede superar/)
-  })
-
-  describe('consentimiento versionado de privacidad (EN-011, CA-02)', () => {
-    it('rechaza el registro sin version de Politica', async () => {
-      const harness = buildHarness()
-
-      await expect(
-        harness.registerAccount.execute(validCommand({ privacyPolicyVersion: '' })),
-      ).rejects.toThrow(/version de la Politica/)
-    })
-
-    it('rechaza una version que Account no reconoce como aplicable', async () => {
-      const harness = buildHarness()
-
-      await expect(
-        harness.registerAccount.execute(validCommand({ privacyPolicyVersion: 'v0.4' })),
-      ).rejects.toThrow(/no es la version aplicable/)
-    })
-
-    it('nunca acepta una version cuando el entorno no tiene ninguna configurada', async () => {
-      // El caso que EN-011 exige evitar: que exista privacy-policy-v0.3.md en
-      // Infrastructure no debe bastar para que "v0.3" se acepte aqui. Sin
-      // PRIVACY_POLICY_APPLICABLE_VERSION configurada, TODO se rechaza.
-      const harness = buildHarness({
-        applicablePrivacyPolicy: new ConfiguredPrivacyPolicyVersion(null),
-      })
-
-      await expect(
-        harness.registerAccount.execute(validCommand({ privacyPolicyVersion: 'v0.3' })),
-      ).rejects.toThrow(/no es la version aplicable/)
-    })
-
-    it('registra el consentimiento asociado a la cuenta, con acceptedAt del backend', async () => {
-      const harness = buildHarness()
-
-      const created = await harness.registerAccount.execute(command)
-      const consents = await harness.accounts.findPrivacyConsents(
-        (await harness.accounts.findByEmail(EmailAddress.create(created.email)))!.id,
-      )
-
-      expect(consents).toHaveLength(1)
-      expect(consents[0]?.policyVersion).toBe('v0.3')
-      // AT es el reloj fijo del arnes: si esto viniera de Web, el arnes no
-      // podria conocerlo de antemano. Viene de ClockPort, no del comando.
-      expect(consents[0]?.acceptedAt).toEqual(AT)
-    })
-
-    it('conserva el historial: una aceptacion anterior no se sobrescribe con la siguiente', async () => {
-      const harness = buildHarness()
-      const account = buildAccount()
-
-      await harness.accounts.saveRegistration(account, [], {
-        id: 'consent-1',
-        policyVersion: 'v0.3',
-        acceptedAt: new Date('2026-08-01T00:00:00.000Z'),
-      })
-      await harness.accounts.saveRegistration(account, [], {
-        id: 'consent-2',
-        policyVersion: 'v0.4',
-        acceptedAt: new Date('2026-09-01T00:00:00.000Z'),
-      })
-
-      const consents = await harness.accounts.findPrivacyConsents(account.id)
-
-      expect(consents).toHaveLength(2)
-      expect(consents.map((c) => c.policyVersion)).toEqual(['v0.3', 'v0.4'])
-    })
-
-    it('no deja consentimiento huerfano si falla la persistencia de la cuenta', async () => {
-      const failing = new InMemoryAccountRepository()
-      jest.spyOn(failing, 'saveRegistration').mockRejectedValue(new Error('almacen no disponible'))
-      const harness = buildHarness({ accounts: failing })
-
-      await expect(harness.registerAccount.execute(command)).rejects.toThrow(
-        'almacen no disponible',
-      )
-
-      // El doble en memoria nunca llego a escribir nada: ni cuenta, ni
-      // respuestas, ni consentimiento. Lo mismo que garantiza la transaccion
-      // de PostgreSQL en el adaptador real.
-      expect(await failing.findPrivacyConsents(AccountId.create('acc-1'))).toEqual([])
-    })
   })
 
   it('rechaza cuando falta una respuesta de seguridad', async () => {

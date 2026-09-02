@@ -85,7 +85,6 @@ import { ID_GENERATOR } from '../../application/ports/IdGeneratorPort'
 import { AVATAR_STORAGE } from '../../application/ports/AvatarStoragePort'
 import { NICKNAME_BLACKLIST } from '../../application/ports/NicknameBlacklistPort'
 import { SECURITY_QUESTION_CATALOG } from '../../application/ports/SecurityQuestionCatalogPort'
-import { APPLICABLE_PRIVACY_POLICY } from '../../application/ports/ApplicablePrivacyPolicyPort'
 import type { AccountRepositoryPort } from '../../application/ports/AccountRepositoryPort'
 import type { AuthenticationProviderPort } from '../../application/ports/AuthenticationProviderPort'
 import type { NotificationRequestPort } from '../../application/ports/NotificationRequestPort'
@@ -94,7 +93,6 @@ import type { IdGeneratorPort } from '../../application/ports/IdGeneratorPort'
 import type { AvatarStoragePort } from '../../application/ports/AvatarStoragePort'
 import type { NicknameBlacklistPort } from '../../application/ports/NicknameBlacklistPort'
 import type { SecurityQuestionCatalogPort } from '../../application/ports/SecurityQuestionCatalogPort'
-import type { ApplicablePrivacyPolicyPort } from '../../application/ports/ApplicablePrivacyPolicyPort'
 
 import { JwtAuthGuard } from '../../adapters/inbound/http/auth/jwt-auth.guard'
 import { RolesGuard } from '../../adapters/inbound/http/auth/roles.guard'
@@ -109,7 +107,6 @@ import { InMemoryNicknameBlacklist } from '../../adapters/outbound/persistence/I
 import { PostgresNicknameBlacklist } from '../../adapters/outbound/persistence/PostgresNicknameBlacklist'
 import { InMemorySecurityQuestionCatalog } from '../../adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
 import { PostgresSecurityQuestionCatalog } from '../../adapters/outbound/persistence/PostgresSecurityQuestionCatalog'
-import { ConfiguredPrivacyPolicyVersion } from '../../adapters/outbound/policy/ConfiguredPrivacyPolicyVersion'
 import { LocalAvatarStorage } from '../../adapters/outbound/storage/LocalAvatarStorage'
 import { createDatabase } from '../persistence/database'
 import type { Database } from '../../adapters/outbound/persistence/schema'
@@ -229,16 +226,6 @@ export const DATABASE = Symbol('Database')
       provide: AVATAR_STORAGE,
       useFactory: (config: AppConfig): AvatarStoragePort =>
         new LocalAvatarStorage(config.avatarStoragePath),
-      inject: [APP_CONFIG],
-    },
-    {
-      // No hay adaptador Postgres/InMemory que elegir aqui: la version
-      // aplicable es siempre configuracion (EN-011, CA-02), nunca datos. Ver
-      // `ApplicablePrivacyPolicyPort` sobre por que no lee el markdown de
-      // Infrastructure ni ningun repositorio.
-      provide: APPLICABLE_PRIVACY_POLICY,
-      useFactory: (config: AppConfig): ApplicablePrivacyPolicyPort =>
-        new ConfiguredPrivacyPolicyVersion(config.applicablePrivacyPolicyVersion),
       inject: [APP_CONFIG],
     },
     {
@@ -487,7 +474,6 @@ export const DATABASE = Symbol('Database')
         questions: SecurityQuestionCatalogPort,
         roleDirectory: RoleDirectoryPort,
         identitySignUp: IdentitySignUpPort,
-        applicablePrivacyPolicy: ApplicablePrivacyPolicyPort,
       ): RegisterAccount =>
         new RegisterAccount({
           accounts,
@@ -499,7 +485,6 @@ export const DATABASE = Symbol('Database')
           questions,
           roleDirectory,
           identitySignUp,
-          applicablePrivacyPolicy,
         }),
       inject: [
         ACCOUNT_REPOSITORY,
@@ -511,7 +496,6 @@ export const DATABASE = Symbol('Database')
         SECURITY_QUESTION_CATALOG,
         ROLE_DIRECTORY,
         IDENTITY_SIGN_UP,
-        APPLICABLE_PRIVACY_POLICY,
       ],
     },
     {

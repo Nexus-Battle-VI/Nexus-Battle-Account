@@ -91,20 +91,6 @@ export interface NicknameBlacklistEntriesTable {
  * nullable: el desafio nace en `IDENTIFIED`, antes de que exista un codigo
  * que resumir. El codigo en claro nunca tiene columna: no se persiste.
  */
-/**
- * Consentimiento versionado de privacidad (EN-011, CA-02). APPEND-ONLY: no
- * hay `id` de negocio para actualizar ni columna que un `UPDATE` pudiera
- * tocar sin querer -el repositorio solo inserta, nunca actualiza esta tabla-.
- * `id` es un identificador tecnico de fila, no algo que el dominio consulte.
- */
-export interface AccountPrivacyConsentsTable {
-  readonly id: string
-  readonly account_id: string
-  readonly policy_version: string
-  readonly accepted_at: Date
-  readonly created_at: Generated<Date>
-}
-
 export interface RecoveryChallengesTable {
   readonly token: string
   readonly email: string
@@ -119,7 +105,6 @@ export interface Database {
   readonly account_roles: AccountRolesTable
   readonly security_questions: SecurityQuestionsTable
   readonly account_security_answers: AccountSecurityAnswersTable
-  readonly account_privacy_consents: AccountPrivacyConsentsTable
   readonly nickname_blacklist_entries: NicknameBlacklistEntriesTable
   readonly recovery_challenges: RecoveryChallengesTable
 }

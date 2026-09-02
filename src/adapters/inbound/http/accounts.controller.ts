@@ -129,7 +129,6 @@ export class AccountsController {
         firstNames: body.firstNames,
         lastNames: body.lastNames,
         termsAccepted: body.termsAccepted,
-        privacyPolicyVersion: body.privacyPolicyVersion,
         securityAnswers: parseSecurityAnswers(body.securityAnswers),
         ...(avatar === undefined
           ? {}
