@@ -86,6 +86,15 @@ export interface AppConfig {
   readonly corsOrigins: readonly string[]
   /** Ingest local de Notifications (`POST /dev/enqueue`). Vacio = solo log. */
   readonly notificationsIngestUrl: string | null
+  /**
+   * Version de la Politica de Privacidad que este entorno reconoce como
+   * aplicable (EN-011, CA-02). `null` (sin configurar) = ninguna version es
+   * aplicable, y todo registro que envie una version se rechaza. Es el valor
+   * correcto mientras `privacy-policy-v0.3.md` siga marcado `Review
+   * Candidate / Pending Internal Approval` en Infrastructure: que el archivo
+   * exista no activa nada por si solo. Ver `ApplicablePrivacyPolicyPort`.
+   */
+  readonly applicablePrivacyPolicyVersion: string | null
 }
 
 type RawEnv = Readonly<Record<string, string | undefined>>
@@ -279,5 +288,7 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     avatarStoragePath: readString(env, 'AVATAR_STORAGE_PATH', './data/avatars'),
     corsOrigins: readCorsOrigins(env, nodeEnv),
     notificationsIngestUrl: readString(env, 'NOTIFICATIONS_INGEST_URL', '') || null,
+    applicablePrivacyPolicyVersion:
+      readString(env, 'PRIVACY_POLICY_APPLICABLE_VERSION', '') || null,
   }
 }

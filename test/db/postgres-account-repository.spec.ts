@@ -440,6 +440,81 @@ describe('PostgresAccountRepository', () => {
       expect(leftover).toEqual([])
     })
 
+    it('persiste el consentimiento de privacidad y conserva el historial (EN-011)', async () => {
+      const account = buildAccount()
+      await repository.saveRegistration(account, [], {
+        id: `consent-${account.id.value}-1`,
+        policyVersion: 'v0.3',
+        acceptedAt: new Date('2026-08-01T00:00:00.000Z'),
+      })
+
+      // Una segunda aceptacion NO reemplaza la primera: se guarda a proposito
+      // como fila nueva desde el repositorio, no desde `RegisterAccount`
+      // -que solo se ejecuta una vez por cuenta-, para demostrar contra el
+      // motor real que la tabla es append-only y no "ultimo valor gana".
+      await repository.saveRegistration(account, [], {
+        id: `consent-${account.id.value}-2`,
+        policyVersion: 'v0.4',
+        acceptedAt: new Date('2026-09-01T00:00:00.000Z'),
+      })
+
+      const consents = await repository.findPrivacyConsents(account.id)
+
+      expect(consents).toHaveLength(2)
+      expect(consents.map((c) => c.policyVersion)).toEqual(['v0.3', 'v0.4'])
+      expect(consents[0]?.acceptedAt).toEqual(new Date('2026-08-01T00:00:00.000Z'))
+    })
+
+    it('no persiste consentimiento si saveRegistration se llama sin uno', async () => {
+      const account = buildAccount()
+      await repository.saveRegistration(account, [])
+
+      expect(await repository.findPrivacyConsents(account.id)).toEqual([])
+    })
+
+    it('rechaza un consentimiento huerfano sin cuenta', async () => {
+      await expect(
+        db
+          .insertInto('account_privacy_consents')
+          .values({
+            id: 'consent-fantasma',
+            account_id: 'acc-fantasma',
+            policy_version: 'v0.3',
+            accepted_at: new Date('2026-08-01T00:00:00.000Z'),
+          })
+          .execute(),
+      ).rejects.toThrow()
+    })
+
+    it('rechaza accepted_at nulo', async () => {
+      const account = buildAccount()
+      await repository.save(account)
+
+      await expect(
+        sql`insert into account_privacy_consents (id, account_id, policy_version, accepted_at)
+            values ('consent-nulo', ${account.id.value}, 'v0.3', null)`.execute(db),
+      ).rejects.toThrow()
+    })
+
+    it('borra el consentimiento en cascada cuando se borra la cuenta', async () => {
+      const account = buildAccount()
+      await repository.saveRegistration(account, [], {
+        id: `consent-${account.id.value}`,
+        policyVersion: 'v0.3',
+        acceptedAt: AT,
+      })
+
+      await db.deleteFrom('accounts').where('id', '=', account.id.value).execute()
+
+      const leftover = await db
+        .selectFrom('account_privacy_consents')
+        .selectAll()
+        .where('account_id', '=', account.id.value)
+        .execute()
+
+      expect(leftover).toEqual([])
+    })
+
     it('el catalogo vigente tiene las cuatro preguntas semilla', async () => {
       const catalog = new PostgresSecurityQuestionCatalog(db)
       const questions = await catalog.listActive()

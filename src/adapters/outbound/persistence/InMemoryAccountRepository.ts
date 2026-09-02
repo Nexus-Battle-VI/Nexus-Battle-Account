@@ -5,6 +5,7 @@ import type { EmailAddress } from '../../../domain/value-objects/EmailAddress'
 import type {
   AccountRepositoryPort,
   HashedSecurityAnswer,
+  PrivacyConsentRecord,
 } from '../../../application/ports/AccountRepositoryPort'
 import type { AccountSnapshot } from '../../../domain/entities/Account'
 import { hydrateAccount } from './hydrate-account'
@@ -12,6 +13,7 @@ import { hydrateAccount } from './hydrate-account'
 export class InMemoryAccountRepository implements AccountRepositoryPort {
   private readonly byId = new Map<string, AccountSnapshot>()
   private readonly answersByAccount = new Map<string, readonly HashedSecurityAnswer[]>()
+  private readonly consentsByAccount = new Map<string, PrivacyConsentRecord[]>()
 
   save(account: Account): Promise<void> {
     this.byId.set(account.id.value, account.toSnapshot())
@@ -19,9 +21,22 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
     return Promise.resolve()
   }
 
-  saveRegistration(account: Account, answers: readonly HashedSecurityAnswer[]): Promise<void> {
+  saveRegistration(
+    account: Account,
+    answers: readonly HashedSecurityAnswer[],
+    consent?: PrivacyConsentRecord,
+  ): Promise<void> {
     this.byId.set(account.id.value, account.toSnapshot())
     this.answersByAccount.set(account.id.value, answers)
+
+    // APPEND-ONLY, igual que el adaptador de PostgreSQL: se anade a la lista
+    // existente, nunca se reemplaza. `?? []` crea la lista la primera vez sin
+    // necesitar una comprobacion de existencia aparte.
+    if (consent !== undefined) {
+      const historial = this.consentsByAccount.get(account.id.value) ?? []
+      historial.push(consent)
+      this.consentsByAccount.set(account.id.value, historial)
+    }
 
     return Promise.resolve()
   }
@@ -90,6 +105,10 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
     return Promise.resolve(this.answersByAccount.get(id.value) ?? [])
   }
 
+  findPrivacyConsents(id: AccountId): Promise<readonly PrivacyConsentRecord[]> {
+    return Promise.resolve(this.consentsByAccount.get(id.value) ?? [])
+  }
+
   answersOf(accountId: string): readonly HashedSecurityAnswer[] {
     return this.answersByAccount.get(accountId) ?? []
   }
@@ -101,5 +120,6 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
   clear(): void {
     this.byId.clear()
     this.answersByAccount.clear()
+    this.consentsByAccount.clear()
   }
 }

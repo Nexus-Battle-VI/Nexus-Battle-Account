@@ -57,6 +57,15 @@ export class RegisterAccountRequest {
   @IsBoolean()
   termsAccepted!: boolean
 
+  /**
+   * Version de la Politica de Privacidad que Web presento antes de este envio
+   * (EN-011, CA-02). La validacion aqui es solo de forma; que sea la version
+   * APLICABLE lo decide `RegisterAccount` contra `ApplicablePrivacyPolicyPort`.
+   */
+  @ApiProperty({ example: 'v0.3', description: 'Version de la Politica que se acepta.' })
+  @IsString()
+  privacyPolicyVersion!: string
+
   @ApiProperty({
     example:
       '[{"questionId":"sq-01","answer":"..."},{"questionId":"sq-02","answer":"..."},{"questionId":"sq-03","answer":"..."},{"questionId":"sq-04","answer":"..."}]',

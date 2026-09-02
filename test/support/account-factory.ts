@@ -96,6 +96,7 @@ export const validCommand = (
   firstNames: 'Ana',
   lastNames: 'Ramirez',
   termsAccepted: true,
+  privacyPolicyVersion: 'v0.3',
   securityAnswers: FOUR_ANSWERS,
   avatar: {
     mimeType: 'image/png',

@@ -22,6 +22,12 @@ export interface RegisterAccountCommand {
   readonly firstNames: string
   readonly lastNames: string
   readonly termsAccepted: boolean
+  /**
+   * Version de la Politica de Privacidad que Web presento a quien se registra
+   * (EN-011, CA-02). Account decide si es la version aplicable -ver
+   * `ApplicablePrivacyPolicyPort`-, no confia en cualquier cadena enviada.
+   */
+  readonly privacyPolicyVersion: string
   readonly securityAnswers: readonly RegisterSecurityAnswer[]
   readonly avatar?: RegisterAvatarUpload
 }

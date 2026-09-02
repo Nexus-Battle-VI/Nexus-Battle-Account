@@ -7,6 +7,7 @@ import type { EmailAddress } from '../../../domain/value-objects/EmailAddress'
 import type {
   AccountRepositoryPort,
   HashedSecurityAnswer,
+  PrivacyConsentRecord,
 } from '../../../application/ports/AccountRepositoryPort'
 import type { AccountSnapshot } from '../../../domain/entities/Account'
 import type { Database } from './schema'
@@ -29,6 +30,7 @@ export class PostgresAccountRepository implements AccountRepositoryPort {
   async saveRegistration(
     account: Account,
     answers: readonly HashedSecurityAnswer[],
+    consent?: PrivacyConsentRecord,
   ): Promise<void> {
     await this.db.transaction().execute(async (trx) => {
       await this.persistAccount(trx, account)
@@ -48,6 +50,23 @@ export class PostgresAccountRepository implements AccountRepositoryPort {
               answer_hash: answer.answerHash,
             })),
           )
+          .execute()
+      }
+
+      // APPEND-ONLY: a diferencia de las respuestas de seguridad, aqui NO se
+      // borra nada antes de insertar. Un registro solo ocurre una vez por
+      // cuenta, pero la tabla existe para conservar TODAS las aceptaciones que
+      // esa cuenta haga con el tiempo -esta es la primera-, nunca solo la
+      // ultima (EN-011, ADR-014 Decision 1).
+      if (consent !== undefined) {
+        await trx
+          .insertInto('account_privacy_consents')
+          .values({
+            id: consent.id,
+            account_id: account.id.value,
+            policy_version: consent.policyVersion,
+            accepted_at: consent.acceptedAt,
+          })
           .execute()
       }
     })
@@ -113,6 +132,21 @@ export class PostgresAccountRepository implements AccountRepositoryPort {
     return rows.map((row) => ({
       questionId: row.question_id,
       answerHash: row.answer_hash,
+    }))
+  }
+
+  async findPrivacyConsents(id: AccountId): Promise<readonly PrivacyConsentRecord[]> {
+    const rows = await this.db
+      .selectFrom('account_privacy_consents')
+      .select(['id', 'policy_version', 'accepted_at'])
+      .where('account_id', '=', id.value)
+      .orderBy('accepted_at', 'asc')
+      .execute()
+
+    return rows.map((row) => ({
+      id: row.id,
+      policyVersion: row.policy_version,
+      acceptedAt: row.accepted_at,
     }))
   }
 
