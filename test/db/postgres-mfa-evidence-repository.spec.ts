@@ -4,8 +4,8 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { sql, type Kysely } from 'kysely'
 
 import { PostgresMfaEvidenceRepository } from '../../src/adapters/outbound/persistence/PostgresMfaEvidenceRepository'
-import * as evidenceMigration from '../../src/adapters/outbound/persistence/migrations/hardening-mfa-evidence'
-import * as methodMigration from '../../src/adapters/outbound/persistence/migrations/hardening-mfa-evidence-method'
+import * as evidenceMigration from '../../src/adapters/outbound/persistence/migrations/hu33-mfa-evidence'
+import * as methodMigration from '../../src/adapters/outbound/persistence/migrations/hu33-mfa-evidence-method'
 import type { Database } from '../../src/adapters/outbound/persistence/schema'
 import { MfaEvidence } from '../../src/domain/entities/MfaEvidence'
 import { SecondFactorMethod } from '../../src/domain/entities/SecondFactorMethod'
