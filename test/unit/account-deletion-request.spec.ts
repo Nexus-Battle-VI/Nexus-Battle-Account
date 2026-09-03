@@ -135,4 +135,56 @@ describe('AccountDeletionRequest', () => {
       request.close(LATER)
     }).toThrow(DomainError)
   })
+
+  describe('isWithinPolicyDeadline (HU-43.3, Politica S10: plazo maximo de 30 dias)', () => {
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
+
+    it('esta dentro del plazo antes de que transcurran los 30 dias', () => {
+      const request = AccountDeletionRequest.receive({
+        id: 'del-8',
+        accountId: AccountId.create('acc-8'),
+        occurredAt: AT,
+      })
+
+      const unDiaAntes = new Date(AT.getTime() + THIRTY_DAYS_MS - 24 * 60 * 60 * 1000)
+
+      expect(request.isWithinPolicyDeadline(unDiaAntes)).toBe(true)
+    })
+
+    it('esta dentro del plazo exactamente en el limite de 30 dias', () => {
+      const request = AccountDeletionRequest.receive({
+        id: 'del-9',
+        accountId: AccountId.create('acc-9'),
+        occurredAt: AT,
+      })
+
+      const exactamenteAlLimite = new Date(AT.getTime() + THIRTY_DAYS_MS)
+
+      expect(request.isWithinPolicyDeadline(exactamenteAlLimite)).toBe(true)
+    })
+
+    it('queda fuera de plazo un instante despues del limite de 30 dias', () => {
+      const request = AccountDeletionRequest.receive({
+        id: 'del-10',
+        accountId: AccountId.create('acc-10'),
+        occurredAt: AT,
+      })
+
+      const unMilisegundoDespues = new Date(AT.getTime() + THIRTY_DAYS_MS + 1)
+
+      expect(request.isWithinPolicyDeadline(unMilisegundoDespues)).toBe(false)
+    })
+
+    it('no cambia ningun estado ni cierra la solicitud: es solo una verificacion', () => {
+      const request = AccountDeletionRequest.receive({
+        id: 'del-11',
+        accountId: AccountId.create('acc-11'),
+        occurredAt: AT,
+      })
+
+      request.isWithinPolicyDeadline(new Date(AT.getTime() + THIRTY_DAYS_MS + 1))
+
+      expect(request.currentStatus).toBe(AccountDeletionRequestStatus.Received)
+    })
+  })
 })

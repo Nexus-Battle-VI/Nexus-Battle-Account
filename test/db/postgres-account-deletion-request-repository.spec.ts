@@ -165,4 +165,157 @@ describe('PostgresAccountDeletionRequestRepository', () => {
     const activa = await repository.findActiveByAccountId(accountId)
     expect(activa).not.toBeNull()
   })
+
+  /**
+   * `claimNextPending` no filtra por cuenta: reclama la mas antigua NO
+   * cerrada de TODA la tabla. Las pruebas anteriores de este fichero dejan
+   * -a proposito, para probar otra cosa- cuentas con solicitudes activas sin
+   * cerrar (p. ej. la primerisima, sobre `acc-1`). Por eso este describe
+   * empieza vaciando la tabla de pendientes, y cada prueba cierra lo que deja
+   * activo: sin eso, el orden FIFO entre pruebas seria arbitrario.
+   */
+  describe('claimNextPending (HU-43.3)', () => {
+    const drainPending = async (): Promise<void> => {
+      for (;;) {
+        const claimed = await repository.claimNextPending()
+
+        if (claimed === null) {
+          return
+        }
+
+        claimed.close(LATER)
+        await repository.save(claimed)
+      }
+    }
+
+    beforeAll(async () => {
+      await drainPending()
+    })
+
+    afterEach(async () => {
+      await drainPending()
+    })
+
+    it('devuelve null cuando no hay ninguna solicitud pendiente', async () => {
+      expect(await repository.claimNextPending()).toBeNull()
+    })
+
+    it('reclama una RECEIVED y la deja IN_PROGRESS de forma durable', async () => {
+      const id = nextId()
+      await repository.save(
+        AccountDeletionRequest.receive({
+          id,
+          accountId: AccountId.create('acc-claim-received'),
+          occurredAt: AT,
+        }),
+      )
+
+      const claimed = await repository.claimNextPending()
+
+      expect(claimed?.id).toBe(id)
+      expect(claimed?.currentStatus).toBe('IN_PROGRESS')
+
+      const reconstructedRepository = new PostgresAccountDeletionRequestRepository(db)
+      expect((await reconstructedRepository.findById(id))?.currentStatus).toBe('IN_PROGRESS')
+    })
+
+    it('reclama primero la solicitud pendiente mas antigua (orden FIFO por received_at)', async () => {
+      const idAntigua = nextId()
+      const idReciente = nextId()
+
+      await repository.save(
+        AccountDeletionRequest.receive({
+          id: idReciente,
+          accountId: AccountId.create('acc-claim-reciente'),
+          occurredAt: LATER,
+        }),
+      )
+      await repository.save(
+        AccountDeletionRequest.receive({
+          id: idAntigua,
+          accountId: AccountId.create('acc-claim-antigua'),
+          occurredAt: AT,
+        }),
+      )
+
+      expect((await repository.claimNextPending())?.id).toBe(idAntigua)
+    })
+
+    it('impide que dos procesadores reclamen la MISMA solicitud a la vez (FOR UPDATE SKIP LOCKED)', async () => {
+      const id = nextId()
+      await repository.save(
+        AccountDeletionRequest.receive({
+          id,
+          accountId: AccountId.create('acc-claim-concurrencia'),
+          occurredAt: AT,
+        }),
+      )
+
+      const otroProcesador = new PostgresAccountDeletionRequestRepository(db)
+
+      // Sin `await` entre ambas: las dos transacciones llegan a PostgreSQL en
+      // vuelo al mismo tiempo. Si la proteccion fuera solo "leer y luego
+      // actualizar" a nivel de aplicacion, las dos podrian leer la misma fila
+      // como RECEIVED antes de que cualquiera la marque IN_PROGRESS. Con
+      // `FOR UPDATE SKIP LOCKED`, la segunda transaccion salta la fila
+      // bloqueada por la primera y, al no haber ninguna otra pendiente,
+      // recibe `null`.
+      const [primero, segundo] = await Promise.all([
+        repository.claimNextPending(),
+        otroProcesador.claimNextPending(),
+      ])
+
+      const ganadores = [primero, segundo].filter(
+        (resultado): resultado is AccountDeletionRequest => resultado !== null,
+      )
+
+      expect(ganadores).toHaveLength(1)
+      expect(ganadores[0]!.id).toBe(id)
+    })
+
+    it('reclama de nuevo una IN_PROGRESS sin lanzar (reanuda tras una interrupcion)', async () => {
+      const id = nextId()
+      const request = AccountDeletionRequest.receive({
+        id,
+        accountId: AccountId.create('acc-claim-en-curso'),
+        occurredAt: AT,
+      })
+      request.beginTreatment()
+      await repository.save(request)
+
+      const claimed = await repository.claimNextPending()
+
+      expect(claimed?.id).toBe(id)
+      expect(claimed?.currentStatus).toBe('IN_PROGRESS')
+    })
+
+    it('reclama una FAILED y la reintenta (queda IN_PROGRESS)', async () => {
+      const id = nextId()
+      const request = AccountDeletionRequest.receive({
+        id,
+        accountId: AccountId.create('acc-claim-fallida'),
+        occurredAt: AT,
+      })
+      request.beginTreatment()
+      request.markFailed()
+      await repository.save(request)
+
+      const claimed = await repository.claimNextPending()
+
+      expect(claimed?.currentStatus).toBe('IN_PROGRESS')
+    })
+
+    it('nunca reclama una solicitud ya CLOSED', async () => {
+      const request = AccountDeletionRequest.receive({
+        id: nextId(),
+        accountId: AccountId.create('acc-claim-cerrada'),
+        occurredAt: AT,
+      })
+      request.beginTreatment()
+      request.close(LATER)
+      await repository.save(request)
+
+      expect(await repository.claimNextPending()).toBeNull()
+    })
+  })
 })

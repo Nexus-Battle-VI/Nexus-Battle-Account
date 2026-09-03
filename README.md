@@ -29,17 +29,17 @@ El servicio comprueba el testimonio que acompaña a cada petición contra el JWK
 
 La comprobación de firma la hace [`aws-jwt-verify`](https://github.com/awslabs/aws-jwt-verify). **No se implementa verificación criptográfica a mano**: es la clase de código donde un error sutil no falla, sino que acepta tokens falsificados en silencio.
 
-| Ruta                                  | Protección                                                      |
-| ------------------------------------- | --------------------------------------------------------------- |
-| `POST /api/accounts`                  | Testimonio válido. La cuenta queda vinculada a su `sub`         |
-| `GET /api/accounts/me`                | Testimonio válido. Resuelve **la propia cuenta**                |
-| `PATCH /api/accounts/me`              | Testimonio válido. Edita **la propia cuenta** (apodo, HU-05)    |
-| `POST /api/accounts/me/password`      | Testimonio válido. Cambia la contraseña en el proveedor (HU-05) |
-| `GET /api/accounts/:id`               | Rol **`ADMINISTRATOR`**                                         |
-| `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                         |
-| `POST /api/sessions`                  | **Pública.** Pedirla ya exigiría la sesión que crea             |
-| `POST /api/sessions/second-factor`    | **Pública.** Continúa el login administrativo (HU-02)           |
-| `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio                 |
+| Ruta                                  | Protección                                                                         |
+| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| `POST /api/accounts`                  | Testimonio válido. La cuenta queda vinculada a su `sub`                            |
+| `GET /api/accounts/me`                | Testimonio válido. Resuelve **la propia cuenta**                                   |
+| `PATCH /api/accounts/me`              | Testimonio válido. Edita **la propia cuenta** (apodo y país opcional, HU-05/HU-57) |
+| `POST /api/accounts/me/password`      | Testimonio válido. Cambia la contraseña en el proveedor (HU-05)                    |
+| `GET /api/accounts/:id`               | Rol **`ADMINISTRATOR`**                                                            |
+| `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                                            |
+| `POST /api/sessions`                  | **Pública.** Pedirla ya exigiría la sesión que crea                                |
+| `POST /api/sessions/second-factor`    | **Pública.** Continúa el login administrativo (HU-02)                              |
+| `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio                                    |
 
 ### El registro exige testimonio, y no es arbitrario
 

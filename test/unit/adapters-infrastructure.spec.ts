@@ -98,6 +98,27 @@ describe('InMemoryAccountRepository', () => {
     expect(repository.size).toBe(0)
   })
 
+  it('elimina fisicamente la cuenta, sus respuestas de seguridad y sus metadatos (HU-43.3)', async () => {
+    const repository = new InMemoryAccountRepository()
+    await repository.saveRegistration(buildAccount(), [
+      { questionId: 'sq-01', answerHash: 'hash-1' },
+    ])
+
+    await repository.deleteById(AccountId.create('acc-1'))
+
+    expect(await repository.findById(AccountId.create('acc-1'))).toBeNull()
+    expect(await repository.findSecurityAnswers(AccountId.create('acc-1'))).toEqual([])
+    expect(repository.size).toBe(0)
+  })
+
+  it('eliminar una cuenta que ya no existe no falla (idempotente ante reintento)', async () => {
+    const repository = new InMemoryAccountRepository()
+
+    await expect(
+      repository.deleteById(AccountId.create('acc-inexistente')),
+    ).resolves.toBeUndefined()
+  })
+
   it('recupera por apodo sin distinguir mayusculas (HU-02)', async () => {
     const repository = new InMemoryAccountRepository()
     await repository.save(buildAccount())
@@ -397,6 +418,29 @@ describe('loadConfig', () => {
       loadConfig({ NOTIFICATIONS_INGEST_URL: 'http://127.0.0.1:3001/dev/enqueue' })
         .notificationsIngestUrl,
     ).toBe('http://127.0.0.1:3001/dev/enqueue')
+  })
+
+  it('el procesamiento durable de HU-43.3 esta apagado por defecto', () => {
+    const config = loadConfig({})
+
+    expect(config.accountDeletionProcessingEnabled).toBe(false)
+    expect(config.accountDeletionProcessingIntervalMs).toBe(60_000)
+  })
+
+  it('activa el procesamiento durable y su intervalo mediante variables de entorno', () => {
+    const config = loadConfig({
+      ACCOUNT_DELETION_PROCESSING_ENABLED: 'true',
+      ACCOUNT_DELETION_PROCESSING_INTERVAL_MS: '5000',
+    })
+
+    expect(config.accountDeletionProcessingEnabled).toBe(true)
+    expect(config.accountDeletionProcessingIntervalMs).toBe(5000)
+  })
+
+  it('rechaza un intervalo de procesamiento fuera de rango', () => {
+    expect(() => loadConfig({ ACCOUNT_DELETION_PROCESSING_INTERVAL_MS: '500' })).toThrow(
+      ConfigurationError,
+    )
   })
 
   // Produccion exige autenticacion configurada: `loadConfig` rechaza arrancar

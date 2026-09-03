@@ -2,7 +2,7 @@ import type { Kysely } from 'kysely'
 
 import {
   AccountDeletionRequest,
-  type AccountDeletionRequestStatus,
+  AccountDeletionRequestStatus,
 } from '../../../domain/entities/AccountDeletionRequest'
 import type { AccountId } from '../../../domain/value-objects/AccountId'
 import type { AccountDeletionRequestRepositoryPort } from '../../../application/ports/AccountDeletionRequestRepositoryPort'
@@ -100,6 +100,55 @@ export class PostgresAccountDeletionRequestRepository implements AccountDeletion
       .executeTakeFirst()
 
     return row === undefined ? null : this.hydrate(row)
+  }
+
+  /**
+   * `FOR UPDATE SKIP LOCKED` es la proteccion real de HU-43.3 contra dos
+   * procesadores reclamando la MISMA solicitud a la vez: si otra transaccion
+   * ya tiene la fila candidata bloqueada, esta consulta la salta y toma la
+   * siguiente en su lugar, en vez de esperar o de leer un estado que otro
+   * proceso esta a punto de cambiar.
+   */
+  async claimNextPending(): Promise<AccountDeletionRequest | null> {
+    return this.db.transaction().execute(async (trx) => {
+      const row = await trx
+        .selectFrom('account_deletion_requests')
+        .selectAll()
+        .where('status', 'in', [
+          AccountDeletionRequestStatus.Received,
+          AccountDeletionRequestStatus.InProgress,
+          AccountDeletionRequestStatus.Failed,
+        ])
+        .orderBy('received_at', 'asc')
+        .limit(1)
+        .forUpdate()
+        .skipLocked()
+        .executeTakeFirst()
+
+      if (row === undefined) {
+        return null
+      }
+
+      const request = this.hydrate(row)
+
+      // La transicion de estado la decide el dominio (`beginTreatment`/
+      // `retry`), no esta consulta: una solicitud ya `IN_PROGRESS` -un
+      // intento anterior interrumpido antes de cerrar- se devuelve tal cual,
+      // sin transicion nueva, para que el procesamiento pueda reanudarse.
+      if (request.currentStatus === AccountDeletionRequestStatus.Received) {
+        request.beginTreatment()
+      } else if (request.currentStatus === AccountDeletionRequestStatus.Failed) {
+        request.retry()
+      }
+
+      await trx
+        .updateTable('account_deletion_requests')
+        .set({ status: request.currentStatus })
+        .where('id', '=', request.id)
+        .execute()
+
+      return request
+    })
   }
 
   private hydrate(row: {

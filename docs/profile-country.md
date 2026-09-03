@@ -8,6 +8,6 @@ La persistencia distingue una escritura explícita del país de una lectura ante
 
 La migración `hu57-profile-country` añade `accounts.country_code` nullable después de todas las migraciones existentes. Las cuentas anteriores y los registros nuevos conservan `null` hasta que su titular lo declare. No se infiere el país desde AWS, Cognito, IP, correo ni idioma del navegador. La columna valida formato normalizado; el dominio valida la pertenencia al vocabulario ISO.
 
-El país es dato personal. Se incluye en la proyección administrativa y su exportación JSON existente, con las mismas autorizaciones; no se añade a testimonios, eventos ni logs. Permanece en la misma fila de la cuenta y no crea otro almacén de datos personales. La solicitud de eliminación existente mantiene su alcance: registrar una solicitud no ejecuta todavía la eliminación del dato.
+El país es dato personal. Se incluye en la proyección administrativa y su exportación JSON existente, con las mismas autorizaciones; no se añade a testimonios, eventos ni logs. Permanece en la misma fila de la cuenta y no crea otro almacén de datos personales. Registrar una solicitud de eliminación no borra el dato inmediatamente; el tratamiento durable de HU-43.3 elimina la fila de la cuenta, incluido `country_code`.
 
 Account solo guarda y entrega el país. La correspondencia con COP/USD/EUR, los importes regionales, el tratamiento de país desconocido y las promociones pertenecen al contrato comercial y necesitan definición allí; Account no convierte precios ni inventa reglas de cambio.

@@ -56,6 +56,19 @@ export interface AccountRepositoryPort {
 
   /** Hashes de las respuestas de HU-01. Vacio si la cuenta no las tiene. */
   findSecurityAnswers(id: AccountId): Promise<readonly HashedSecurityAnswer[]>
+
+  /**
+   * Elimina fisicamente la cuenta (HU-43.3): nombres, apellidos, apodo,
+   * correo, metadatos de avatar, `terms_accepted`, `status` y marcas
+   * temporales dejan de existir. Los roles y las respuestas de seguridad se
+   * eliminan en cascada al mismo tiempo (restriccion `on delete cascade` de
+   * `hu01-registration` y `001-accounts`).
+   *
+   * Idempotente: eliminar una cuenta que ya no existe -un reintento tras un
+   * fallo que ocurrio DESPUES de borrarla- no falla, simplemente no afecta
+   * ninguna fila.
+   */
+  deleteById(id: AccountId): Promise<void>
 }
 
 export const ACCOUNT_REPOSITORY = Symbol('AccountRepositoryPort')
