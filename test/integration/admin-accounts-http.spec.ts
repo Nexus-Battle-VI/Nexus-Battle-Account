@@ -42,32 +42,32 @@ interface AccountSeed {
 }
 
 const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
- 'token-player': {
-  subject: 'subject-player-caller',
-  roles: new Set([Role.Player]),
-  jti: null,
-  expiresAt: null,
-},
-'token-moderator': {
-  subject: 'subject-moderator-caller',
-  roles: new Set([Role.Player, Role.Moderator]),
-  jti: null,
-  expiresAt: null,
-},
+  'token-player': {
+    subject: 'subject-player-caller',
+    roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
+  },
+  'token-moderator': {
+    subject: 'subject-moderator-caller',
+    roles: new Set([Role.Player, Role.Moderator]),
+    jti: null,
+    expiresAt: null,
+  },
 
-'token-admin': {
-  subject: 'subject-admin-caller',
-  roles: new Set([Role.Player, Role.Administrator]),
-  jti: null,
-  expiresAt: null,
-},
+  'token-admin': {
+    subject: 'subject-admin-caller',
+    roles: new Set([Role.Player, Role.Administrator]),
+    jti: null,
+    expiresAt: null,
+  },
 
-'token-super': {
-  subject: 'subject-super-caller',
-  roles: new Set([Role.SuperAdministrator]),
-  jti: null,
-  expiresAt: null,
-},
+  'token-super': {
+    subject: 'subject-super-caller',
+    roles: new Set([Role.SuperAdministrator]),
+    jti: null,
+    expiresAt: null,
+  },
 }
 
 const SEEDS: readonly AccountSeed[] = [
