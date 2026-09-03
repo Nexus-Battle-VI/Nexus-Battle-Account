@@ -14,12 +14,20 @@ import {
   Post,
   Query,
   ServiceUnavailableException,
+  StreamableFile,
   UnauthorizedException,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
-import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
+import {
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiOperation,
+  ApiProduces,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger'
 import { memoryStorage } from 'multer'
 
 import { DomainError } from '../../../domain/errors/DomainError'
@@ -43,10 +51,12 @@ import { GetAccount } from '../../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
 import { UpdateOwnAccount } from '../../../application/use-cases/UpdateOwnAccount'
 import { ListAdminAccounts } from '../../../application/use-cases/ListAdminAccounts'
+import { ExportAdminAccounts } from '../../../application/use-cases/ExportAdminAccounts'
 import { VerifyAccount } from '../../../application/use-cases/VerifyAccount'
 import { AssignRole } from '../../../application/use-cases/AssignRole'
 import { FindAccountByEmail } from '../../../application/use-cases/FindAccountByEmail'
 import { RevokeRole } from '../../../application/use-cases/RevokeRole'
+import type { AdminAccountQueryCriteria } from '../../../application/dto/AdminAccountQueryCriteria'
 import { Role, isRole } from '../../../domain/entities/Role'
 import { CurrentIdentity, Public, Roles } from './auth/decorators'
 import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
@@ -61,9 +71,11 @@ import {
   ASSIGN_ROLE,
   REVOKE_ROLE,
   LIST_ADMIN_ACCOUNTS,
+  EXPORT_ADMIN_ACCOUNTS,
 } from './tokens'
 import {
   AccountResponse,
+  AdminAccountSummaryResponse,
   AdminAccountsResponse,
   AssignRoleRequest,
   ConfirmRegistrationRequest,
@@ -91,6 +103,7 @@ export class AccountsController {
     @Inject(GET_OWN_ACCOUNT) private readonly getOwnAccount: GetOwnAccount,
     @Inject(UPDATE_OWN_ACCOUNT) private readonly updateOwnAccount: UpdateOwnAccount,
     @Inject(LIST_ADMIN_ACCOUNTS) private readonly listAdminAccounts: ListAdminAccounts,
+    @Inject(EXPORT_ADMIN_ACCOUNTS) private readonly exportAdminAccounts: ExportAdminAccounts,
     @Inject(VERIFY_ACCOUNT) private readonly verifyAccount: VerifyAccount,
     @Inject(CONFIRM_REGISTRATION) private readonly confirmRegistration: ConfirmRegistration,
     @Inject(FIND_ACCOUNT_BY_EMAIL) private readonly findAccountByEmail: FindAccountByEmail,
@@ -190,14 +203,35 @@ export class AccountsController {
   @ApiResponse({ status: 403, description: 'La identidad no es administradora' })
   async listAdmin(@Query() query: ListAdminAccountsQuery): Promise<AdminAccountsResponse> {
     try {
-      return await this.listAdminAccounts.execute({
-        id: query.id,
-        email: query.email,
-        firstNames: query.firstNames,
-        lastNames: query.lastNames,
-        displayName: query.nickname,
-        role: query.role,
-        status: query.status,
+      return await this.listAdminAccounts.execute(toAdminAccountCriteria(query))
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  @Roles(Role.Administrator)
+  @Get('export')
+  @ApiProduces('application/json')
+  @ApiOperation({
+    summary: 'Exporta cuentas del panel administrativo (HU-44.4)',
+    description:
+      'Genera un archivo JSON descargable con los mismos criterios del panel. JSON es una decision tecnica de implementacion y no una nueva regla funcional de RF-44.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Archivo JSON descargable con el listado administrativo filtrado. Content-Disposition usa attachment.',
+    type: [AdminAccountSummaryResponse],
+  })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
+  @ApiResponse({ status: 403, description: 'La identidad no es administradora' })
+  async exportAdmin(@Query() query: ListAdminAccountsQuery): Promise<StreamableFile> {
+    try {
+      const file = await this.exportAdminAccounts.execute(toAdminAccountCriteria(query))
+
+      return new StreamableFile(Buffer.from(file.content, 'utf8'), {
+        type: file.mediaType,
+        disposition: asAttachment(file.filename),
       })
     } catch (error: unknown) {
       throw AccountsController.translate(error)
@@ -397,6 +431,18 @@ export class AccountsController {
     return error instanceof Error ? error : new Error('Fallo desconocido del servicio.')
   }
 }
+
+const toAdminAccountCriteria = (query: ListAdminAccountsQuery): AdminAccountQueryCriteria => ({
+  id: query.id,
+  email: query.email,
+  firstNames: query.firstNames,
+  lastNames: query.lastNames,
+  displayName: query.nickname,
+  role: query.role,
+  status: query.status,
+})
+
+const asAttachment = (filename: string): string => `attachment; filename="${filename}"`
 
 const parseSecurityAnswers = (raw: string): RegisterSecurityAnswer[] => {
   let parsed: unknown
