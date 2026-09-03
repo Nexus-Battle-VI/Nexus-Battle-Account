@@ -161,19 +161,24 @@ describe('API de solicitud de eliminacion de la cuenta propia (HU-43.2)', () => 
       expect(response.body).not.toHaveProperty('closedAt')
     })
 
-    it('ignora cualquier accountId del cuerpo: la solicitud es SIEMPRE sobre el titular del testimonio', async () => {
+    it('ignora accountId/subject/email/customerId del cuerpo: la solicitud es SIEMPRE sobre el titular del testimonio (HU-43.6, Caso 2)', async () => {
       const deletionRequests = app.get<AccountDeletionRequestRepositoryPort>(
         ACCOUNT_DELETION_REQUEST_REPOSITORY,
       )
 
-      const response = await post()
-        .set('authorization', bearer('token-jugador-b'))
-        .send({ accountId: 'acc-propia', subject: 'sub:ana@nexus.test' })
+      const response = await post().set('authorization', bearer('token-jugador-b')).send({
+        accountId: 'acc-propia',
+        subject: 'sub:ana@nexus.test',
+        email: 'ana@nexus.test',
+        customerId: 'acc-propia',
+      })
 
       expect(response.status).toBe(200)
 
       // La solicitud creada pertenece a Beatriz (el testimonio), nunca a la
-      // cuenta ajena que el cuerpo intento nombrar.
+      // cuenta ajena que el cuerpo intento nombrar por ningun campo -no hay
+      // `@Body()` declarado en el controlador: cualquier campo enviado se
+      // descarta sin llegar al caso de uso, sea cual sea su nombre.
       const propia = await deletionRequests.findById(response.body.id as string)
       expect(propia?.accountId).toBe('acc-ajena')
     })
