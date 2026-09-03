@@ -30,6 +30,40 @@ const setup = async (): Promise<{
 }
 
 describe('UpdateOwnAccount', () => {
+  it('normaliza el país y conserva los campos omitidos en cada actualización parcial', async () => {
+    const { caso, accounts } = await setup()
+    expect((await accounts.findBySubject('sub-propia'))?.currentCountryCode).toBeNull()
+    const first = await caso.execute({ subject: 'sub-propia', countryCode: ' co ' })
+    expect(first).toMatchObject({ countryCode: 'CO', displayName: 'Ana Ramirez' })
+    const renamed = await caso.execute({ subject: 'sub-propia', displayName: 'Ana Nueva' })
+    expect(renamed).toMatchObject({ countryCode: 'CO', displayName: 'Ana Nueva' })
+    const sameName = await caso.execute({
+      subject: 'sub-propia',
+      displayName: 'Ana Nueva',
+      countryCode: 'us',
+    })
+    expect(sameName.countryCode).toBe('US')
+    expect((await accounts.findBySubject('sub-propia'))?.currentCountryCode?.value).toBe('US')
+    expect(
+      (await caso.execute({ subject: 'sub-propia', countryCode: null })).countryCode,
+    ).toBeNull()
+  })
+
+  it('rechaza un cambio mixto inválido sin guardar ninguno de sus campos', async () => {
+    const { caso, accounts } = await setup()
+    await expect(
+      caso.execute({ subject: 'sub-propia', displayName: 'Ana Nueva', countryCode: 'ZZ' }),
+    ).rejects.toBeInstanceOf(DomainError)
+    await expect(
+      caso.execute({ subject: 'sub-propia', displayName: 'admin', countryCode: 'CO' }),
+    ).rejects.toBeInstanceOf(NicknameBlacklistedError)
+    expect((await accounts.findBySubject('sub-propia'))?.toSnapshot()).toMatchObject({
+      countryCode: null,
+      displayName: 'Ana Ramirez',
+    })
+    await expect(caso.execute({ subject: 'sub-propia' })).rejects.toBeInstanceOf(DomainError)
+  })
+
   it('cambia el apodo, persiste y devuelve el estado actualizado', async () => {
     const { caso, accounts } = await setup()
 

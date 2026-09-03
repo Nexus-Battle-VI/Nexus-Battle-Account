@@ -2,28 +2,52 @@ import type { Account } from '../../../domain/entities/Account'
 import type { AccountId } from '../../../domain/value-objects/AccountId'
 import type { DisplayName } from '../../../domain/value-objects/DisplayName'
 import type { EmailAddress } from '../../../domain/value-objects/EmailAddress'
+import { CountryCode } from '../../../domain/value-objects/CountryCode'
 import type {
   AccountRepositoryPort,
   HashedSecurityAnswer,
 } from '../../../application/ports/AccountRepositoryPort'
+import type { AdminAccountQueryPort } from '../../../application/ports/AdminAccountQueryPort'
+import type { AdminAccountQueryCriteria } from '../../../application/dto/AdminAccountQueryCriteria'
+import {
+  orderAdminAccountRoles,
+  type AdminAccountSummaryDto,
+} from '../../../application/dto/AdminAccountSummaryDto'
 import type { AccountSnapshot } from '../../../domain/entities/Account'
 import { hydrateAccount } from './hydrate-account'
 
-export class InMemoryAccountRepository implements AccountRepositoryPort {
+interface AccountMetadata {
+  readonly createdAt: Date
+  readonly updatedAt: Date
+}
+
+export class InMemoryAccountRepository implements AccountRepositoryPort, AdminAccountQueryPort {
   private readonly byId = new Map<string, AccountSnapshot>()
   private readonly answersByAccount = new Map<string, readonly HashedSecurityAnswer[]>()
+  private readonly metadataByAccount = new Map<string, AccountMetadata>()
+
+  constructor(private readonly now: () => Date = () => new Date()) {}
 
   save(account: Account): Promise<void> {
-    this.byId.set(account.id.value, account.toSnapshot())
+    this.store(account)
 
     return Promise.resolve()
   }
 
   saveRegistration(account: Account, answers: readonly HashedSecurityAnswer[]): Promise<void> {
-    this.byId.set(account.id.value, account.toSnapshot())
+    this.store(account)
     this.answersByAccount.set(account.id.value, answers)
 
     return Promise.resolve()
+  }
+
+  query(criteria: AdminAccountQueryCriteria): Promise<readonly AdminAccountSummaryDto[]> {
+    const items = [...this.byId.values()]
+      .filter((snapshot) => matches(snapshot, criteria))
+      .map((snapshot) => this.toAdminSummary(snapshot))
+      .sort((left, right) => left.id.localeCompare(right.id))
+
+    return Promise.resolve(items)
   }
 
   findById(id: AccountId): Promise<Account | null> {
@@ -90,6 +114,14 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
     return Promise.resolve(this.answersByAccount.get(id.value) ?? [])
   }
 
+  deleteById(id: AccountId): Promise<void> {
+    this.byId.delete(id.value)
+    this.answersByAccount.delete(id.value)
+    this.metadataByAccount.delete(id.value)
+
+    return Promise.resolve()
+  }
+
   answersOf(accountId: string): readonly HashedSecurityAnswer[] {
     return this.answersByAccount.get(accountId) ?? []
   }
@@ -101,5 +133,80 @@ export class InMemoryAccountRepository implements AccountRepositoryPort {
   clear(): void {
     this.byId.clear()
     this.answersByAccount.clear()
+    this.metadataByAccount.clear()
+  }
+
+  private store(account: Account): void {
+    const snapshot = account.toSnapshot()
+    const previous = this.byId.get(snapshot.id)
+    const countryCode =
+      previous !== undefined && !account.hasCountryCodeChange
+        ? previous.countryCode
+        : snapshot.countryCode
+    const current = new Date(this.now().getTime())
+    const metadata = this.metadataByAccount.get(snapshot.id)
+
+    this.byId.set(snapshot.id, { ...snapshot, countryCode })
+    this.metadataByAccount.set(snapshot.id, {
+      createdAt: metadata?.createdAt ?? current,
+      updatedAt: current,
+    })
+    account.acceptPersistedCountryCode(
+      countryCode === null ? null : CountryCode.create(countryCode),
+      account.countryCodePersistenceVersion,
+    )
+  }
+
+  private toAdminSummary(snapshot: AccountSnapshot): AdminAccountSummaryDto {
+    const metadata = this.metadataByAccount.get(snapshot.id)
+
+    return {
+      id: snapshot.id,
+      email: snapshot.email,
+      displayName: snapshot.displayName,
+      countryCode: snapshot.countryCode,
+      firstNames: snapshot.firstNames,
+      lastNames: snapshot.lastNames,
+      status: snapshot.status,
+      roles: orderAdminAccountRoles(snapshot.roles),
+      registeredAt: (metadata?.createdAt ?? this.now()).toISOString(),
+    }
   }
 }
+
+const matches = (snapshot: AccountSnapshot, criteria: AdminAccountQueryCriteria): boolean => {
+  if (criteria.id !== undefined && snapshot.id !== criteria.id) {
+    return false
+  }
+
+  if (criteria.email !== undefined && snapshot.email !== criteria.email) {
+    return false
+  }
+
+  if (
+    criteria.firstNames !== undefined &&
+    !sameHumanText(snapshot.firstNames, criteria.firstNames)
+  ) {
+    return false
+  }
+
+  if (criteria.lastNames !== undefined && !sameHumanText(snapshot.lastNames, criteria.lastNames)) {
+    return false
+  }
+
+  if (
+    criteria.displayName !== undefined &&
+    !sameHumanText(snapshot.displayName, criteria.displayName)
+  ) {
+    return false
+  }
+
+  if (criteria.role !== undefined && !snapshot.roles.includes(criteria.role)) {
+    return false
+  }
+
+  return criteria.status === undefined || snapshot.status === criteria.status
+}
+
+const sameHumanText = (left: string, right: string): boolean =>
+  left.toLowerCase() === right.toLowerCase()

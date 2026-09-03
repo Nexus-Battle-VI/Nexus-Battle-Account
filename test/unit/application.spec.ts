@@ -138,6 +138,7 @@ describe('RegisterAccount', () => {
       id: 'acc-1',
       email: 'jugador@nexus.test',
       displayName: 'Ana Ramirez',
+      countryCode: null,
       firstNames: 'Ana',
       lastNames: 'Ramirez',
       status: AccountStatus.PendingVerification,

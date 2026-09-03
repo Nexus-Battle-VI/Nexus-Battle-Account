@@ -15,6 +15,9 @@ import * as migrationHu03SuperAdmin from '../../adapters/outbound/persistence/mi
 import * as migrationHu04RecoveryChallenges from '../../adapters/outbound/persistence/migrations/hu04-recovery-challenges'
 import * as migrationHu33MfaEvidence from '../../adapters/outbound/persistence/migrations/hu33-mfa-evidence'
 import * as migrationHu33MfaEvidenceMethod from '../../adapters/outbound/persistence/migrations/hu33-mfa-evidence-method'
+import * as migrationHu43AccountDeletionRequests from '../../adapters/outbound/persistence/migrations/hu43-account-deletion-requests'
+import * as migrationHu43DesvincularSolicitudEliminacion from '../../adapters/outbound/persistence/migrations/hu43-desvincular-solicitud-eliminacion-de-cuenta'
+import * as migrationHu57ProfileCountry from '../../adapters/outbound/persistence/migrations/hu57-profile-country'
 
 export interface DatabaseOptions {
   readonly connectionString: string
@@ -74,6 +77,10 @@ const migrations: MigrationProvider = {
       'hu04-recovery-challenges': migrationHu04RecoveryChallenges,
       'hu33-mfa-evidence': migrationHu33MfaEvidence,
       'hu33-mfa-evidence-method': migrationHu33MfaEvidenceMethod,
+      'hu43-account-deletion-requests': migrationHu43AccountDeletionRequests,
+      'hu43-desvincular-solicitud-eliminacion-de-cuenta':
+        migrationHu43DesvincularSolicitudEliminacion,
+      'hu57-profile-country': migrationHu57ProfileCountry,
     }),
 }
 

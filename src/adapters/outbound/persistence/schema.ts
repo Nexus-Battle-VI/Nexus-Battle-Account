@@ -34,6 +34,7 @@ export interface AccountsTable {
   readonly email: string
 
   readonly display_name: string
+  readonly country_code: Generated<string | null>
   readonly first_names: string
   readonly last_names: string
   readonly terms_accepted: boolean
@@ -113,6 +114,19 @@ export interface MfaEvidencesTable {
   readonly verified_at: Generated<Date>
 }
 
+/**
+ * Solicitud durable de eliminacion de cuenta (HU-43.1). Vive enteramente
+ * dentro de Account (ADR-014 Decision 5): ningun progreso "por bounded
+ * context" se persiste aqui porque esa orquestacion no existe.
+ */
+export interface AccountDeletionRequestsTable {
+  readonly id: string
+  readonly account_id: string
+  readonly status: string
+  readonly received_at: Generated<Date>
+  readonly closed_at: Date | null
+}
+
 export interface Database {
   readonly accounts: AccountsTable
   readonly account_roles: AccountRolesTable
@@ -121,4 +135,5 @@ export interface Database {
   readonly nickname_blacklist_entries: NicknameBlacklistEntriesTable
   readonly recovery_challenges: RecoveryChallengesTable
   readonly mfa_evidences: MfaEvidencesTable
+  readonly account_deletion_requests: AccountDeletionRequestsTable
 }
