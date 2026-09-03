@@ -65,3 +65,17 @@ export class IdentityRequiredError extends Error {
     this.name = 'IdentityRequiredError'
   }
 }
+
+export class AuthenticationRequiredError extends Error {
+  constructor() {
+    super('Se requiere autenticacion.')
+    this.name = 'AuthenticationRequiredError'
+  }
+}
+
+export class AccessDeniedError extends Error {
+  constructor() {
+    super('Acceso denegado.')
+    this.name = 'AccessDeniedError'
+  }
+}
