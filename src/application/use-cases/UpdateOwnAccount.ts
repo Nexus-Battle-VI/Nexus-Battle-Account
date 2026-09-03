@@ -74,9 +74,8 @@ export class UpdateOwnAccount {
       }
       if (await this.blacklist.isBlocked(displayName.value)) throw new NicknameBlacklistedError()
     }
-    const changeCountry =
-      countryCode !== undefined &&
-      (countryCode?.value ?? null) !== (account.currentCountryCode?.value ?? null)
+    // Presencia expresa intencion de escribir, incluso null o el valor leido.
+    const changeCountry = countryCode !== undefined
     if (!rename && !changeCountry) return toAccountDto(account.toSnapshot())
 
     // Validate both fields before changing the aggregate; omitted fields survive.

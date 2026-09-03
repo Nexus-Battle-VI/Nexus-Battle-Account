@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
+import { startTestPostgres, type TestPostgres } from './postgres-runtime'
 import type { Kysely } from 'kysely'
 
 import { describeError } from '../../src/infrastructure/observability/describe-error'
@@ -22,7 +22,7 @@ import { buildAccount } from '../support/account-factory'
  * ejecuta dos peticiones en paralelo contra el mismo motor.
  */
 describe('PostgresAccountDeletionRequestRepository', () => {
-  let container: StartedPostgreSqlContainer
+  let container: TestPostgres
   let db: Kysely<Database>
   let repository: PostgresAccountDeletionRequestRepository
 
@@ -37,7 +37,7 @@ describe('PostgresAccountDeletionRequestRepository', () => {
   }
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer('postgres:17-alpine').start()
+    container = await startTestPostgres()
     db = createDatabase({ connectionString: container.getConnectionUri() })
 
     const { error } = await migrateToLatest(db)

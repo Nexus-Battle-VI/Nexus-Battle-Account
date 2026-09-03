@@ -58,6 +58,8 @@ export class Account {
   private email: EmailAddress
   private displayName: DisplayName
   private countryCode: CountryCode | null
+  private countryCodeVersion = 0
+  private persistedCountryCodeVersion = 0
   private readonly firstNames: PersonName
   private readonly lastNames: PersonName
   private readonly termsAccepted: boolean
@@ -200,6 +202,23 @@ export class Account {
 
   changeCountryCode(countryCode: CountryCode | null): void {
     this.countryCode = countryCode
+    this.countryCodeVersion += 1
+  }
+
+  /** Una lectura antigua no expresa intencion de escribir el pais. */
+  get hasCountryCodeChange(): boolean {
+    return this.countryCodeVersion !== this.persistedCountryCodeVersion
+  }
+
+  get countryCodePersistenceVersion(): number {
+    return this.countryCodeVersion
+  }
+
+  /** Acepta el valor realmente guardado, sin borrar un cambio local posterior. */
+  acceptPersistedCountryCode(countryCode: CountryCode | null, version: number): void {
+    if (version !== this.countryCodeVersion) return
+    this.countryCode = countryCode
+    this.persistedCountryCodeVersion = version
   }
 
   get currentFirstNames(): PersonName {

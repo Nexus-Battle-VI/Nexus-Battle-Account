@@ -4,6 +4,7 @@ import type { Account } from '../../../domain/entities/Account'
 import type { AccountId } from '../../../domain/value-objects/AccountId'
 import type { DisplayName } from '../../../domain/value-objects/DisplayName'
 import type { EmailAddress } from '../../../domain/value-objects/EmailAddress'
+import { CountryCode } from '../../../domain/value-objects/CountryCode'
 import type {
   AccountRepositoryPort,
   HashedSecurityAnswer,
@@ -29,17 +30,18 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
   }
 
   async save(account: Account): Promise<void> {
-    await this.db.transaction().execute(async (trx) => {
-      await this.persistAccount(trx, account)
-    })
+    const persisted = await this.db
+      .transaction()
+      .execute((trx) => this.persistAccount(trx, account))
+    account.acceptPersistedCountryCode(persisted.countryCode, persisted.version)
   }
 
   async saveRegistration(
     account: Account,
     answers: readonly HashedSecurityAnswer[],
   ): Promise<void> {
-    await this.db.transaction().execute(async (trx) => {
-      await this.persistAccount(trx, account)
+    const persisted = await this.db.transaction().execute(async (trx) => {
+      const persistedAccount = await this.persistAccount(trx, account)
 
       await trx
         .deleteFrom('account_security_answers')
@@ -58,7 +60,9 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
           )
           .execute()
       }
+      return persistedAccount
     })
+    account.acceptPersistedCountryCode(persisted.countryCode, persisted.version)
   }
 
   async findById(id: AccountId): Promise<Account | null> {
@@ -238,11 +242,15 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
     })
   }
 
-  private async persistAccount(trx: Transaction<Database>, account: Account): Promise<void> {
+  private async persistAccount(
+    trx: Transaction<Database>,
+    account: Account,
+  ): Promise<{ countryCode: CountryCode | null; version: number }> {
     const snapshot = account.toSnapshot()
     const row = toRow(snapshot)
+    const version = account.countryCodePersistenceVersion
 
-    await trx
+    const persisted = await trx
       .insertInto('accounts')
       .values(row)
       .onConflict((oc) =>
@@ -250,7 +258,7 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
           subject: row.subject,
           email: row.email,
           display_name: row.display_name,
-          country_code: row.country_code,
+          ...(account.hasCountryCodeChange ? { country_code: row.country_code } : {}),
           first_names: row.first_names,
           last_names: row.last_names,
           terms_accepted: row.terms_accepted,
@@ -262,7 +270,8 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
           updated_at: new Date(),
         }),
       )
-      .execute()
+      .returning('country_code')
+      .executeTakeFirstOrThrow()
 
     await trx.deleteFrom('account_roles').where('account_id', '=', snapshot.id).execute()
 
@@ -270,6 +279,11 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
       .insertInto('account_roles')
       .values(snapshot.roles.map((role) => ({ account_id: snapshot.id, role })))
       .execute()
+    return {
+      countryCode:
+        persisted.country_code === null ? null : CountryCode.create(persisted.country_code),
+      version,
+    }
   }
 
   private async hydrate(row: AccountSnapshotRow): Promise<Account> {

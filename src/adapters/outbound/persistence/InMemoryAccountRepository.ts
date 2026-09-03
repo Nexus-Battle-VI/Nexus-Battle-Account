@@ -2,6 +2,7 @@ import type { Account } from '../../../domain/entities/Account'
 import type { AccountId } from '../../../domain/value-objects/AccountId'
 import type { DisplayName } from '../../../domain/value-objects/DisplayName'
 import type { EmailAddress } from '../../../domain/value-objects/EmailAddress'
+import { CountryCode } from '../../../domain/value-objects/CountryCode'
 import type {
   AccountRepositoryPort,
   HashedSecurityAnswer,
@@ -129,14 +130,23 @@ export class InMemoryAccountRepository implements AccountRepositoryPort, AdminAc
 
   private store(account: Account): void {
     const snapshot = account.toSnapshot()
+    const previous = this.byId.get(snapshot.id)
+    const countryCode =
+      previous !== undefined && !account.hasCountryCodeChange
+        ? previous.countryCode
+        : snapshot.countryCode
     const current = new Date(this.now().getTime())
     const metadata = this.metadataByAccount.get(snapshot.id)
 
-    this.byId.set(snapshot.id, snapshot)
+    this.byId.set(snapshot.id, { ...snapshot, countryCode })
     this.metadataByAccount.set(snapshot.id, {
       createdAt: metadata?.createdAt ?? current,
       updatedAt: current,
     })
+    account.acceptPersistedCountryCode(
+      countryCode === null ? null : CountryCode.create(countryCode),
+      account.countryCodePersistenceVersion,
+    )
   }
 
   private toAdminSummary(snapshot: AccountSnapshot): AdminAccountSummaryDto {
