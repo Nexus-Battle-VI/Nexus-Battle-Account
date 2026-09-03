@@ -11,6 +11,8 @@ import { Role } from '../../src/domain/entities/Role'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
+import { PersonName } from '../../src/domain/value-objects/PersonName'
+import { defaultAvatarMetadata } from '../support/account-factory'
 
 const buildAccount = (params: {
   readonly id: string
@@ -19,8 +21,13 @@ const buildAccount = (params: {
 }): Account =>
   Account.restore({
     id: AccountId.create(params.id),
-    email: EmailAddress.create(`${params.id}@nexus.test`),
-    displayName: DisplayName.create('Ana Ramirez'),
+    subject: params.id,
+    email: EmailAddress.create(`${params.id}@example.com`),
+    displayName: DisplayName.create('Usuario Administrativo'),
+    firstNames: PersonName.create('Usuario', 'Los nombres'),
+    lastNames: PersonName.create('Prueba', 'Los apellidos'),
+    termsAccepted: true,
+    avatar: defaultAvatarMetadata(params.id),
     status: params.status ?? AccountStatus.Active,
     roles: params.roles ?? [Role.Player],
   })
