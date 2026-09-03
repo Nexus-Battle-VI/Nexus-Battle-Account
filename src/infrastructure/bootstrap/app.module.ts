@@ -98,6 +98,8 @@ import {
 } from '../../application/ports/IdentityPasswordResetPort'
 import { RECOVERY_CHALLENGE_REPOSITORY } from '../../application/ports/RecoveryChallengeRepositoryPort'
 import type { RecoveryChallengeRepositoryPort } from '../../application/ports/RecoveryChallengeRepositoryPort'
+import { ACCOUNT_DELETION_REQUEST_REPOSITORY } from '../../application/ports/AccountDeletionRequestRepositoryPort'
+import type { AccountDeletionRequestRepositoryPort } from '../../application/ports/AccountDeletionRequestRepositoryPort'
 import { RECOVERY_OTP } from '../../application/ports/RecoveryOtpPort'
 import type { RecoveryOtpPort } from '../../application/ports/RecoveryOtpPort'
 import { CLOCK } from '../../application/ports/ClockPort'
@@ -150,6 +152,8 @@ import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/
 import { HttpNotificationRequester } from '../../adapters/outbound/messaging/HttpNotificationRequester'
 import { InMemoryRecoveryChallengeRepository } from '../../adapters/outbound/persistence/InMemoryRecoveryChallengeRepository'
 import { PostgresRecoveryChallengeRepository } from '../../adapters/outbound/persistence/PostgresRecoveryChallengeRepository'
+import { InMemoryAccountDeletionRequestRepository } from '../../adapters/outbound/persistence/InMemoryAccountDeletionRequestRepository'
+import { PostgresAccountDeletionRequestRepository } from '../../adapters/outbound/persistence/PostgresAccountDeletionRequestRepository'
 import { FixedRecoveryOtp } from '../../adapters/outbound/identity/FixedRecoveryOtp'
 import { RandomRecoveryOtp } from '../../adapters/outbound/identity/RandomRecoveryOtp'
 import { CognitoIdentityPasswordReset } from '../../adapters/outbound/identity/CognitoIdentityPasswordReset'
@@ -691,6 +695,18 @@ export const DATABASE = Symbol('Database')
         db === null
           ? new InMemoryRecoveryChallengeRepository()
           : new PostgresRecoveryChallengeRepository(db),
+      inject: [DATABASE],
+    },
+    {
+      // HU-43.1: sin caso de uso ni endpoint todavia (ver ADR-014 Decision 5
+      // y EN-011, Management #197). Se registra aqui, con el mismo
+      // `PERSISTENCE_DRIVER`, para que HU-43.2 pueda inyectarla sin volver a
+      // tocar la raiz de composicion.
+      provide: ACCOUNT_DELETION_REQUEST_REPOSITORY,
+      useFactory: (db: Kysely<Database> | null): AccountDeletionRequestRepositoryPort =>
+        db === null
+          ? new InMemoryAccountDeletionRequestRepository()
+          : new PostgresAccountDeletionRequestRepository(db),
       inject: [DATABASE],
     },
     {

@@ -31,6 +31,7 @@ const config: Config = {
     'src/adapters/outbound/persistence/PostgresMfaEvidenceRepository.ts',
     'src/adapters/outbound/persistence/PostgresNicknameBlacklist.ts',
     'src/adapters/outbound/persistence/PostgresSecurityQuestionCatalog.ts',
+    'src/adapters/outbound/persistence/PostgresAccountDeletionRequestRepository.ts',
     'src/adapters/outbound/persistence/migrations/hardening-mfa-evidence*.ts',
     'src/infrastructure/persistence/**/*.ts',
     '!src/infrastructure/persistence/migrate.ts',
