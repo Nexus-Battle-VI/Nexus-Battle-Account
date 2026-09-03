@@ -29,3 +29,5 @@ export const VERIFY_MFA_EVIDENCE = Symbol('VerifyMfaEvidence')
 export const LIST_ADMIN_ACCOUNTS = Symbol('ListAdminAccounts')
 export const EXPORT_ADMIN_ACCOUNTS = Symbol('ExportAdminAccounts')
 export const REQUEST_ACCOUNT_DELETION = Symbol('RequestAccountDeletion')
+/** Sin ruta HTTP propia: lo invoca `AccountDeletionProcessingScheduler` (HU-43.3). */
+export const PROCESS_ACCOUNT_DELETION = Symbol('ProcessAccountDeletion')

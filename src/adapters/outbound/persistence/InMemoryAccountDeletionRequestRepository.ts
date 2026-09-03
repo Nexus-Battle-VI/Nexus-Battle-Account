@@ -1,5 +1,6 @@
 import {
   AccountDeletionRequest,
+  AccountDeletionRequestStatus,
   type AccountDeletionRequestSnapshot,
 } from '../../../domain/entities/AccountDeletionRequest'
 import type { AccountId } from '../../../domain/value-objects/AccountId'
@@ -49,5 +50,36 @@ export class InMemoryAccountDeletionRequestRepository implements AccountDeletion
     )
 
     return Promise.resolve(found === undefined ? null : AccountDeletionRequest.restore(found))
+  }
+
+  /**
+   * Sin concurrencia real que proteger -JavaScript es de un solo hilo-, esta
+   * version solo reproduce la SEMANTICA: toma la mas antigua no cerrada y
+   * aplica la misma transicion de dominio que el adaptador de PostgreSQL. La
+   * proteccion real contra dos procesadores a la vez se verifica contra
+   * PostgreSQL de verdad (`FOR UPDATE SKIP LOCKED`), no aqui.
+   */
+  claimNextPending(): Promise<AccountDeletionRequest | null> {
+    const oldest = [...this.byId.values()]
+      .filter((snapshot) => snapshot.status !== AccountDeletionRequestStatus.Closed)
+      .sort(
+        (left, right) => new Date(left.receivedAt).getTime() - new Date(right.receivedAt).getTime(),
+      )[0]
+
+    if (oldest === undefined) {
+      return Promise.resolve(null)
+    }
+
+    const request = AccountDeletionRequest.restore(oldest)
+
+    if (request.currentStatus === AccountDeletionRequestStatus.Received) {
+      request.beginTreatment()
+    } else if (request.currentStatus === AccountDeletionRequestStatus.Failed) {
+      request.retry()
+    }
+
+    this.byId.set(request.id, request.toSnapshot())
+
+    return Promise.resolve(request)
   }
 }

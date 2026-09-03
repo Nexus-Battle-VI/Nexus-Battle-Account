@@ -40,6 +40,7 @@ import {
   LIST_ADMIN_ACCOUNTS,
   EXPORT_ADMIN_ACCOUNTS,
   REQUEST_ACCOUNT_DELETION,
+  PROCESS_ACCOUNT_DELETION,
 } from '../../adapters/inbound/http/tokens'
 import { READINESS_CHECKS, VERSION_REPORT } from '../../adapters/inbound/http/tokens.health'
 
@@ -65,6 +66,7 @@ import { FindAccountByEmail } from '../../application/use-cases/FindAccountByEma
 import { ListAdminAccounts } from '../../application/use-cases/ListAdminAccounts'
 import { ExportAdminAccounts } from '../../application/use-cases/ExportAdminAccounts'
 import { RequestAccountDeletion } from '../../application/use-cases/RequestAccountDeletion'
+import { ProcessAccountDeletion } from '../../application/use-cases/ProcessAccountDeletion'
 import { RevokeRole } from '../../application/use-cases/RevokeRole'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import {
@@ -163,6 +165,7 @@ import { CognitoIdentityPasswordReset } from '../../adapters/outbound/identity/C
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
 
+import { AccountDeletionProcessingScheduler } from '../scheduling/AccountDeletionProcessingScheduler'
 import { createLogger, type Logger } from '../observability/logger'
 import {
   AuthenticationDriver,
@@ -725,6 +728,59 @@ export const DATABASE = Symbol('Database')
       ): RequestAccountDeletion =>
         new RequestAccountDeletion({ accounts, deletionRequests, clock, ids }),
       inject: [ACCOUNT_REPOSITORY, ACCOUNT_DELETION_REQUEST_REPOSITORY, CLOCK, ID_GENERATOR],
+    },
+    {
+      // HU-43.3 (Management #305): tratamiento durable de datos personales y
+      // cierre. Sin ruta HTTP: lo invoca unicamente
+      // `AccountDeletionProcessingScheduler`.
+      provide: PROCESS_ACCOUNT_DELETION,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        deletionRequests: AccountDeletionRequestRepositoryPort,
+        avatars: AvatarStoragePort,
+        notifications: NotificationRequestPort,
+        clock: ClockPort,
+        logger: Logger,
+      ): ProcessAccountDeletion =>
+        new ProcessAccountDeletion({
+          accounts,
+          deletionRequests,
+          avatars,
+          notifications,
+          clock,
+          logger,
+        }),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        ACCOUNT_DELETION_REQUEST_REPOSITORY,
+        AVATAR_STORAGE,
+        NOTIFICATION_REQUEST,
+        CLOCK,
+        LOGGER,
+      ],
+    },
+    {
+      // Arranca (o no) segun `ACCOUNT_DELETION_PROCESSING_ENABLED`. Es un
+      // provider mas de la raiz de composicion: Nest invoca sus ganchos de
+      // ciclo de vida (`onModuleInit`/`onModuleDestroy`) sobre CUALQUIER
+      // instancia de provider que los implemente, sin exigir `@Injectable()`
+      // ni una clase registrada de otra forma -mismo patron de clase plana
+      // que el resto de casos de uso de este modulo.
+      provide: AccountDeletionProcessingScheduler,
+      useFactory: (
+        config: AppConfig,
+        deletionRequests: AccountDeletionRequestRepositoryPort,
+        processAccountDeletion: ProcessAccountDeletion,
+        logger: Logger,
+      ): AccountDeletionProcessingScheduler =>
+        new AccountDeletionProcessingScheduler({
+          enabled: config.accountDeletionProcessingEnabled,
+          intervalMs: config.accountDeletionProcessingIntervalMs,
+          deletionRequests,
+          processAccountDeletion,
+          logger,
+        }),
+      inject: [APP_CONFIG, ACCOUNT_DELETION_REQUEST_REPOSITORY, PROCESS_ACCOUNT_DELETION, LOGGER],
     },
     {
       // Con proveedor de identidad real, el codigo debe ser impredecible
