@@ -42,6 +42,7 @@ import { ConfirmRegistration } from '../../../application/use-cases/ConfirmRegis
 import { GetAccount } from '../../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
 import { UpdateOwnAccount } from '../../../application/use-cases/UpdateOwnAccount'
+import { ListAdminAccounts } from '../../../application/use-cases/ListAdminAccounts'
 import { VerifyAccount } from '../../../application/use-cases/VerifyAccount'
 import { AssignRole } from '../../../application/use-cases/AssignRole'
 import { FindAccountByEmail } from '../../../application/use-cases/FindAccountByEmail'
@@ -59,12 +60,15 @@ import {
   FIND_ACCOUNT_BY_EMAIL,
   ASSIGN_ROLE,
   REVOKE_ROLE,
+  LIST_ADMIN_ACCOUNTS,
 } from './tokens'
 import {
   AccountResponse,
+  AdminAccountsResponse,
   AssignRoleRequest,
   ConfirmRegistrationRequest,
   FindAccountByEmailQuery,
+  ListAdminAccountsQuery,
   ManagedAccountResponse,
   RegisterAccountRequest,
   UpdateOwnAccountRequest,
@@ -86,6 +90,7 @@ export class AccountsController {
     @Inject(GET_ACCOUNT) private readonly getAccount: GetAccount,
     @Inject(GET_OWN_ACCOUNT) private readonly getOwnAccount: GetOwnAccount,
     @Inject(UPDATE_OWN_ACCOUNT) private readonly updateOwnAccount: UpdateOwnAccount,
+    @Inject(LIST_ADMIN_ACCOUNTS) private readonly listAdminAccounts: ListAdminAccounts,
     @Inject(VERIFY_ACCOUNT) private readonly verifyAccount: VerifyAccount,
     @Inject(CONFIRM_REGISTRATION) private readonly confirmRegistration: ConfirmRegistration,
     @Inject(FIND_ACCOUNT_BY_EMAIL) private readonly findAccountByEmail: FindAccountByEmail,
@@ -175,6 +180,28 @@ export class AccountsController {
     }
 
     return outcome.account
+  }
+
+  @Roles(Role.Administrator)
+  @Get()
+  @ApiOperation({ summary: 'Lista cuentas para el panel administrativo (HU-44.2)' })
+  @ApiResponse({ status: 200, description: 'Listado administrativo', type: AdminAccountsResponse })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
+  @ApiResponse({ status: 403, description: 'La identidad no es administradora' })
+  async listAdmin(@Query() query: ListAdminAccountsQuery): Promise<AdminAccountsResponse> {
+    try {
+      return await this.listAdminAccounts.execute({
+        id: query.id,
+        email: query.email,
+        firstNames: query.firstNames,
+        lastNames: query.lastNames,
+        displayName: query.nickname,
+        role: query.role,
+        status: query.status,
+      })
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
   }
 
   @Get('me')
