@@ -102,16 +102,18 @@ type RawEnv = Readonly<Record<string, string | undefined>>
 /**
  * Servicios autorizados a firmar peticiones internas.
  *
- * La lista por defecto contiene `catalog` porque es el unico consumidor
- * previsto hoy. Declararla vacia por defecto obligaria a configurarla en todos
- * los entornos para que el contrato funcionara, y el sintoma -401 sin motivo
- * visible- seria dificil de atribuir.
+ * La lista por defecto contiene `catalog` y `community`: son los dos
+ * consumidores previstos hoy del contrato interno de evidencia MFA (HU-33.6 en
+ * Catalog, HARDENING en Community -`INTERNAL_SERVICE_NAME=community` por
+ * defecto en ese servicio-). Declararla vacia por defecto obligaria a
+ * configurarla en todos los entornos para que el contrato funcionara, y el
+ * sintoma -401 sin motivo visible- seria dificil de atribuir.
  */
 const readAllowedServices = (env: RawEnv): readonly string[] => {
   const raw = env.INTERNAL_SERVICE_ALLOWED_SERVICES
 
   if (raw === undefined || raw.trim().length === 0) {
-    return ['catalog']
+    return ['catalog', 'community']
   }
 
   return raw
