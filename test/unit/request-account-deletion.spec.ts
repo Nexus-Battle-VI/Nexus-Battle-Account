@@ -106,6 +106,7 @@ describe('RequestAccountDeletion', () => {
     const fallando: AccountDeletionRequestRepositoryPort = {
       findActiveByAccountId: () => Promise.resolve(null),
       findById: () => Promise.resolve(null),
+      claimNextPending: () => Promise.resolve(null),
       save: () => Promise.reject(new Error('la base de datos no respondio')),
     }
 
@@ -139,6 +140,7 @@ describe('RequestAccountDeletion', () => {
     const conCarrera: AccountDeletionRequestRepositoryPort = {
       findActiveByAccountId: () => Promise.resolve(intento === 0 ? null : ganadora),
       findById: () => Promise.resolve(ganadora),
+      claimNextPending: () => Promise.resolve(null),
       save: () => {
         intento += 1
 

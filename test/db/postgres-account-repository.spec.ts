@@ -674,6 +674,62 @@ describe('PostgresAccountRepository', () => {
     })
   })
 
+  describe('deleteById (HU-43.3, tratamiento durable de eliminacion)', () => {
+    it('elimina fisicamente la cuenta y hace cascada sobre roles y respuestas de seguridad', async () => {
+      const account = buildAccount()
+      await repository.saveRegistration(account, [
+        { questionId: 'sq-01', answerHash: 'f'.repeat(64) },
+      ])
+
+      await repository.deleteById(account.id)
+
+      expect(await repository.findById(account.id)).toBeNull()
+      expect(await repository.findSecurityAnswers(account.id)).toEqual([])
+
+      const leftoverRoles = await db
+        .selectFrom('account_roles')
+        .selectAll()
+        .where('account_id', '=', account.id.value)
+        .execute()
+
+      expect(leftoverRoles).toEqual([])
+    })
+
+    it('eliminar una cuenta que ya no existe no falla (idempotente ante reintento)', async () => {
+      await expect(
+        repository.deleteById(AccountId.create('acc-jamas-existio')),
+      ).resolves.toBeUndefined()
+    })
+
+    it('no impide que la cuenta se elimine mientras exista una solicitud de eliminacion asociada (FK desacoplada)', async () => {
+      const account = buildAccount()
+      await repository.save(account)
+
+      await db
+        .insertInto('account_deletion_requests')
+        .values({
+          id: `del-${account.id.value}`,
+          account_id: account.id.value,
+          status: 'IN_PROGRESS',
+        })
+        .execute()
+
+      await repository.deleteById(account.id)
+
+      expect(await repository.findById(account.id)).toBeNull()
+
+      // La solicitud sobrevive: es la evidencia de que existio y cuando se
+      // cerro, independientemente de que la cuenta ya no exista.
+      const solicitud = await db
+        .selectFrom('account_deletion_requests')
+        .selectAll()
+        .where('id', '=', `del-${account.id.value}`)
+        .executeTakeFirst()
+
+      expect(solicitud?.account_id).toBe(account.id.value)
+    })
+  })
+
   beforeEach(() => {
     repository = new PostgresAccountRepository(db)
   })

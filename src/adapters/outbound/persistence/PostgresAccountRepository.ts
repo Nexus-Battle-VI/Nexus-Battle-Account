@@ -111,6 +111,13 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
     return found !== undefined
   }
 
+  async deleteById(id: AccountId): Promise<void> {
+    // `account_roles` y `account_security_answers` referencian `accounts` con
+    // `on delete cascade`: no hace falta borrarlas aqui aparte. Borrar un id
+    // que ya no existe afecta cero filas, no lanza.
+    await this.db.deleteFrom('accounts').where('id', '=', id.value).execute()
+  }
+
   async findSecurityAnswers(id: AccountId): Promise<readonly HashedSecurityAnswer[]> {
     const rows = await this.db
       .selectFrom('account_security_answers')

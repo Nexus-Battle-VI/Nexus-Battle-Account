@@ -95,6 +95,15 @@ export interface AppConfig {
   readonly internalServiceAuthSecret: string | null
   /** Servicios autorizados a invocar el contrato interno. */
   readonly internalServiceAllowed: readonly string[]
+  /**
+   * Procesamiento durable de HU-43.3 (Management #305). Apagado por
+   * defecto, igual que `NOTIFICATIONS_INGEST_URL`: un entorno que no lo activa
+   * explicitamente no ejecuta tratamiento de datos personales en segundo
+   * plano por sorpresa.
+   */
+  readonly accountDeletionProcessingEnabled: boolean
+  /** Intervalo entre pasadas del procesamiento, en milisegundos. */
+  readonly accountDeletionProcessingIntervalMs: number
 }
 
 type RawEnv = Readonly<Record<string, string | undefined>>
@@ -311,5 +320,17 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     notificationsIngestUrl: readString(env, 'NOTIFICATIONS_INGEST_URL', '') || null,
     internalServiceAuthSecret: readString(env, 'INTERNAL_SERVICE_AUTH_SECRET', '') || null,
     internalServiceAllowed: readAllowedServices(env),
+    accountDeletionProcessingEnabled: readBoolean(
+      env,
+      'ACCOUNT_DELETION_PROCESSING_ENABLED',
+      false,
+    ),
+    accountDeletionProcessingIntervalMs: readInteger(
+      env,
+      'ACCOUNT_DELETION_PROCESSING_INTERVAL_MS',
+      60_000,
+      1_000,
+      86_400_000,
+    ),
   }
 }

@@ -113,6 +113,14 @@ export class InMemoryAccountRepository implements AccountRepositoryPort, AdminAc
     return Promise.resolve(this.answersByAccount.get(id.value) ?? [])
   }
 
+  deleteById(id: AccountId): Promise<void> {
+    this.byId.delete(id.value)
+    this.answersByAccount.delete(id.value)
+    this.metadataByAccount.delete(id.value)
+
+    return Promise.resolve()
+  }
+
   answersOf(accountId: string): readonly HashedSecurityAnswer[] {
     return this.answersByAccount.get(accountId) ?? []
   }

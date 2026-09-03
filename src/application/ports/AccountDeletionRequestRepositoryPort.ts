@@ -26,6 +26,22 @@ export interface AccountDeletionRequestRepositoryPort {
    * idempotente una solicitud repetida.
    */
   findActiveByAccountId(accountId: AccountId): Promise<AccountDeletionRequest | null>
+
+  /**
+   * Reclama, de forma atomica, la solicitud pendiente mas antigua para
+   * procesarla (HU-43.3): `RECEIVED`/`FAILED` avanzan a `IN_PROGRESS` como
+   * parte de la misma operacion; una que ya estaba `IN_PROGRESS` -un intento
+   * previo que se interrumpio antes de cerrar- se devuelve tal cual, para que
+   * el procesamiento pueda reanudarse.
+   *
+   * Es la proteccion real contra dos procesadores tomando la MISMA solicitud
+   * a la vez (HU-43.3): el adaptador de PostgreSQL la implementa con
+   * `SELECT ... FOR UPDATE SKIP LOCKED`, no con una comprobacion previa en la
+   * aplicacion que una carrera podria saltarse.
+   *
+   * Devuelve `null` cuando no hay ninguna solicitud pendiente que reclamar.
+   */
+  claimNextPending(): Promise<AccountDeletionRequest | null>
 }
 
 export const ACCOUNT_DELETION_REQUEST_REPOSITORY = Symbol('AccountDeletionRequestRepositoryPort')

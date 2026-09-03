@@ -1,6 +1,9 @@
 import { DomainError } from '../errors/DomainError'
 import type { AccountId } from '../value-objects/AccountId'
 
+/** Politica de Privacidad y Datos Personales S10: plazo maximo de tratamiento. */
+const POLICY_DEADLINE_MS = 30 * 24 * 60 * 60 * 1000
+
 export const AccountDeletionRequestStatus = {
   Received: 'RECEIVED',
   InProgress: 'IN_PROGRESS',
@@ -98,6 +101,20 @@ export class AccountDeletionRequest {
   /** `Closed` es el unico estado que no cuenta como solicitud activa. */
   get isActive(): boolean {
     return this.status !== AccountDeletionRequestStatus.Closed
+  }
+
+  /**
+   * Verifica el cumplimiento del plazo maximo de 30 dias (HU-43.3, Politica
+   * S10) tomando `referenceDate` de `ClockPort`, nunca del reloj del sistema.
+   *
+   * Es una comprobacion de HECHO, no una accion de negocio: HU-43 no define
+   * que debe ocurrir cuando una solicitud supera el plazo, asi que este
+   * metodo no cierra, ni marca, ni descarta nada por su cuenta.
+   */
+  isWithinPolicyDeadline(referenceDate: Date): boolean {
+    const elapsedMs = referenceDate.getTime() - this.receivedAt.getTime()
+
+    return elapsedMs <= POLICY_DEADLINE_MS
   }
 
   /** El tratamiento dentro de Account empieza a ejecutarse (Decision 5, ADR-014). */
