@@ -22,6 +22,7 @@ import {
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
   GET_OWN_PERSONAL_DATA,
+  EXPORT_PORTABLE_PERSONAL_DATA,
   UPDATE_OWN_ACCOUNT,
   CHANGE_OWN_PASSWORD,
   LOGIN_ACCOUNT,
@@ -52,6 +53,7 @@ import { ConfirmTotpEnrollment } from '../../application/use-cases/ConfirmTotpEn
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
 import { GetOwnPersonalData } from '../../application/use-cases/GetOwnPersonalData'
+import { ExportPortablePersonalData } from '../../application/use-cases/ExportPortablePersonalData'
 import { UpdateOwnAccount } from '../../application/use-cases/UpdateOwnAccount'
 import { ChangeOwnPassword } from '../../application/use-cases/ChangeOwnPassword'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
@@ -165,6 +167,8 @@ import { FixedRecoveryOtp } from '../../adapters/outbound/identity/FixedRecovery
 import { RandomRecoveryOtp } from '../../adapters/outbound/identity/RandomRecoveryOtp'
 import { CognitoIdentityPasswordReset } from '../../adapters/outbound/identity/CognitoIdentityPasswordReset'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
+import { JsonPrivacySerializer } from '../../adapters/outbound/export/JsonPrivacySerializer'
+import { XmlPrivacySerializer } from '../../adapters/outbound/export/XmlPrivacySerializer'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
 
 import { AccountDeletionProcessingScheduler } from '../scheduling/AccountDeletionProcessingScheduler'
@@ -627,6 +631,22 @@ export const DATABASE = Symbol('Database')
       useFactory: (accounts: AccountRepositoryPort): GetOwnPersonalData =>
         new GetOwnPersonalData(accounts),
       inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: EXPORT_PORTABLE_PERSONAL_DATA,
+      useFactory: (
+        getOwnPersonalData: GetOwnPersonalData,
+        clock: ClockPort,
+      ): ExportPortablePersonalData =>
+        new ExportPortablePersonalData({
+          getOwnPersonalData,
+          clock,
+          serializers: {
+            json: new JsonPrivacySerializer(),
+            xml: new XmlPrivacySerializer(),
+          },
+        }),
+      inject: [GET_OWN_PERSONAL_DATA, CLOCK],
     },
     {
       provide: UPDATE_OWN_ACCOUNT,

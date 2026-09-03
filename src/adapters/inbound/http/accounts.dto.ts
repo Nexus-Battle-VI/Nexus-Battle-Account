@@ -133,6 +133,12 @@ export class OwnPersonalDataResponse implements OwnPersonalDataDto {
   readonly termsAccepted!: boolean
 }
 
+export class PrivacyExportQuery {
+  @ApiProperty({ enum: ['json', 'xml', 'pdf'] })
+  @IsIn(['json', 'xml', 'pdf'])
+  readonly format!: 'json' | 'xml' | 'pdf'
+}
+
 /**
  * Contrato de la actualizacion self-service de la cuenta propia (HU-05).
  *
