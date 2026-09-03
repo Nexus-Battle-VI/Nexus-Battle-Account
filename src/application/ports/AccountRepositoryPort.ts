@@ -22,6 +22,7 @@ export interface HashedSecurityAnswer {
  * contrato, incluido el de no filtrar al almacen una mutacion sin guardar.
  */
 export interface AccountRepositoryPort {
+  /** Conserva el pais vigente salvo cambio explicito; tras commit actualiza ese dato en el agregado. */
   save(account: Account): Promise<void>
   findById(id: AccountId): Promise<Account | null>
   findByEmail(email: EmailAddress): Promise<Account | null>

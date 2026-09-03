@@ -29,17 +29,17 @@ El servicio comprueba el testimonio que acompaña a cada petición contra el JWK
 
 La comprobación de firma la hace [`aws-jwt-verify`](https://github.com/awslabs/aws-jwt-verify). **No se implementa verificación criptográfica a mano**: es la clase de código donde un error sutil no falla, sino que acepta tokens falsificados en silencio.
 
-| Ruta                                  | Protección                                                      |
-| ------------------------------------- | --------------------------------------------------------------- |
-| `POST /api/accounts`                  | Testimonio válido. La cuenta queda vinculada a su `sub`         |
-| `GET /api/accounts/me`                | Testimonio válido. Resuelve **la propia cuenta**                |
-| `PATCH /api/accounts/me`              | Testimonio válido. Edita **la propia cuenta** (apodo, HU-05)    |
-| `POST /api/accounts/me/password`      | Testimonio válido. Cambia la contraseña en el proveedor (HU-05) |
-| `GET /api/accounts/:id`               | Rol **`ADMINISTRATOR`**                                         |
-| `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                         |
-| `POST /api/sessions`                  | **Pública.** Pedirla ya exigiría la sesión que crea             |
-| `POST /api/sessions/second-factor`    | **Pública.** Continúa el login administrativo (HU-02)           |
-| `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio                 |
+| Ruta                                  | Protección                                                                         |
+| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| `POST /api/accounts`                  | Testimonio válido. La cuenta queda vinculada a su `sub`                            |
+| `GET /api/accounts/me`                | Testimonio válido. Resuelve **la propia cuenta**                                   |
+| `PATCH /api/accounts/me`              | Testimonio válido. Edita **la propia cuenta** (apodo y país opcional, HU-05/HU-57) |
+| `POST /api/accounts/me/password`      | Testimonio válido. Cambia la contraseña en el proveedor (HU-05)                    |
+| `GET /api/accounts/:id`               | Rol **`ADMINISTRATOR`**                                                            |
+| `POST /api/accounts/:id/verification` | Rol **`ADMINISTRATOR`**                                                            |
+| `POST /api/sessions`                  | **Pública.** Pedirla ya exigiría la sesión que crea                                |
+| `POST /api/sessions/second-factor`    | **Pública.** Continúa el login administrativo (HU-02)                              |
+| `GET /api/health/*`                   | **Pública.** Un orquestador no lleva testimonio                                    |
 
 ### El registro exige testimonio, y no es arbitrario
 
@@ -189,19 +189,19 @@ Documentación interactiva de la API en `http://localhost:3000/api/docs`.
 
 ## API
 
-| Método  | Ruta                             | Descripción                                                          |
-| ------- | -------------------------------- | -------------------------------------------------------------------- |
-| `POST`  | `/api/accounts`                  | Registra una cuenta de jugador (`multipart/form-data`, HU-01)        |
-| `GET`   | `/api/accounts/me`               | Recupera la cuenta del testimonio                                    |
-| `PATCH` | `/api/accounts/me`               | Actualiza la información personal de la cuenta propia (apodo, HU-05) |
-| `POST`  | `/api/accounts/me/password`      | Cambia la contraseña de la cuenta propia (HU-05)                     |
-| `GET`   | `/api/accounts/:id`              | Recupera una cuenta                                                  |
-| `POST`  | `/api/accounts/:id/verification` | Marca la cuenta como verificada                                      |
-| `POST`  | `/api/sessions`                  | Inicia sesion con correo/apodo + contrasena (HU-02)                  |
-| `POST`  | `/api/sessions/second-factor`    | Completa el segundo factor administrativo (HU-02)                    |
-| `GET`   | `/api/health/live`               | El proceso responde. No consulta dependencias                        |
-| `GET`   | `/api/health/ready`              | Evalúa las dependencias reales. Responde `503` si alguna falla       |
-| `GET`   | `/api/version`                   | Servicio, versión y entorno                                          |
+| Método  | Ruta                             | Descripción                                                       |
+| ------- | -------------------------------- | ----------------------------------------------------------------- |
+| `POST`  | `/api/accounts`                  | Registra una cuenta de jugador (`multipart/form-data`, HU-01)     |
+| `GET`   | `/api/accounts/me`               | Recupera la cuenta del testimonio                                 |
+| `PATCH` | `/api/accounts/me`               | Actualiza apodo y país opcional de la cuenta propia (HU-05/HU-57) |
+| `POST`  | `/api/accounts/me/password`      | Cambia la contraseña de la cuenta propia (HU-05)                  |
+| `GET`   | `/api/accounts/:id`              | Recupera una cuenta                                               |
+| `POST`  | `/api/accounts/:id/verification` | Marca la cuenta como verificada                                   |
+| `POST`  | `/api/sessions`                  | Inicia sesion con correo/apodo + contrasena (HU-02)               |
+| `POST`  | `/api/sessions/second-factor`    | Completa el segundo factor administrativo (HU-02)                 |
+| `GET`   | `/api/health/live`               | El proceso responde. No consulta dependencias                     |
+| `GET`   | `/api/health/ready`              | Evalúa las dependencias reales. Responde `503` si alguna falla    |
+| `GET`   | `/api/version`                   | Servicio, versión y entorno                                       |
 
 ## Inicio de sesion y RBAC (HU-02)
 
@@ -289,10 +289,12 @@ siempre desde el sujeto del testimonio (`@CurrentIdentity()`), nunca desde un
 identificador del cuerpo. No existe `PATCH /api/accounts/:id`.
 
 - **`GET /api/accounts/me`** — consulta. Devuelve el contrato público
-  (`id`, `email`, `displayName`, `firstNames`, `lastNames`, `status`, `roles`).
+  (`id`, `email`, `displayName`, `countryCode`, `firstNames`, `lastNames`, `status`, `roles`).
   El `subject` es un vínculo interno con el proveedor y **no** sale del servicio.
 - **`PATCH /api/accounts/me`** — actualización de información personal. Hoy admite
-  **únicamente `displayName`** (apodo), reutilizando las reglas ya aprobadas en el
+  **`displayName`** (apodo) y **`countryCode`** (país opcional), como actualización parcial.
+  El país omitido se conserva y `null` lo elimina; no se infiere para cuentas antiguas.
+  [Contrato de país para e-commerce](docs/profile-country.md). El apodo reutiliza las reglas ya aprobadas en el
   registro: formato de `DisplayName`, unicidad insensible a mayúsculas y lista
   negra vigente. El `ValidationPipe` global (`forbidNonWhitelisted`) rechaza con
   400 cualquier campo no declarado, de modo que no se puede tocar `status`,

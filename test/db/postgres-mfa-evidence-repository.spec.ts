@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
+import { startTestPostgres, type TestPostgres } from './postgres-runtime'
 import { sql, type Kysely } from 'kysely'
 
 import { PostgresMfaEvidenceRepository } from '../../src/adapters/outbound/persistence/PostgresMfaEvidenceRepository'
@@ -12,7 +12,7 @@ import { SecondFactorMethod } from '../../src/domain/entities/SecondFactorMethod
 import { createDatabase } from '../../src/infrastructure/persistence/database'
 
 describe('PostgresMfaEvidenceRepository', () => {
-  let container: StartedPostgreSqlContainer
+  let container: TestPostgres
   let db: Kysely<Database>
   let repository: PostgresMfaEvidenceRepository
 
@@ -20,7 +20,7 @@ describe('PostgresMfaEvidenceRepository', () => {
   const EXPIRES_AT = new Date('2026-09-02T05:15:00.000Z')
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer('postgres:17-alpine').start()
+    container = await startTestPostgres()
     db = createDatabase({ connectionString: container.getConnectionUri() })
 
     await evidenceMigration.up(db as unknown as Kysely<unknown>)

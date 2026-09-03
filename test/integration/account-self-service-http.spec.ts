@@ -360,6 +360,48 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
   })
 
   describe('PATCH /api/accounts/me', () => {
+    it('guarda país propio normalizado y permite borrarlo sin cambiar el apodo ni otra cuenta', async () => {
+      const before = await getOwn()
+      expect(before.body.countryCode).toBeNull()
+      const otherBefore = await request(app.getHttpServer())
+        .get('/api/accounts/me')
+        .set('authorization', bearer('token-jugador-b'))
+      const saved = await request(app.getHttpServer())
+        .patch('/api/accounts/me')
+        .set('authorization', bearer('token-jugador'))
+        .send({ countryCode: ' co ' })
+        .expect(200)
+      expect(saved.body).toEqual({ ...before.body, countryCode: 'CO' })
+      expect((await getOwn()).body.countryCode).toBe('CO')
+      const otherAfter = await request(app.getHttpServer())
+        .get('/api/accounts/me')
+        .set('authorization', bearer('token-jugador-b'))
+      expect(otherAfter.body).toEqual(otherBefore.body)
+      const cleared = await request(app.getHttpServer())
+        .patch('/api/accounts/me')
+        .set('authorization', bearer('token-jugador'))
+        .send({ countryCode: null })
+        .expect(200)
+      expect(cleared.body).toEqual(before.body)
+    })
+
+    it.each([
+      { countryCode: 'ZZ' },
+      { countryCode: 57 },
+      { countryCode: '' },
+      { displayName: null },
+      {},
+      { countryCode: 'CO', subject: 'sub:beatriz@nexus.test' },
+    ])('rechaza perfil inválido o cambio de titular %j', async (body) => {
+      const before = await getOwn()
+      await request(app.getHttpServer())
+        .patch('/api/accounts/me')
+        .set('authorization', bearer('token-jugador'))
+        .send(body)
+        .expect(400)
+      expect((await getOwn()).body).toEqual(before.body)
+    })
+
     it('responde 401 sin testimonio', async () => {
       const response = await request(app.getHttpServer())
         .patch('/api/accounts/me')

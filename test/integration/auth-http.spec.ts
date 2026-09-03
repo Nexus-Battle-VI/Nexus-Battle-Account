@@ -381,6 +381,7 @@ describe('API de cuentas con autenticacion activa', () => {
 
       expect(response.status).toBe(200)
       expect(Object.keys(response.body).sort()).toEqual([
+        'countryCode',
         'displayName',
         'email',
         'firstNames',

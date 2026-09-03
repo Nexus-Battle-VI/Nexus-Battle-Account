@@ -2,6 +2,7 @@ import { Account, type AccountSnapshot } from '../../../domain/entities/Account'
 import { AccountId } from '../../../domain/value-objects/AccountId'
 import { AvatarMetadata } from '../../../domain/value-objects/AvatarMetadata'
 import { DisplayName } from '../../../domain/value-objects/DisplayName'
+import { CountryCode } from '../../../domain/value-objects/CountryCode'
 import { EmailAddress } from '../../../domain/value-objects/EmailAddress'
 import { PersonName } from '../../../domain/value-objects/PersonName'
 
@@ -11,6 +12,7 @@ export const hydrateAccount = (snapshot: AccountSnapshot): Account =>
     subject: snapshot.subject,
     email: EmailAddress.create(snapshot.email),
     displayName: DisplayName.create(snapshot.displayName),
+    countryCode: snapshot.countryCode === null ? null : CountryCode.create(snapshot.countryCode),
     firstNames: PersonName.create(snapshot.firstNames, 'Los nombres'),
     lastNames: PersonName.create(snapshot.lastNames, 'Los apellidos'),
     termsAccepted: snapshot.termsAccepted,
