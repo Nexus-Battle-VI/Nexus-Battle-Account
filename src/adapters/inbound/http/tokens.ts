@@ -33,3 +33,4 @@ export const EXPORT_ADMIN_ACCOUNTS = Symbol('ExportAdminAccounts')
 export const REQUEST_ACCOUNT_DELETION = Symbol('RequestAccountDeletion')
 /** Sin ruta HTTP propia: lo invoca `AccountDeletionProcessingScheduler` (HU-43.3). */
 export const PROCESS_ACCOUNT_DELETION = Symbol('ProcessAccountDeletion')
+export const GENERATE_PRIVACY_PDF_REPORT = Symbol('GeneratePrivacyPdfReport')

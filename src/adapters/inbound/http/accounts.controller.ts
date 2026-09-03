@@ -52,6 +52,7 @@ import { GetAccount } from '../../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
 import { GetOwnPersonalData } from '../../../application/use-cases/GetOwnPersonalData'
 import { ExportPortablePersonalData } from '../../../application/use-cases/ExportPortablePersonalData'
+import { GeneratePrivacyPdfReport } from '../../../application/use-cases/GeneratePrivacyPdfReport'
 import { UpdateOwnAccount } from '../../../application/use-cases/UpdateOwnAccount'
 import { ListAdminAccounts } from '../../../application/use-cases/ListAdminAccounts'
 import { ExportAdminAccounts } from '../../../application/use-cases/ExportAdminAccounts'
@@ -61,7 +62,7 @@ import { FindAccountByEmail } from '../../../application/use-cases/FindAccountBy
 import { RevokeRole } from '../../../application/use-cases/RevokeRole'
 import type { AdminAccountQueryCriteria } from '../../../application/dto/AdminAccountQueryCriteria'
 import { Role, isRole } from '../../../domain/entities/Role'
-import { CurrentIdentity, Public, Roles } from './auth/decorators'
+import { CurrentAccessToken, CurrentIdentity, Public, Roles } from './auth/decorators'
 import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
 import {
   REGISTER_ACCOUNT,
@@ -69,6 +70,7 @@ import {
   GET_OWN_ACCOUNT,
   GET_OWN_PERSONAL_DATA,
   EXPORT_PORTABLE_PERSONAL_DATA,
+  GENERATE_PRIVACY_PDF_REPORT,
   UPDATE_OWN_ACCOUNT,
   VERIFY_ACCOUNT,
   CONFIRM_REGISTRATION,
@@ -111,6 +113,8 @@ export class AccountsController {
     @Inject(GET_OWN_PERSONAL_DATA) private readonly getOwnPersonalData: GetOwnPersonalData,
     @Inject(EXPORT_PORTABLE_PERSONAL_DATA)
     private readonly exportPortablePersonalData: ExportPortablePersonalData,
+    @Inject(GENERATE_PRIVACY_PDF_REPORT)
+    private readonly generatePrivacyPdfReport: GeneratePrivacyPdfReport,
     @Inject(UPDATE_OWN_ACCOUNT) private readonly updateOwnAccount: UpdateOwnAccount,
     @Inject(LIST_ADMIN_ACCOUNTS) private readonly listAdminAccounts: ListAdminAccounts,
     @Inject(EXPORT_ADMIN_ACCOUNTS) private readonly exportAdminAccounts: ExportAdminAccounts,
@@ -287,12 +291,20 @@ export class AccountsController {
   @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
   async exportOwnPersonalData(
     @CurrentIdentity() identity: VerifiedIdentity,
+    @CurrentAccessToken() accessToken: string,
     @Query() query: PrivacyExportQuery,
   ): Promise<StreamableFile> {
     if (query.format === 'pdf') {
-      throw new ServiceUnavailableException(
-        'El reporte de privacidad no esta disponible. Intentelo de nuevo mas tarde.',
-      )
+      try {
+        const file = await this.generatePrivacyPdfReport.execute(identity.subject, accessToken)
+
+        return new StreamableFile(file.content, {
+          type: file.mediaType,
+          disposition: `attachment; filename="${file.filename}"`,
+        })
+      } catch (error: unknown) {
+        throw AccountsController.translate(error)
+      }
     }
 
     try {
