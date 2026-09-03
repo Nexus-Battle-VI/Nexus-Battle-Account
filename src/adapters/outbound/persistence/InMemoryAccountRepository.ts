@@ -146,6 +146,7 @@ export class InMemoryAccountRepository implements AccountRepositoryPort, AdminAc
       id: snapshot.id,
       email: snapshot.email,
       displayName: snapshot.displayName,
+      countryCode: snapshot.countryCode,
       firstNames: snapshot.firstNames,
       lastNames: snapshot.lastNames,
       status: snapshot.status,

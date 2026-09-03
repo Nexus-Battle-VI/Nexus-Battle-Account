@@ -9,6 +9,7 @@ import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { Role } from '../../src/domain/entities/Role'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
+import { CountryCode } from '../../src/domain/value-objects/CountryCode'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
 import { PersonName } from '../../src/domain/value-objects/PersonName'
 import { defaultAvatarMetadata } from '../support/account-factory'
@@ -65,6 +66,7 @@ const EXPORT_FIELDS = [
   'id',
   'email',
   'displayName',
+  'countryCode',
   'firstNames',
   'lastNames',
   'status',
@@ -78,6 +80,7 @@ const buildAccount = (seed: AccountSeed): Account =>
     subject: seed.subject,
     email: EmailAddress.create(seed.email),
     displayName: DisplayName.create(seed.displayName),
+    countryCode: seed.id === 'acc-export-admin' ? CountryCode.create('CO') : null,
     firstNames: PersonName.create(seed.firstNames, 'Los nombres'),
     lastNames: PersonName.create(seed.lastNames, 'Los apellidos'),
     termsAccepted: true,
@@ -188,6 +191,7 @@ describe('ExportAdminAccounts', () => {
       id: 'acc-export-admin',
       email: 'export.admin@nexus.test',
       displayName: 'Capitana Export',
+      countryCode: 'CO',
       firstNames: 'Ana Maria',
       lastNames: 'Vega',
       status: AccountStatus.Active,
@@ -210,6 +214,7 @@ describe('ExportAdminAccounts', () => {
       id: 'acc-extra',
       email: 'extra@nexus.test',
       displayName: 'Extra Export',
+      countryCode: null,
       firstNames: 'Extra',
       lastNames: 'Runtime',
       status: AccountStatus.Active,
@@ -244,6 +249,7 @@ describe('ExportAdminAccounts', () => {
       id: 'acc-mutacion',
       email: 'mutacion@nexus.test',
       displayName: 'Mutacion Export',
+      countryCode: null,
       firstNames: 'Muta',
       lastNames: 'Cion',
       status: AccountStatus.Active,

@@ -11,6 +11,7 @@ import {
   Matches,
   MaxLength,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator'
 
@@ -96,6 +97,14 @@ export class AccountResponse {
   @ApiProperty({ example: 'Ana Ramirez' })
   readonly displayName!: string
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'CO',
+    description: 'País declarado, ISO 3166-1 alpha-2; null si no se conoce.',
+  })
+  readonly countryCode!: string | null
+
   @ApiProperty({ example: 'Ana' })
   readonly firstNames!: string
 
@@ -122,16 +131,27 @@ export class AccountResponse {
  * por el cuerpo.
  */
 export class UpdateOwnAccountRequest {
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'Ana Ramirez',
     description: 'Nuevo apodo (display_name).',
     minLength: DisplayName.MIN_LENGTH,
     maxLength: DisplayName.MAX_LENGTH,
   })
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
   @IsString()
   @MinLength(DisplayName.MIN_LENGTH)
   @MaxLength(DisplayName.MAX_LENGTH)
-  displayName!: string
+  displayName?: string
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    example: 'CO',
+    description: 'País ISO alpha-2. Omitido conserva el actual; null lo borra.',
+  })
+  @IsOptional()
+  @IsString()
+  countryCode?: string | null
 }
 
 export class FindAccountByEmailQuery {
@@ -208,6 +228,9 @@ export class AdminAccountSummaryResponse {
 
   @ApiProperty({ example: 'Ana Ramirez' })
   readonly displayName!: string
+
+  @ApiProperty({ type: String, nullable: true, example: 'CO' })
+  readonly countryCode!: string | null
 
   @ApiProperty({ example: 'Ana' })
   readonly firstNames!: string

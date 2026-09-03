@@ -141,6 +141,7 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
         'account.id as id',
         'account.email as email',
         'account.display_name as display_name',
+        'account.country_code as country_code',
         'account.first_names as first_names',
         'account.last_names as last_names',
         'account.status as status',
@@ -227,6 +228,7 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
         id: row.id,
         email: row.email,
         displayName: row.display_name,
+        countryCode: row.country_code,
         firstNames: row.first_names,
         lastNames: row.last_names,
         status,
@@ -248,6 +250,7 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
           subject: row.subject,
           email: row.email,
           display_name: row.display_name,
+          country_code: row.country_code,
           first_names: row.first_names,
           last_names: row.last_names,
           terms_accepted: row.terms_accepted,
@@ -290,6 +293,7 @@ interface AccountSnapshotRow {
   readonly subject: string
   readonly email: string
   readonly display_name: string
+  readonly country_code: string | null
   readonly first_names: string
   readonly last_names: string
   readonly terms_accepted: boolean

@@ -5,6 +5,7 @@ export interface AdminAccountSummaryDto {
   readonly id: string
   readonly email: string
   readonly displayName: string
+  readonly countryCode: string | null
   readonly firstNames: string
   readonly lastNames: string
   readonly status: AccountStatus

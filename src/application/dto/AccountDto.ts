@@ -11,6 +11,7 @@ export interface AccountDto {
   readonly id: string
   readonly email: string
   readonly displayName: string
+  readonly countryCode: string | null
   readonly firstNames: string
   readonly lastNames: string
   readonly status: string
@@ -21,6 +22,7 @@ export const toAccountDto = (snapshot: AccountSnapshot): AccountDto => ({
   id: snapshot.id,
   email: snapshot.email,
   displayName: snapshot.displayName,
+  countryCode: snapshot.countryCode,
   firstNames: snapshot.firstNames,
   lastNames: snapshot.lastNames,
   status: snapshot.status,

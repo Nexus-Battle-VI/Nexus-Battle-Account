@@ -4,7 +4,15 @@ import type { AdminAccountExportPort } from '../../../application/ports/AdminAcc
 
 type ExportableAdminAccount = Pick<
   AdminAccountSummaryDto,
-  'id' | 'email' | 'displayName' | 'firstNames' | 'lastNames' | 'status' | 'roles' | 'registeredAt'
+  | 'id'
+  | 'email'
+  | 'displayName'
+  | 'countryCode'
+  | 'firstNames'
+  | 'lastNames'
+  | 'status'
+  | 'roles'
+  | 'registeredAt'
 >
 
 const FILENAME = 'nexus-battles-users.json'
@@ -26,6 +34,7 @@ const toExportableAccount = (account: AdminAccountSummaryDto): ExportableAdminAc
   id: account.id,
   email: account.email,
   displayName: account.displayName,
+  countryCode: account.countryCode,
   firstNames: account.firstNames,
   lastNames: account.lastNames,
   status: account.status,
