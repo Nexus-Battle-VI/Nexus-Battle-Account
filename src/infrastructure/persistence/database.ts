@@ -16,6 +16,8 @@ import * as migrationHu04RecoveryChallenges from '../../adapters/outbound/persis
 import * as migrationHu33MfaEvidence from '../../adapters/outbound/persistence/migrations/hu33-mfa-evidence'
 import * as migrationHu33MfaEvidenceMethod from '../../adapters/outbound/persistence/migrations/hu33-mfa-evidence-method'
 import * as migrationHu43AccountDeletionRequests from '../../adapters/outbound/persistence/migrations/hu43-account-deletion-requests'
+import * as migrationHu43NotifyEmail from '../../adapters/outbound/persistence/migrations/hu43-account-deletion-requests-notify-email'
+import * as migrationHu43AccountStatusDeleted from '../../adapters/outbound/persistence/migrations/hu43-account-status-deleted'
 
 export interface DatabaseOptions {
   readonly connectionString: string
@@ -76,6 +78,8 @@ const migrations: MigrationProvider = {
       'hu33-mfa-evidence': migrationHu33MfaEvidence,
       'hu33-mfa-evidence-method': migrationHu33MfaEvidenceMethod,
       'hu43-account-deletion-requests': migrationHu43AccountDeletionRequests,
+      'hu43-account-deletion-requests-notify-email': migrationHu43NotifyEmail,
+      'hu43-account-status-deleted': migrationHu43AccountStatusDeleted,
     }),
 }
 

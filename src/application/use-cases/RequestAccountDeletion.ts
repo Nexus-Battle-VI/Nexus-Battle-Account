@@ -4,6 +4,7 @@ import type { AccountDeletionRequestRepositoryPort } from '../ports/AccountDelet
 import type { ClockPort } from '../ports/ClockPort'
 import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
 import {
+  AccountAlreadyDeletedError,
   AccountHasActiveDeletionRequestError,
   AccountNotFoundError,
 } from '../errors/ApplicationError'
@@ -51,6 +52,15 @@ export class RequestAccountDeletion {
       )
     }
 
+    // HU-43.3: una cuenta ya eliminada (Account.erase()) no tiene nada nuevo
+    // que solicitar. Sin esta comprobacion, una segunda llamada tras el
+    // cierre crearia una solicitud RECEIVED nueva -la unica activa por
+    // cuenta ya se cerro- y reenviaria la notificacion de cierre por cada
+    // repeticion.
+    if (account.isDeleted) {
+      throw new AccountAlreadyDeletedError()
+    }
+
     // Idempotencia (HU-43.2): repetir la solicitud mientras ya hay una activa
     // no debe iniciar un segundo proceso. Se devuelve la misma solicitud, no
     // un error: para el titular, pedir de nuevo lo que ya esta en curso no es
@@ -64,6 +74,12 @@ export class RequestAccountDeletion {
     const request = AccountDeletionRequest.receive({
       id: this.deps.ids.generate(),
       accountId: account.id,
+      // HU-43.3: el correo de la notificacion de cierre se captura AQUI,
+      // antes de que el tratamiento pueda anonimizarlo. `Account.erase()`
+      // sobrescribe `accounts.email`, y el proceso de cierre debe poder
+      // reanudarse tras un reinicio sin depender de un valor que ya fue
+      // sobrescrito. Mismo patron que `recovery_challenges.email` (HU-04).
+      notifyEmail: account.currentEmail.value,
       occurredAt: this.deps.clock.now(),
     })
 

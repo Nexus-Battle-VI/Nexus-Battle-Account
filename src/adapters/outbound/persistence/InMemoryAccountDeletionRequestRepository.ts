@@ -50,4 +50,14 @@ export class InMemoryAccountDeletionRequestRepository implements AccountDeletion
 
     return Promise.resolve(found === undefined ? null : AccountDeletionRequest.restore(found))
   }
+
+  findPendingForProcessing(limit: number): Promise<readonly AccountDeletionRequest[]> {
+    const pending = [...this.byId.values()]
+      .filter((snapshot) => snapshot.status !== 'CLOSED')
+      .sort((left, right) => left.receivedAt.localeCompare(right.receivedAt))
+      .slice(0, limit)
+      .map((snapshot) => AccountDeletionRequest.restore(snapshot))
+
+    return Promise.resolve(pending)
+  }
 }

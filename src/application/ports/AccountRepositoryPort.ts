@@ -55,6 +55,17 @@ export interface AccountRepositoryPort {
 
   /** Hashes de las respuestas de HU-01. Vacio si la cuenta no las tiene. */
   findSecurityAnswers(id: AccountId): Promise<readonly HashedSecurityAnswer[]>
+
+  /**
+   * Elimina las respuestas de seguridad de la cuenta (HU-43.3).
+   *
+   * La matriz de tratamiento las clasifica como eliminables sin excepcion: el
+   * hash es irreversible por diseno, pero sigue siendo un secreto de
+   * recuperacion ligado al titular. Idempotente: eliminar las respuestas de
+   * una cuenta que ya no las tiene no falla, para que HU-43.3 pueda
+   * reintentar su tratamiento sin comprobar antes si este paso ya corrio.
+   */
+  deleteSecurityAnswers(id: AccountId): Promise<void>
 }
 
 export const ACCOUNT_REPOSITORY = Symbol('AccountRepositoryPort')

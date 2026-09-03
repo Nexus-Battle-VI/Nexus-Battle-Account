@@ -11,6 +11,7 @@ describe('InMemoryAccountDeletionRequestRepository', () => {
     const request = AccountDeletionRequest.receive({
       id: 'del-1',
       accountId: AccountId.create('acc-1'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
 
@@ -31,6 +32,7 @@ describe('InMemoryAccountDeletionRequestRepository', () => {
     const request = AccountDeletionRequest.receive({
       id: 'del-2',
       accountId: AccountId.create('acc-2'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
     await repository.save(request)
@@ -45,6 +47,7 @@ describe('InMemoryAccountDeletionRequestRepository', () => {
     const request = AccountDeletionRequest.receive({
       id: 'del-3',
       accountId: AccountId.create('acc-3'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
     request.beginTreatment()
@@ -58,24 +61,48 @@ describe('InMemoryAccountDeletionRequestRepository', () => {
     const repository = new InMemoryAccountDeletionRequestRepository()
     const accountId = AccountId.create('acc-4')
     await repository.save(
-      AccountDeletionRequest.receive({ id: 'del-4a', accountId, occurredAt: AT }),
+      AccountDeletionRequest.receive({
+        id: 'del-4a',
+        accountId,
+        notifyEmail: 'titular@nexus.test',
+        occurredAt: AT,
+      }),
     )
 
     await expect(
-      repository.save(AccountDeletionRequest.receive({ id: 'del-4b', accountId, occurredAt: AT })),
+      repository.save(
+        AccountDeletionRequest.receive({
+          id: 'del-4b',
+          accountId,
+          notifyEmail: 'titular@nexus.test',
+          occurredAt: AT,
+        }),
+      ),
     ).rejects.toThrow(AccountHasActiveDeletionRequestError)
   })
 
   it('permite una solicitud nueva si la anterior de la cuenta ya esta CLOSED', async () => {
     const repository = new InMemoryAccountDeletionRequestRepository()
     const accountId = AccountId.create('acc-5')
-    const first = AccountDeletionRequest.receive({ id: 'del-5a', accountId, occurredAt: AT })
+    const first = AccountDeletionRequest.receive({
+      id: 'del-5a',
+      accountId,
+      notifyEmail: 'titular@nexus.test',
+      occurredAt: AT,
+    })
     first.beginTreatment()
     first.close(AT)
     await repository.save(first)
 
     await expect(
-      repository.save(AccountDeletionRequest.receive({ id: 'del-5b', accountId, occurredAt: AT })),
+      repository.save(
+        AccountDeletionRequest.receive({
+          id: 'del-5b',
+          accountId,
+          notifyEmail: 'titular@nexus.test',
+          occurredAt: AT,
+        }),
+      ),
     ).resolves.toBeUndefined()
   })
 
@@ -84,6 +111,7 @@ describe('InMemoryAccountDeletionRequestRepository', () => {
     const request = AccountDeletionRequest.receive({
       id: 'del-6',
       accountId: AccountId.create('acc-6'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
     await repository.save(request)
@@ -94,5 +122,45 @@ describe('InMemoryAccountDeletionRequestRepository', () => {
     const found = await repository.findById('del-6')
 
     expect(found?.currentStatus).toBe('IN_PROGRESS')
+  })
+
+  describe('findPendingForProcessing', () => {
+    it('devuelve RECEIVED e IN_PROGRESS, ordenadas por recepcion, excluye CLOSED y respeta el limite', async () => {
+      const repository = new InMemoryAccountDeletionRequestRepository()
+      const antes = new Date('2026-09-01T00:00:00.000Z')
+      const enMedio = new Date('2026-09-02T00:00:00.000Z')
+      const despues = new Date('2026-09-03T00:00:00.000Z')
+
+      const recibida = AccountDeletionRequest.receive({
+        id: 'del-a',
+        accountId: AccountId.create('acc-a'),
+        notifyEmail: 'titular@nexus.test',
+        occurredAt: antes,
+      })
+      const enTratamiento = AccountDeletionRequest.receive({
+        id: 'del-b',
+        accountId: AccountId.create('acc-b'),
+        notifyEmail: 'titular@nexus.test',
+        occurredAt: enMedio,
+      })
+      enTratamiento.beginTreatment()
+      const cerrada = AccountDeletionRequest.receive({
+        id: 'del-c',
+        accountId: AccountId.create('acc-c'),
+        notifyEmail: 'titular@nexus.test',
+        occurredAt: despues,
+      })
+      cerrada.beginTreatment()
+      cerrada.close(despues)
+
+      await repository.save(cerrada)
+      await repository.save(enTratamiento)
+      await repository.save(recibida)
+
+      const pendientes = await repository.findPendingForProcessing(100)
+      expect(pendientes.map((r) => r.id)).toEqual(['del-a', 'del-b'])
+
+      expect(await repository.findPendingForProcessing(1)).toHaveLength(1)
+    })
   })
 })

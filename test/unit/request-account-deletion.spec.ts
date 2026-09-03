@@ -4,6 +4,7 @@ import { InMemoryAccountDeletionRequestRepository } from '../../src/adapters/out
 import { AccountDeletionRequest } from '../../src/domain/entities/AccountDeletionRequest'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import {
+  AccountAlreadyDeletedError,
   AccountHasActiveDeletionRequestError,
   AccountNotFoundError,
 } from '../../src/application/errors/ApplicationError'
@@ -106,6 +107,7 @@ describe('RequestAccountDeletion', () => {
     const fallando: AccountDeletionRequestRepositoryPort = {
       findActiveByAccountId: () => Promise.resolve(null),
       findById: () => Promise.resolve(null),
+      findPendingForProcessing: () => Promise.resolve([]),
       save: () => Promise.reject(new Error('la base de datos no respondio')),
     }
 
@@ -133,12 +135,14 @@ describe('RequestAccountDeletion', () => {
     const ganadora = AccountDeletionRequest.receive({
       id: 'del-ganadora',
       accountId: AccountId.create('acc-propia'),
+      notifyEmail: 'ana@nexus.test',
       occurredAt: AT,
     })
     let intento = 0
     const conCarrera: AccountDeletionRequestRepositoryPort = {
       findActiveByAccountId: () => Promise.resolve(intento === 0 ? null : ganadora),
       findById: () => Promise.resolve(ganadora),
+      findPendingForProcessing: () => Promise.resolve([]),
       save: () => {
         intento += 1
 
@@ -156,5 +160,42 @@ describe('RequestAccountDeletion', () => {
     const dto = await caso.execute('sub-propia')
 
     expect(dto.id).toBe('del-ganadora')
+  })
+
+  /**
+   * HU-43.3: el correo de la notificacion de cierre se captura AQUI, antes de
+   * que `Account.erase()` pueda anonimizar `accounts.email`. Sin esto, el
+   * proceso de cierre no tendria a donde notificar tras reanudarse desde un
+   * reinicio.
+   */
+  it('captura el correo vigente de la cuenta como notifyEmail de la solicitud', async () => {
+    const { caso, deletionRequests } = await setup()
+
+    const dto = await caso.execute('sub-propia')
+
+    const persisted = await deletionRequests.findById(dto.id)
+    expect(persisted?.notificationRecipient).toBe('ana@nexus.test')
+  })
+
+  /**
+   * Sin esta comprobacion, una segunda llamada tras HU-43.3 cerrar la unica
+   * solicitud activa crearia una solicitud RECEIVED nueva -no hay ninguna
+   * activa que la bloquee, la anterior ya esta CLOSED- y reenviaria la
+   * notificacion de cierre en cada repeticion.
+   */
+  it('rechaza con AccountAlreadyDeletedError una solicitud sobre una cuenta ya eliminada', async () => {
+    const { caso, accounts, deletionRequests } = await setup()
+
+    const account = await accounts.findBySubject('sub-propia')
+    account?.erase()
+    if (account !== null) {
+      await accounts.save(account)
+    }
+
+    await expect(caso.execute('sub-propia')).rejects.toBeInstanceOf(AccountAlreadyDeletedError)
+
+    // No crea ninguna solicitud nueva ni huerfana.
+    const activa = await deletionRequests.findActiveByAccountId(AccountId.create('acc-propia'))
+    expect(activa).toBeNull()
   })
 })

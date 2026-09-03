@@ -64,6 +64,7 @@ export class PostgresAccountDeletionRequestRepository implements AccountDeletion
           status: snapshot.status,
           received_at: new Date(snapshot.receivedAt),
           closed_at: snapshot.closedAt === null ? null : new Date(snapshot.closedAt),
+          notify_email: snapshot.notifyEmail,
         })
         .onConflict((oc) =>
           oc.column('id').doUpdateSet({
@@ -102,12 +103,25 @@ export class PostgresAccountDeletionRequestRepository implements AccountDeletion
     return row === undefined ? null : this.hydrate(row)
   }
 
+  async findPendingForProcessing(limit: number): Promise<readonly AccountDeletionRequest[]> {
+    const rows = await this.db
+      .selectFrom('account_deletion_requests')
+      .selectAll()
+      .where('status', '<>', 'CLOSED')
+      .orderBy('received_at', 'asc')
+      .limit(limit)
+      .execute()
+
+    return rows.map((row) => this.hydrate(row))
+  }
+
   private hydrate(row: {
     id: string
     account_id: string
     status: string
     received_at: Date
     closed_at: Date | null
+    notify_email: string
   }): AccountDeletionRequest {
     return AccountDeletionRequest.restore({
       id: row.id,
@@ -115,6 +129,7 @@ export class PostgresAccountDeletionRequestRepository implements AccountDeletion
       status: row.status as AccountDeletionRequestStatus,
       receivedAt: row.received_at.toISOString(),
       closedAt: row.closed_at === null ? null : row.closed_at.toISOString(),
+      notifyEmail: row.notify_email,
     })
   }
 }

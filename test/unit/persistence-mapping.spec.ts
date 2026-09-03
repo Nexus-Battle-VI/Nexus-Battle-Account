@@ -10,6 +10,7 @@ import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { ALL_ROLES, Role } from '../../src/domain/entities/Role'
 import { up } from '../../src/adapters/outbound/persistence/migrations/001-accounts'
 import { up as upSuperAdministratorRole } from '../../src/adapters/outbound/persistence/migrations/hu03-super-administrator-role'
+import { up as upAccountStatusDeleted } from '../../src/adapters/outbound/persistence/migrations/hu43-account-status-deleted'
 import { describeError } from '../../src/infrastructure/observability/describe-error'
 
 const ROW: AccountRow = {
@@ -92,28 +93,31 @@ describe('Traduccion entre fila e instantanea', () => {
  * si alguien anade un estado o un rol al dominio sin escribir la migracion
  * correspondiente, falla aqui y no en produccion al intentar guardar.
  *
- * El vocabulario de roles ya no vive en un unico archivo: `001-accounts`
- * declaro la restriccion original (PLAYER/MODERATOR/ADMINISTRATOR) y
- * `hu03-super-administrator-role` la ALTERA para anadir SUPER_ADMINISTRATOR
- * (HU-02). Una migracion aplicada no se edita, asi que el vocabulario EFECTIVO
- * de hoy es la union de ambos textos, no solo el de `001-accounts`.
+ * El vocabulario de roles y el de estados ya no viven en un unico archivo:
+ * `001-accounts` declaro las restricciones originales (roles
+ * PLAYER/MODERATOR/ADMINISTRATOR, estados PENDING_VERIFICATION/ACTIVE/SUSPENDED)
+ * y dos migraciones posteriores las ALTERAN: `hu03-super-administrator-role`
+ * anade SUPER_ADMINISTRATOR (HU-02) y `hu43-account-status-deleted` anade
+ * DELETED (HU-43.3). Una migracion aplicada no se edita, asi que el
+ * vocabulario EFECTIVO de hoy es la union de los tres textos, no solo el de
+ * `001-accounts`.
  */
 describe('El vocabulario del dominio y el de la migracion no divergen', () => {
-  const sqlDeLaMigracion = up.toString()
+  const sqlDelVocabularioDeEstados = up.toString() + upAccountStatusDeleted.toString()
   const sqlDelVocabularioDeRoles = up.toString() + upSuperAdministratorRole.toString()
+  const sqlEfectivo =
+    up.toString() + upSuperAdministratorRole.toString() + upAccountStatusDeleted.toString()
 
-  it.each(Object.values(AccountStatus))('la migracion admite el estado %s', (status) => {
-    expect(sqlDeLaMigracion).toContain(`'${status}'`)
+  it.each(Object.values(AccountStatus))('la union de migraciones admite el estado %s', (status) => {
+    expect(sqlDelVocabularioDeEstados).toContain(`'${status}'`)
   })
 
   it.each(ALL_ROLES)('la union de migraciones admite el rol %s', (role) => {
     expect(sqlDelVocabularioDeRoles).toContain(`'${role}'`)
   })
 
-  it('la migracion inicial no admite valores que el dominio desconoce', () => {
-    const enLaRestriccion = [...sqlDeLaMigracion.matchAll(/'([A-Z_]{3,})'/g)].map(
-      (match) => match[1]!,
-    )
+  it('la union de migraciones no admite valores que el dominio desconoce', () => {
+    const enLaRestriccion = [...sqlEfectivo.matchAll(/'([A-Z_]{3,})'/g)].map((match) => match[1]!)
     const conocidos: readonly string[] = [...Object.values(AccountStatus), ...ALL_ROLES]
 
     expect(enLaRestriccion.filter((value) => !conocidos.includes(value))).toEqual([])

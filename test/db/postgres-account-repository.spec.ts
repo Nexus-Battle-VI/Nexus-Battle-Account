@@ -674,6 +674,44 @@ describe('PostgresAccountRepository', () => {
     })
   })
 
+  describe('HU-43.3 tratamiento de eliminacion', () => {
+    it('borra las respuestas de seguridad y no falla si ya no hay ninguna (idempotente)', async () => {
+      const account = buildAccount()
+      await repository.saveRegistration(account, [
+        { questionId: 'sq-01', answerHash: 'a'.repeat(64) },
+      ])
+
+      await repository.deleteSecurityAnswers(account.id)
+
+      expect(await repository.findSecurityAnswers(account.id)).toEqual([])
+
+      // Segunda vez, sin filas que borrar: no debe lanzar.
+      await expect(repository.deleteSecurityAnswers(account.id)).resolves.toBeUndefined()
+    })
+
+    /**
+     * `erase()` deja el agregado en un estado que sigue cumpliendo TODOS los
+     * invariantes de persistencia -en particular, `restore()` sigue exigiendo
+     * al menos un rol-. Sin esto, una cuenta eliminada y releida desde
+     * PostgreSQL rompe la hidratacion en lugar de devolverse anonimizada.
+     */
+    it('persiste el tratamiento de HU-43.3 y la cuenta se relee anonimizada, sin romper la hidratacion', async () => {
+      const account = buildAccount()
+      const originalEmail = account.currentEmail.value
+      await repository.save(account)
+
+      account.erase()
+      await repository.save(account)
+
+      const found = await repository.findById(account.id)
+
+      expect(found?.currentStatus).toBe(AccountStatus.Deleted)
+      expect(found?.currentEmail.value).not.toBe(originalEmail)
+      expect(found?.currentRoles.length).toBeGreaterThan(0)
+      expect(found?.isDeleted).toBe(true)
+    })
+  })
+
   beforeEach(() => {
     repository = new PostgresAccountRepository(db)
   })

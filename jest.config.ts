@@ -39,6 +39,10 @@ const config: Config = {
     '!src/adapters/outbound/persistence/migrations/hu01-registration.ts',
     '!src/adapters/outbound/persistence/migrations/hu02-nickname-blacklist-seed.ts',
     '!src/infrastructure/persistence/**',
+    // `process-account-deletions.ts` es un punto de entrada de CLI (HU-43.3),
+    // igual que `migrate.ts`: no hay nada que una prueba unitaria/de
+    // integracion pueda ejercitar sin una base de datos real.
+    '!src/infrastructure/jobs/**',
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text-summary', 'lcov', 'json-summary'],

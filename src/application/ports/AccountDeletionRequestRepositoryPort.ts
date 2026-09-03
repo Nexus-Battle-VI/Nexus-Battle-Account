@@ -26,6 +26,18 @@ export interface AccountDeletionRequestRepositoryPort {
    * idempotente una solicitud repetida.
    */
   findActiveByAccountId(accountId: AccountId): Promise<AccountDeletionRequest | null>
+
+  /**
+   * Solicitudes elegibles para que HU-43.3 ejecute o reanude su tratamiento
+   * (`RECEIVED`, `IN_PROGRESS` o `FAILED`), de mas antigua a mas reciente.
+   *
+   * `IN_PROGRESS` se incluye a proposito: si el proceso que la marco en
+   * tratamiento se interrumpio antes de cerrarla (reinicio, despliegue), no
+   * queda otra senal persistida de que sigue pendiente. El tratamiento de
+   * `Account.erase()` es idempotente precisamente para que retomarla desde
+   * `IN_PROGRESS` sea seguro.
+   */
+  findPendingForProcessing(limit: number): Promise<readonly AccountDeletionRequest[]>
 }
 
 export const ACCOUNT_DELETION_REQUEST_REPOSITORY = Symbol('AccountDeletionRequestRepositoryPort')

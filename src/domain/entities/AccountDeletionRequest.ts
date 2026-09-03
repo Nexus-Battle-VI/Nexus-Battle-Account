@@ -17,6 +17,19 @@ export interface AccountDeletionRequestSnapshot {
   readonly status: AccountDeletionRequestStatus
   readonly receivedAt: string
   readonly closedAt: string | null
+  /**
+   * Correo de destino de la notificacion de cierre (HU-43.3/HU-43.4),
+   * capturado en la recepcion de la solicitud.
+   *
+   * Es la UNICA excepcion a la minimizacion de datos que HU-43.1 ya declaro:
+   * el tratamiento de HU-43.3 anonimiza `accounts.email` como parte del
+   * derecho al olvido, y la notificacion de cierre debe seguir pudiendo
+   * llegar al titular aunque el tratamiento se reanude despues de un
+   * reinicio, cuando `Account.currentEmail` ya no conserva el valor
+   * original. Igual que `recovery_challenges.email` (HU-04), es informacion
+   * minima de progreso, no una copia redundante del perfil.
+   */
+  readonly notifyEmail: string
 }
 
 /**
@@ -48,6 +61,7 @@ export class AccountDeletionRequest {
   private status: AccountDeletionRequestStatus
   readonly receivedAt: Date
   private closedAt: Date | null
+  private readonly notifyEmail: string
 
   private constructor(snapshot: AccountDeletionRequestSnapshot) {
     this.id = snapshot.id
@@ -55,6 +69,7 @@ export class AccountDeletionRequest {
     this.status = snapshot.status
     this.receivedAt = new Date(snapshot.receivedAt)
     this.closedAt = snapshot.closedAt === null ? null : new Date(snapshot.closedAt)
+    this.notifyEmail = snapshot.notifyEmail
   }
 
   /**
@@ -63,15 +78,21 @@ export class AccountDeletionRequest {
    * `id` lo genera el backend (`IdGeneratorPort`), nunca el cliente.
    * `receivedAt` lo genera el backend a partir de `ClockPort`, por la misma
    * razon que el resto de fechas de evidencia de este servicio: nunca un
-   * valor enviado por Web.
+   * valor enviado por Web. `notifyEmail` es `Account.currentEmail` en el
+   * momento de la recepcion, antes de que HU-43.3 pueda anonimizarlo.
    */
   static receive(input: {
     id: string
     accountId: AccountId
+    notifyEmail: string
     occurredAt: Date
   }): AccountDeletionRequest {
     if (input.id.trim().length === 0) {
       throw new DomainError('La solicitud de eliminacion exige un identificador.')
+    }
+
+    if (input.notifyEmail.trim().length === 0) {
+      throw new DomainError('La solicitud de eliminacion exige un correo de notificacion.')
     }
 
     return new AccountDeletionRequest({
@@ -80,6 +101,7 @@ export class AccountDeletionRequest {
       status: AccountDeletionRequestStatus.Received,
       receivedAt: input.occurredAt.toISOString(),
       closedAt: null,
+      notifyEmail: input.notifyEmail,
     })
   }
 
@@ -93,6 +115,11 @@ export class AccountDeletionRequest {
 
   get currentClosedAt(): Date | null {
     return this.closedAt
+  }
+
+  /** Destino de la notificacion de cierre (HU-43.3/HU-43.4). */
+  get notificationRecipient(): string {
+    return this.notifyEmail
   }
 
   /** `Closed` es el unico estado que no cuenta como solicitud activa. */
@@ -150,6 +177,7 @@ export class AccountDeletionRequest {
       status: this.status,
       receivedAt: this.receivedAt.toISOString(),
       closedAt: this.closedAt === null ? null : this.closedAt.toISOString(),
+      notifyEmail: this.notifyEmail,
     }
   }
 }

@@ -1,9 +1,9 @@
 import { DomainError } from '../errors/DomainError'
 import type { AccountId } from '../value-objects/AccountId'
-import type { EmailAddress } from '../value-objects/EmailAddress'
-import type { DisplayName } from '../value-objects/DisplayName'
-import type { PersonName } from '../value-objects/PersonName'
-import type { AvatarMetadata } from '../value-objects/AvatarMetadata'
+import { EmailAddress } from '../value-objects/EmailAddress'
+import { DisplayName } from '../value-objects/DisplayName'
+import { PersonName } from '../value-objects/PersonName'
+import { AvatarMetadata } from '../value-objects/AvatarMetadata'
 import { AccountStatus } from './AccountStatus'
 import type { Role } from './Role'
 import { RolePolicy } from '../policies/RolePolicy'
@@ -55,10 +55,10 @@ export class Account {
 
   private email: EmailAddress
   private displayName: DisplayName
-  private readonly firstNames: PersonName
-  private readonly lastNames: PersonName
+  private firstNames: PersonName
+  private lastNames: PersonName
   private readonly termsAccepted: boolean
-  private readonly avatar: AvatarMetadata
+  private avatar: AvatarMetadata
   private status: AccountStatus
   private readonly roles: Set<Role>
   private readonly events: DomainEvent[] = []
@@ -219,11 +219,27 @@ export class Account {
     return this.status === AccountStatus.Active
   }
 
+  get isDeleted(): boolean {
+    return this.status === AccountStatus.Deleted
+  }
+
   hasRole(role: Role): boolean {
     return this.roles.has(role)
   }
 
+  /**
+   * Una cuenta eliminada (HU-43.3) es terminal: ninguna otra transicion del
+   * ciclo de vida admite reabrirla, reasignarla ni reactivarla.
+   */
+  private ensureNotDeleted(action: string): void {
+    if (this.status === AccountStatus.Deleted) {
+      throw new DomainError(`La cuenta ${this.id.value} fue eliminada y no admite ${action}.`)
+    }
+  }
+
   verify(occurredAt: Date): void {
+    this.ensureNotDeleted('verificarse')
+
     if (this.status === AccountStatus.Suspended) {
       throw new DomainError(`La cuenta ${this.id.value} esta suspendida y no puede verificarse.`)
     }
@@ -243,6 +259,8 @@ export class Account {
   }
 
   suspend(): void {
+    this.ensureNotDeleted('suspenderse')
+
     if (this.status === AccountStatus.Suspended) {
       throw new DomainError(`La cuenta ${this.id.value} ya esta suspendida.`)
     }
@@ -251,6 +269,8 @@ export class Account {
   }
 
   reinstate(): void {
+    this.ensureNotDeleted('reinstalarse')
+
     if (this.status !== AccountStatus.Suspended) {
       throw new DomainError(`La cuenta ${this.id.value} no esta suspendida.`)
     }
@@ -259,6 +279,8 @@ export class Account {
   }
 
   rename(displayName: DisplayName): void {
+    this.ensureNotDeleted('cambiar de apodo')
+
     this.displayName = displayName
   }
 
@@ -267,6 +289,8 @@ export class Account {
    * todavia no ha demostrado pertenecer a la persona titular.
    */
   changeEmail(email: EmailAddress, occurredAt: Date): boolean {
+    this.ensureNotDeleted('cambiar de correo')
+
     if (this.email.equals(email)) {
       return false
     }
@@ -288,6 +312,8 @@ export class Account {
   }
 
   grantRole(role: Role, actorRoles: ReadonlySet<Role>): void {
+    this.ensureNotDeleted('recibir roles')
+
     if (!RolePolicy.canManageRoles(actorRoles)) {
       throw new DomainError('Solo un Super Administrador puede conceder roles.')
     }
@@ -296,6 +322,8 @@ export class Account {
   }
 
   revokeRole(role: Role, actorRoles: ReadonlySet<Role>): void {
+    this.ensureNotDeleted('retirar roles')
+
     if (!RolePolicy.canManageRoles(actorRoles)) {
       throw new DomainError('Solo un Super Administrador puede retirar roles.')
     }
@@ -305,6 +333,45 @@ export class Account {
     }
 
     this.roles.delete(role)
+  }
+
+  /**
+   * Tratamiento de HU-43.3 sobre los datos propios de Account.
+   *
+   * La matriz de tratamiento (Infrastructure,
+   * docs/privacy/data-treatment-matrix-v0.3.md) clasifica nombres, apellidos,
+   * apodo y avatar como eliminables SIN excepcion cuando la cuenta se
+   * elimina: se sobrescriben con un valor anonimizado y unico por cuenta
+   * -nunca se deja el campo vacio, porque `EmailAddress`, `DisplayName` y
+   * `PersonName` siguen exigiendo un valor que cumpla su propio formato-.
+   *
+   * NO toca: la contrasena (Cognito, fuera del alcance de HU-43 sobre datos
+   * propios, segun la misma matriz), `termsAccepted` (la matriz lo deja
+   * "Pendiente decision", no se inventa una regla), ni los roles (retirarlos
+   * violaria el invariante de `restore` -toda cuenta reconstituida exige al
+   * menos un rol- sin que la matriz exija vaciarlos: una cuenta eliminada ya
+   * no puede autenticarse, con o sin roles).
+   *
+   * Idempotente: procesar una cuenta ya eliminada no hace nada. Es lo que
+   * permite que HU-43.3 reintente el tratamiento completo tras un reinicio
+   * sin depender de progreso en memoria.
+   */
+  erase(): void {
+    if (this.status === AccountStatus.Deleted) {
+      return
+    }
+
+    this.email = EmailAddress.create(`${this.id.value}@eliminado.invalid`)
+    this.displayName = DisplayName.create(`Eliminada-${this.id.value.slice(0, 8)}`)
+    this.firstNames = PersonName.create('Eliminado', 'Los nombres')
+    this.lastNames = PersonName.create('Eliminado', 'Los apellidos')
+    this.avatar = AvatarMetadata.create({
+      storageKey: `eliminado/${this.id.value}`,
+      mimeType: 'image/gif',
+      sizeBytes: 1,
+      originalName: 'eliminado',
+    })
+    this.status = AccountStatus.Deleted
   }
 
   pullEvents(): readonly DomainEvent[] {

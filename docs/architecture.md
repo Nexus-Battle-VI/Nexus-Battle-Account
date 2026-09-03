@@ -122,9 +122,13 @@ La identidad se crea en el proveedor con `signUp` (ADR-004, «Alta server-side»
              suspend   reinstate
                    v   |
                SUSPENDED
+
+  PENDING_VERIFICATION, ACTIVE y SUSPENDED --- erase (HU-43.3) ---> DELETED (terminal)
 ```
 
 Una cuenta solo puede autenticarse en estado `ACTIVE`. Cambiar el correo devuelve la cuenta a `PENDING_VERIFICATION`, porque la nueva dirección todavía no ha demostrado pertenecer a la persona titular.
+
+`DELETED` es terminal: `erase()` (HU-43.3) puede alcanzarse desde cualquier otro estado y ninguna transición admite salir de él -`verify`, `suspend`, `reinstate`, `rename`, `changeEmail`, `grantRole` y `revokeRole` rechazan actuar sobre una cuenta eliminada-. `erase()` no borra la fila: anonimiza correo, nombres, apodo y avatar con un valor determinista y único por cuenta (los value objects siguen exigiendo un valor con formato válido) y es idempotente, para que el reintento de HU-43.3 tras un reinicio no falle ni repita efectos. Ver "Eliminación de cuenta (HU-43)" más abajo.
 
 ## Inicio de sesión (HU-02)
 
@@ -255,6 +259,27 @@ Eventos de dominio emitidos:
 | `account.verified`      | La cuenta demuestra control del correo y pasa a activa |
 | `account.email-changed` | Cambia la dirección de correo de una cuenta            |
 
+### Eliminación de cuenta (HU-43)
+
+EN-011 (Management #197) y ADR-014 Decisión 5 (Nexus-Battle-Infrastructure) fijan el alcance: Account trata únicamente sus propios datos personales, sin coordinar Community, Commerce, Player-Inventory ni Catalog por la sola presencia de un `subject` opaco. La matriz de tratamiento (`docs/privacy/data-treatment-matrix-v0.3.md`) es la referencia de qué campo se elimina, anonimiza o retiene.
+
+| Ruta                                | Uso                                                                                                                                                      |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DELETE /api/accounts/me`           | HU-43.2. Registra la solicitud durable de HU-43.1 y responde `202`: aceptada, no completada. Idempotente.                                                |
+| `npm run process-account-deletions` | HU-43.3. Procesador por lotes, fuera de cualquier petición HTTP -mismo patrón que `npm run migrate`-. Ejecuta el tratamiento real y cierra la solicitud. |
+
+El flujo tiene tres piezas deliberadamente separadas:
+
+1. **HU-43.1** (`AccountDeletionRequest`, ya en `develop` antes de esta Task): el estado durable de la solicitud (`RECEIVED` → `IN_PROGRESS` → `CLOSED`, con `FAILED` como fallo transitorio reintentable). Un índice único parcial en PostgreSQL (`account_deletion_requests_una_activa_por_cuenta`, sobre filas `status <> 'CLOSED'`) impide una segunda solicitud activa para la misma cuenta, incluso bajo llamadas concurrentes.
+2. **HU-43.2** (`RequestAccountDeletion`): resuelve al titular exclusivamente por `VerifiedIdentity.subject` -nunca por un id del cuerpo-, y devuelve la solicitud activa existente en lugar de crear una segunda cuando ya hay una en curso.
+3. **HU-43.3** (`ProcessAccountDeletion`, `Account.erase()`): ejecuta el tratamiento y cierra la solicitud.
+
+`Account.erase()` no borra la fila: anonimiza `email`, `displayName`, `firstNames`, `lastNames` y el avatar con un valor determinista y único por cuenta (los value objects siguen exigiendo formato válido) y pasa el estado a `DELETED` (terminal). No toca `termsAccepted` -la matriz lo deja "Pendiente decisión", no se inventa una regla- ni los roles -vaciarlos rompería el invariante de `Account.restore`, que exige al menos uno, y la matriz no exige vaciarlos para que la cuenta deje de poder autenticarse-. La contraseña no vive en Account (Cognito, fuera de alcance según la propia matriz).
+
+`ProcessAccountDeletion` retira el avatar **antes** de anonimizar y guardar la cuenta: si se hiciera al revés y el borrado del avatar fallara después de guardar la cuenta ya anonimizada, un reintento leería `account.currentAvatar.storageKey` ya sobrescrito por el marcador de `erase()` -no el original- y el archivo real nunca llegaría a borrarse. El correo de la notificación de cierre se captura una sola vez, en la recepción de la solicitud (`AccountDeletionRequest.notifyEmail`), por la misma razón: `erase()` anonimiza `accounts.email` antes de que el tratamiento llegue a notificar, y el proceso debe poder reanudarse tras un reinicio sin depender de un valor que ya fue sobrescrito.
+
+La notificación de cierre usa el `notificationId` estable `${request.id}-cierre`: si el pipeline de Notifications ya la aceptó en un intento anterior que falló después (antes de cerrar la solicitud), el reintento no produce un segundo envío -la deduplicación por `notificationId` la aplica el pipeline de Notifications, no Account-. El identificador de plantilla (`ACCOUNT_DELETION_CLOSED_TEMPLATE_ID = 'account-deletion-closed'`) es el contrato del lado de Account con **HU-43.4** (Nexus-Battle-Notifications), que todavía no está implementada: hasta entonces, la notificación se registra o se intenta según `NOTIFICATIONS_INGEST_URL`, sin bloquear el cierre de la solicitud.
+
 ## Observabilidad
 
 El registro es JSON estructurado por línea. Se emite exclusivamente desde `infrastructure/observability/logger.ts`; el resto del código tiene prohibido escribir en la consola mediante la regla `no-console` de ESLint.
@@ -275,5 +300,8 @@ El correo electrónico es un dato personal: la observabilidad registra el **domi
 - **Mi Cuenta (HU-05):** `PATCH /api/accounts/me` edita hoy **solo el apodo** (`displayName`). `firstNames`, `lastNames`, `email` y `avatar` no se editan porque HU-05 no enumera aquí una lista definitiva de campos editables (y `changeEmail` reabriría la verificación del correo).
 - **Preferencias (HU-05):** idioma y apariencia no están implementadas. No existe en el repositorio un vocabulario aprobado de valores; modelarlas con valores inventados sería peor que declarar el bloqueo. `PATCH /api/accounts/me` está preparado para extenderse sin reescribirse.
 - **Suscripciones y métodos de pago (HU-05):** sin operaciones funcionales aprobadas ni ownership definido para `Account`. Fuera del alcance implementable.
+- **Notificación de cierre de eliminación (HU-43.4):** vive en Nexus-Battle-Notifications, todavía sin implementar. Account ya emite la solicitud con el identificador de plantilla `account-deletion-closed`; hasta que Notifications incorpore esa plantilla, la entrega depende de `NOTIFICATIONS_INGEST_URL` y no bloquea el cierre de la solicitud si falla.
+- **Interfaz Web de eliminación (HU-43.5):** fuera del alcance de este repositorio.
+- **Cognito de la cuenta eliminada:** la matriz de tratamiento deja explícitamente fuera de HU-43 la eliminación del usuario en el proveedor de identidad ("sujeto a la eliminación del usuario en Cognito, fuera del alcance de HU-43 sobre datos propios"). `erase()` no la invoca: la identidad en Cognito sigue existiendo tras el tratamiento, aunque ya no pueda autenticarse contra una cuenta `DELETED`.
 
 Estas limitaciones están declaradas de forma explícita para que la arquitectura de demo no se confunda con la arquitectura objetivo, documentada en `docs/architecture/target-scale-deployment.md` de Nexus-Battle-Infrastructure.

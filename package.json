@@ -26,6 +26,8 @@
     "test:coverage": "jest --coverage",
     "migrate": "node dist/infrastructure/persistence/migrate.js",
     "migrate:dev": "ts-node src/infrastructure/persistence/migrate.ts",
+    "process-account-deletions": "node dist/infrastructure/jobs/process-account-deletions.js",
+    "process-account-deletions:dev": "ts-node src/infrastructure/jobs/process-account-deletions.ts",
     "test:db": "jest --config jest.db.config.ts --coverage"
   },
   "dependencies": {

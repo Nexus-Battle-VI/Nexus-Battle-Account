@@ -124,6 +124,13 @@ export interface AccountDeletionRequestsTable {
   readonly status: string
   readonly received_at: Generated<Date>
   readonly closed_at: Date | null
+  /**
+   * Correo de destino de la notificacion de cierre (HU-43.3/HU-43.4),
+   * capturado en la recepcion. Anadido por la migracion
+   * `hu43-account-deletion-requests-notify-email`: HU-43.1 no lo necesitaba
+   * porque todavia no ejecutaba tratamiento ni notificaba nada.
+   */
+  readonly notify_email: string
 }
 
 export interface Database {

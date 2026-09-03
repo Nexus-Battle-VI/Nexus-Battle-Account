@@ -55,6 +55,16 @@ const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
     jti: null,
     expiresAt: null,
   },
+  // Cuenta dedicada para el caso de HU-43.3: se elimina directamente por
+  // agregado (`erase()`), sin pasar por el procesador por lotes, para probar
+  // el 409 sin depender de que ProcessAccountDeletion este integrado en el
+  // arnes HTTP.
+  'token-jugador-eliminado': {
+    subject: 'sub:carla@nexus.test',
+    roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
+  },
 }
 
 const stubVerifier: TokenVerifierPort = {
@@ -124,6 +134,19 @@ describe('API de solicitud de eliminacion de la cuenta propia (HU-43.2)', () => 
         displayName: 'Beatriz Lopez',
       }),
     )
+
+    // Ya eliminada (HU-43.3): se erase() directamente sobre el agregado, sin
+    // pasar por ProcessAccountDeletion -que no expone superficie HTTP-, para
+    // reproducir el estado que el procesador dejaria tras cerrar la unica
+    // solicitud activa.
+    const eliminada = buildActiveAccount({
+      id: 'acc-eliminada',
+      subject: 'sub:carla@nexus.test',
+      email: 'carla@nexus.test',
+      displayName: 'Carla Eliminada',
+    })
+    eliminada.erase()
+    await accounts.save(eliminada)
   })
 
   afterAll(async () => {
@@ -185,6 +208,18 @@ describe('API de solicitud de eliminacion de la cuenta propia (HU-43.2)', () => 
       expect(segunda.status).toBe(200)
       expect(segunda.body.id).toBe(primera.body.id)
       expect(segunda.body.receivedAt).toBe(primera.body.receivedAt)
+    })
+
+    /**
+     * HU-43.3: sin esta comprobacion, una cuenta ya eliminada podria acumular
+     * una solicitud RECEIVED nueva -la anterior ya esta CLOSED, no hay
+     * ninguna activa que la bloquee- y reenviar la notificacion de cierre en
+     * cada repeticion.
+     */
+    it('responde 409 cuando la cuenta ya fue eliminada (HU-43.3)', async () => {
+      const response = await post().set('authorization', bearer('token-jugador-eliminado'))
+
+      expect(response.status).toBe(409)
     })
   })
 })

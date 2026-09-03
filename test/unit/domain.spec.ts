@@ -342,6 +342,104 @@ describe('Account', () => {
       roles: [Role.Player],
     })
   })
+
+  describe('erase (HU-43.3)', () => {
+    it('anonimiza correo, nombres, apodo y avatar, y queda DELETED', () => {
+      const account = buildAccount()
+      account.pullEvents()
+
+      account.erase()
+
+      expect(account.currentStatus).toBe(AccountStatus.Deleted)
+      expect(account.isDeleted).toBe(true)
+      expect(account.canAuthenticate).toBe(false)
+      expect(account.currentEmail.value).not.toBe('jugador@nexus.test')
+      expect(account.currentDisplayName.value).not.toBe('Ana Ramirez')
+      expect(account.currentFirstNames.value).not.toBe('Ana')
+      expect(account.currentLastNames.value).not.toBe('Ramirez')
+      expect(account.currentAvatar.storageKey).not.toBe('acc-1/a.png')
+    })
+
+    it('no toca termsAccepted ni los roles (la matriz no exige vaciarlos)', () => {
+      const account = buildAccount()
+
+      account.erase()
+
+      expect(account.acceptedTerms).toBe(true)
+      expect(account.currentRoles).toEqual([Role.Player])
+    })
+
+    it('no emite ningun evento', () => {
+      const account = buildAccount()
+      account.pullEvents()
+
+      account.erase()
+
+      expect(account.pullEvents()).toHaveLength(0)
+    })
+
+    it('es idempotente: procesar una cuenta ya eliminada no hace nada', () => {
+      const account = buildAccount()
+      account.erase()
+      const snapshotTrasPrimerBorrado = account.toSnapshot()
+
+      account.erase()
+
+      expect(account.toSnapshot()).toEqual(snapshotTrasPrimerBorrado)
+    })
+
+    it.each<[string, (account: Account) => void]>([
+      [
+        'verify',
+        (account) => {
+          account.verify(AT)
+        },
+      ],
+      [
+        'suspend',
+        (account) => {
+          account.suspend()
+        },
+      ],
+      [
+        'reinstate',
+        (account) => {
+          account.reinstate()
+        },
+      ],
+      [
+        'rename',
+        (account) => {
+          account.rename(DisplayName.create('Otro Apodo'))
+        },
+      ],
+      [
+        'changeEmail',
+        (account) => {
+          account.changeEmail(EmailAddress.create('otro@nexus.test'), AT)
+        },
+      ],
+      [
+        'grantRole',
+        (account) => {
+          account.grantRole(Role.Moderator, superAdministratorRoles)
+        },
+      ],
+      [
+        'revokeRole',
+        (account) => {
+          account.revokeRole(Role.Player, superAdministratorRoles)
+        },
+      ],
+    ])('rechaza %s sobre una cuenta eliminada', (_name, action) => {
+      const account = buildAccount()
+      account.erase()
+
+      expect(() => {
+        action(account)
+      }).toThrow(/fue eliminada/)
+    })
+  })
 })
 
 describe('Vinculo con el sujeto de identidad', () => {

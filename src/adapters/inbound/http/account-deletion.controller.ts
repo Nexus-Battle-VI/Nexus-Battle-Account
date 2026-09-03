@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Controller,
   HttpCode,
   HttpStatus,
@@ -10,7 +11,10 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 
 import { DomainError } from '../../../domain/errors/DomainError'
-import { AccountNotFoundError } from '../../../application/errors/ApplicationError'
+import {
+  AccountAlreadyDeletedError,
+  AccountNotFoundError,
+} from '../../../application/errors/ApplicationError'
 import { RequestAccountDeletion } from '../../../application/use-cases/RequestAccountDeletion'
 import { CurrentIdentity } from './auth/decorators'
 import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
@@ -64,6 +68,7 @@ export class AccountDeletionController {
   })
   @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
   @ApiResponse({ status: 404, description: 'El sujeto no tiene cuenta en este servicio' })
+  @ApiResponse({ status: 409, description: 'La cuenta ya fue eliminada (HU-43.3)' })
   async requestDeletion(
     @CurrentIdentity() identity: VerifiedIdentity,
   ): Promise<AccountDeletionRequestResponse> {
@@ -77,6 +82,10 @@ export class AccountDeletionController {
   private static translate(error: unknown): Error {
     if (error instanceof AccountNotFoundError) {
       return new NotFoundException(error.message)
+    }
+
+    if (error instanceof AccountAlreadyDeletedError) {
+      return new ConflictException(error.message)
     }
 
     if (error instanceof DomainError) {

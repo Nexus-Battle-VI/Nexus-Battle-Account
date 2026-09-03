@@ -124,6 +124,13 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
     }))
   }
 
+  async deleteSecurityAnswers(id: AccountId): Promise<void> {
+    await this.db
+      .deleteFrom('account_security_answers')
+      .where('account_id', '=', id.value)
+      .execute()
+  }
+
   async existsByDisplayName(displayName: DisplayName): Promise<boolean> {
     const found = await this.db
       .selectFrom('accounts')

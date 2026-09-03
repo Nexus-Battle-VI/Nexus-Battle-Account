@@ -13,6 +13,7 @@ describe('AccountDeletionRequest', () => {
     const request = AccountDeletionRequest.receive({
       id: 'del-1',
       accountId: AccountId.create('acc-1'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
 
@@ -29,6 +30,7 @@ describe('AccountDeletionRequest', () => {
       AccountDeletionRequest.receive({
         id: '  ',
         accountId: AccountId.create('acc-1'),
+        notifyEmail: 'titular@nexus.test',
         occurredAt: AT,
       }),
     ).toThrow(DomainError)
@@ -38,6 +40,7 @@ describe('AccountDeletionRequest', () => {
     const original = AccountDeletionRequest.receive({
       id: 'del-2',
       accountId: AccountId.create('acc-2'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
 
@@ -50,6 +53,7 @@ describe('AccountDeletionRequest', () => {
     const request = AccountDeletionRequest.receive({
       id: 'del-3',
       accountId: AccountId.create('acc-3'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
 
@@ -67,6 +71,7 @@ describe('AccountDeletionRequest', () => {
     const request = AccountDeletionRequest.receive({
       id: 'del-4',
       accountId: AccountId.create('acc-4'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
     request.beginTreatment()
@@ -102,6 +107,7 @@ describe('AccountDeletionRequest', () => {
     const request = AccountDeletionRequest.receive({
       id: 'del-5',
       accountId: AccountId.create('acc-5'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
     request.beginTreatment()
@@ -116,6 +122,7 @@ describe('AccountDeletionRequest', () => {
     const request = AccountDeletionRequest.receive({
       id: 'del-6',
       accountId: AccountId.create('acc-6'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
 
@@ -128,6 +135,7 @@ describe('AccountDeletionRequest', () => {
     const request = AccountDeletionRequest.receive({
       id: 'del-7',
       accountId: AccountId.create('acc-7'),
+      notifyEmail: 'titular@nexus.test',
       occurredAt: AT,
     })
 

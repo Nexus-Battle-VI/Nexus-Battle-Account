@@ -93,3 +93,18 @@ export class AccountHasActiveDeletionRequestError extends Error {
     this.name = 'AccountHasActiveDeletionRequestError'
   }
 }
+
+/**
+ * El titular ya completo su derecho al olvido (HU-43.3 ya cerro la unica
+ * solicitud posible sobre esta cuenta). Distinta de
+ * `AccountHasActiveDeletionRequestError`: aqui no hay nada en curso que
+ * reintentar, el tratamiento ya termino. Sin esta comprobacion, una segunda
+ * llamada a `DELETE /accounts/me` sobre una cuenta ya eliminada crearia una
+ * solicitud RECEIVED nueva y reenviaria la notificacion de cierre.
+ */
+export class AccountAlreadyDeletedError extends Error {
+  constructor() {
+    super('La cuenta ya fue eliminada.')
+    this.name = 'AccountAlreadyDeletedError'
+  }
+}
