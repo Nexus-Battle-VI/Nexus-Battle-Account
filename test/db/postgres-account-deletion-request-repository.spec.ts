@@ -17,8 +17,8 @@ import { buildAccount } from '../support/account-factory'
  * Adaptador de PostgreSQL contra un motor REAL, en contenedor.
  *
  * HU-43.1 exige que la proteccion contra dos solicitudes activas sea real
- * frente a concurrencia, no solo `if (!exists) insert` a nivel de aplicacion
- * -esta suite es la unica capaz de comprobar eso: un doble en memoria no
+ * frente a concurrencia, no solo `if (!exists) insert` a nivel de aplicacion.
+ * Esta suite es la unica capaz de comprobar eso: un doble en memoria no
  * ejecuta dos peticiones en paralelo contra el mismo motor.
  */
 describe('PostgresAccountDeletionRequestRepository', () => {
