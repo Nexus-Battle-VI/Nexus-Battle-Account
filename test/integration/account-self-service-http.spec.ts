@@ -17,6 +17,21 @@ import { ROLE_DIRECTORY } from '../../src/application/ports/RoleDirectoryPort'
 import { MFA_STATUS } from '../../src/application/ports/MfaStatusPort'
 import { SESSION_REVOCATION } from '../../src/application/ports/SessionRevocationPort'
 import { PASSWORD_CHANGE } from '../../src/application/ports/PasswordChangePort'
+import {
+  PLAYER_INVENTORY_REPORT,
+  type PlayerInventoryReportPort,
+  type PlayerInventoryReportResult,
+} from '../../src/application/ports/PlayerInventoryReportPort'
+import {
+  COMMUNITY_REPORT,
+  type CommunityReportPort,
+  type CommunityReportResult,
+} from '../../src/application/ports/CommunityReportPort'
+import {
+  COMMERCE_REPORT,
+  type CommerceReportPort,
+  type CommerceReportResult,
+} from '../../src/application/ports/CommerceReportPort'
 import { ACCOUNT_REPOSITORY } from '../../src/application/ports/AccountRepositoryPort'
 import { CLOCK, type ClockPort } from '../../src/application/ports/ClockPort'
 import type { AccountRepositoryPort } from '../../src/application/ports/AccountRepositoryPort'
@@ -88,11 +103,68 @@ const stubVerifier: TokenVerifierPort = {
 
 const bearer = (token: string): string => `Bearer ${token}`
 
+/**
+ * Dobles de los tres puertos de lectura del reporte PDF (HU-45.3). Registran
+ * el testimonio con el que se les llamo, para comprobar que Account reenvia
+ * el mismo testimonio del titular sin construir ningun identificador propio.
+ */
+class FakePlayerInventoryReport implements PlayerInventoryReportPort {
+  result: PlayerInventoryReportResult = {
+    available: true,
+    items: [{ reference: 'espada-de-hierro', name: 'Espada de Hierro', quantity: 1 }],
+  }
+  lastAccessToken: string | null = null
+
+  listOwnItems(accessToken: string): Promise<PlayerInventoryReportResult> {
+    this.lastAccessToken = accessToken
+
+    return Promise.resolve(this.result)
+  }
+}
+
+class FakeCommunityReport implements CommunityReportPort {
+  result: CommunityReportResult = {
+    available: true,
+    posts: [
+      {
+        id: 'post-1',
+        threadId: 'thread-1',
+        content: 'Buen combate',
+        createdAt: EXPORT_GENERATED_AT,
+      },
+    ],
+  }
+  lastAccessToken: string | null = null
+
+  listOwnPosts(accessToken: string): Promise<CommunityReportResult> {
+    this.lastAccessToken = accessToken
+
+    return Promise.resolve(this.result)
+  }
+}
+
+class FakeCommerceReport implements CommerceReportPort {
+  result: CommerceReportResult = {
+    available: true,
+    orders: [{ id: 'ord-1', status: 'CONFIRMED', currency: 'COP', total: 30000, itemCount: 2 }],
+  }
+  lastAccessToken: string | null = null
+
+  listOwnOrders(accessToken: string): Promise<CommerceReportResult> {
+    this.lastAccessToken = accessToken
+
+    return Promise.resolve(this.result)
+  }
+}
+
 describe('API self-service de la cuenta propia (HU-05)', () => {
   let app: INestApplication
   let previousEnv: Record<string, string | undefined>
   let beatrizAccountId: string
   const passwords = new InMemoryPasswordChange()
+  const inventoryReport = new FakePlayerInventoryReport()
+  const communityReport = new FakeCommunityReport()
+  const commerceReport = new FakeCommerceReport()
 
   beforeAll(async () => {
     previousEnv = {
@@ -123,6 +195,12 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
       .useValue(passwords)
       .overrideProvider(CLOCK)
       .useValue(fixedClock)
+      .overrideProvider(PLAYER_INVENTORY_REPORT)
+      .useValue(inventoryReport)
+      .overrideProvider(COMMUNITY_REPORT)
+      .useValue(communityReport)
+      .overrideProvider(COMMERCE_REPORT)
+      .useValue(commerceReport)
       .compile()
 
     app = moduleRef.createNestApplication()
@@ -310,6 +388,89 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
       expect(response.text).toContain('<email>ana@nexus.test</email>')
       expect(response.text).toContain('<role>PLAYER</role>')
       expect(response.text).toContain('<termsAccepted>true</termsAccepted>')
+    })
+
+    describe('format=pdf (HU-45.3, Management #135)', () => {
+      afterEach(() => {
+        inventoryReport.result = {
+          available: true,
+          items: [{ reference: 'espada-de-hierro', name: 'Espada de Hierro', quantity: 1 }],
+        }
+        communityReport.result = {
+          available: true,
+          posts: [
+            {
+              id: 'post-1',
+              threadId: 'thread-1',
+              content: 'Buen combate',
+              createdAt: EXPORT_GENERATED_AT,
+            },
+          ],
+        }
+        commerceReport.result = {
+          available: true,
+          orders: [
+            { id: 'ord-1', status: 'CONFIRMED', currency: 'COP', total: 30000, itemCount: 2 },
+          ],
+        }
+      })
+
+      it('descarga un PDF real (ya no 503): identidad + inventario + comentarios + transacciones', async () => {
+        const response = await exportPrivacy('pdf')
+
+        expect(response.status).toBe(200)
+        expect(response.headers['content-type']).toBe('application/pdf')
+        expect(response.headers['content-disposition']).toBe(
+          'attachment; filename="nexus-battles-privacy-report.pdf"',
+        )
+        const bytes = response.body as Buffer
+        expect(Buffer.isBuffer(bytes)).toBe(true)
+        expect(bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-')
+      })
+
+      it('reenvia el testimonio del titular a las tres fuentes externas, sin construir ningun identificador', async () => {
+        await exportPrivacy('pdf')
+
+        expect(inventoryReport.lastAccessToken).toBe('token-jugador')
+        expect(communityReport.lastAccessToken).toBe('token-jugador')
+        expect(commerceReport.lastAccessToken).toBe('token-jugador')
+      })
+
+      it('genera el PDF igual cuando una fuente externa no esta disponible: no bloquea el reporte', async () => {
+        inventoryReport.result = { available: false, items: [] }
+
+        const response = await exportPrivacy('pdf')
+
+        expect(response.status).toBe(200)
+        expect(response.headers['content-type']).toBe('application/pdf')
+      })
+
+      it('resuelve el reporte exclusivamente desde el subject verificado, nunca de un identificador del titular ajeno', async () => {
+        const a = await exportPrivacy('pdf', 'token-jugador')
+        const b = await exportPrivacy('pdf', 'token-jugador-b')
+
+        expect(a.status).toBe(200)
+        expect(b.status).toBe(200)
+        // Cada peticion reenvio el testimonio de SU PROPIO titular, nunca el ajeno.
+        expect(inventoryReport.lastAccessToken).toBe('token-jugador-b')
+      })
+
+      it('responde 401 sin testimonio', async () => {
+        const response = await request(app.getHttpServer()).get(
+          '/api/accounts/me/privacy/export?format=pdf',
+        )
+
+        expect(response.status).toBe(401)
+      })
+
+      it('no muta la cuenta al generar el PDF', async () => {
+        const before = await getOwnPrivacy()
+
+        await exportPrivacy('pdf')
+
+        const after = await getOwnPrivacy()
+        expect(after.body).toEqual(before.body)
+      })
     })
 
     it('resuelve exportaciones diferentes exclusivamente desde cada subject verificado', async () => {

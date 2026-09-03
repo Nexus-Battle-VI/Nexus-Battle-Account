@@ -23,6 +23,7 @@ import {
   GET_OWN_ACCOUNT,
   GET_OWN_PERSONAL_DATA,
   EXPORT_PORTABLE_PERSONAL_DATA,
+  GENERATE_PRIVACY_PDF_REPORT,
   UPDATE_OWN_ACCOUNT,
   CHANGE_OWN_PASSWORD,
   LOGIN_ACCOUNT,
@@ -54,6 +55,7 @@ import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
 import { GetOwnPersonalData } from '../../application/use-cases/GetOwnPersonalData'
 import { ExportPortablePersonalData } from '../../application/use-cases/ExportPortablePersonalData'
+import { GeneratePrivacyPdfReport } from '../../application/use-cases/GeneratePrivacyPdfReport'
 import { UpdateOwnAccount } from '../../application/use-cases/UpdateOwnAccount'
 import { ChangeOwnPassword } from '../../application/use-cases/ChangeOwnPassword'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
@@ -101,6 +103,14 @@ import {
   type PasswordChangePort,
 } from '../../application/ports/PasswordChangePort'
 import { NOTIFICATION_REQUEST } from '../../application/ports/NotificationRequestPort'
+import { PLAYER_INVENTORY_REPORT } from '../../application/ports/PlayerInventoryReportPort'
+import type { PlayerInventoryReportPort } from '../../application/ports/PlayerInventoryReportPort'
+import { COMMUNITY_REPORT } from '../../application/ports/CommunityReportPort'
+import type { CommunityReportPort } from '../../application/ports/CommunityReportPort'
+import { COMMERCE_REPORT } from '../../application/ports/CommerceReportPort'
+import type { CommerceReportPort } from '../../application/ports/CommerceReportPort'
+import { PDF_PRIVACY_REPORT_RENDERER } from '../../application/ports/PdfPrivacyReportRendererPort'
+import type { PdfPrivacyReportRendererPort } from '../../application/ports/PdfPrivacyReportRendererPort'
 import {
   IDENTITY_PASSWORD_RESET,
   type IdentityPasswordResetPort,
@@ -169,6 +179,10 @@ import { CognitoIdentityPasswordReset } from '../../adapters/outbound/identity/C
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
 import { JsonPrivacySerializer } from '../../adapters/outbound/export/JsonPrivacySerializer'
 import { XmlPrivacySerializer } from '../../adapters/outbound/export/XmlPrivacySerializer'
+import { PdfKitPrivacyReportRenderer } from '../../adapters/outbound/export/PdfKitPrivacyReportRenderer'
+import { HttpPlayerInventoryReportAdapter } from '../../adapters/outbound/reporting/HttpPlayerInventoryReportAdapter'
+import { HttpCommunityReportAdapter } from '../../adapters/outbound/reporting/HttpCommunityReportAdapter'
+import { HttpCommerceReportAdapter } from '../../adapters/outbound/reporting/HttpCommerceReportAdapter'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
 
 import { AccountDeletionProcessingScheduler } from '../scheduling/AccountDeletionProcessingScheduler'
@@ -647,6 +661,58 @@ export const DATABASE = Symbol('Database')
           },
         }),
       inject: [GET_OWN_PERSONAL_DATA, CLOCK],
+    },
+    {
+      // HU-45.3 (Management #135): lectura de solo API sobre el servicio
+      // publico de Player-Inventory. `null` sin configurar: la seccion se
+      // genera igual, marcada como no disponible (ver ADR-014 Decision 4).
+      provide: PLAYER_INVENTORY_REPORT,
+      useFactory: (config: AppConfig, logger: Logger): PlayerInventoryReportPort =>
+        new HttpPlayerInventoryReportAdapter({ baseUrl: config.playerInventoryBaseUrl, logger }),
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
+      provide: COMMUNITY_REPORT,
+      useFactory: (config: AppConfig, logger: Logger): CommunityReportPort =>
+        new HttpCommunityReportAdapter({ baseUrl: config.communityBaseUrl, logger }),
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
+      provide: COMMERCE_REPORT,
+      useFactory: (config: AppConfig, logger: Logger): CommerceReportPort =>
+        new HttpCommerceReportAdapter({ baseUrl: config.commerceBaseUrl, logger }),
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
+      provide: PDF_PRIVACY_REPORT_RENDERER,
+      useFactory: (): PdfPrivacyReportRendererPort => new PdfKitPrivacyReportRenderer(),
+    },
+    {
+      provide: GENERATE_PRIVACY_PDF_REPORT,
+      useFactory: (
+        getOwnPersonalData: GetOwnPersonalData,
+        inventory: PlayerInventoryReportPort,
+        community: CommunityReportPort,
+        commerce: CommerceReportPort,
+        renderer: PdfPrivacyReportRendererPort,
+        clock: ClockPort,
+      ): GeneratePrivacyPdfReport =>
+        new GeneratePrivacyPdfReport({
+          getOwnPersonalData,
+          inventory,
+          community,
+          commerce,
+          renderer,
+          clock,
+        }),
+      inject: [
+        GET_OWN_PERSONAL_DATA,
+        PLAYER_INVENTORY_REPORT,
+        COMMUNITY_REPORT,
+        COMMERCE_REPORT,
+        PDF_PRIVACY_REPORT_RENDERER,
+        CLOCK,
+      ],
     },
     {
       provide: UPDATE_OWN_ACCOUNT,
