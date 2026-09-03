@@ -108,6 +108,7 @@ const EXPORT_FIELDS = [
   'id',
   'email',
   'displayName',
+  'countryCode',
   'firstNames',
   'lastNames',
   'status',

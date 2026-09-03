@@ -271,6 +271,7 @@ export class AccountsController {
       return await this.updateOwnAccount.execute({
         subject: identity.subject,
         displayName: body.displayName,
+        countryCode: body.countryCode,
       })
     } catch (error: unknown) {
       throw AccountsController.translate(error)

@@ -241,11 +241,11 @@ La especificación OpenAPI se genera desde el código con `@nestjs/swagger` y se
 
 Las operaciones sobre la cuenta propia derivan la cuenta del sujeto del testimonio, nunca de un identificador del cuerpo. No existe `PATCH /api/accounts/:id`.
 
-| Ruta                             | Uso                                                                                                                                                                 |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/accounts/me`           | Consulta. Contrato público, sin `subject` ni credenciales.                                                                                                          |
-| `PATCH /api/accounts/me`         | Actualiza información personal. Hoy solo `displayName`, con las reglas de unicidad y lista negra del registro. `forbidNonWhitelisted` rechaza cualquier otro campo. |
-| `POST /api/accounts/me/password` | Cambio de contraseña vía `PasswordChangePort`. La contraseña actúa sobre el testimonio de acceso y no toca `Account` ni PostgreSQL. Responde `204`.                 |
+| Ruta                             | Uso                                                                                                                                                                               |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/accounts/me`           | Consulta. Contrato público, sin `subject` ni credenciales.                                                                                                                        |
+| `PATCH /api/accounts/me`         | Actualiza parcialmente `displayName` y `countryCode` nullable. El apodo conserva unicidad y lista negra; el país valida ISO alpha-2. `forbidNonWhitelisted` rechaza otros campos. |
+| `POST /api/accounts/me/password` | Cambio de contraseña vía `PasswordChangePort`. La contraseña actúa sobre el testimonio de acceso y no toca `Account` ni PostgreSQL. Responde `204`.                               |
 
 Eventos de dominio emitidos:
 
@@ -272,7 +272,7 @@ El correo electrónico es un dato personal: la observabilidad registra el **domi
 - El segundo factor administrativo (HU-02) usa el reto que el proveedor emita, pero el mecanismo aprobado por el cliente (correo) no coincide con el aprovisionado en el pool (TOTP): el correo exige SES, decisión todavía pendiente. Ver ADR-004 en Nexus-Battle-Infrastructure.
 - Los bytes del avatar viven fuera de PostgreSQL (`AvatarStoragePort`). En local se usa disco; AWS sustituye el adaptador.
 - Las solicitudes de notificación se registran en la observabilidad con la forma exacta del mensaje, pero no se publican en una cola. Depende de ADR-006.
-- **Mi Cuenta (HU-05):** `PATCH /api/accounts/me` edita hoy **solo el apodo** (`displayName`). `firstNames`, `lastNames`, `email` y `avatar` no se editan porque HU-05 no enumera aquí una lista definitiva de campos editables (y `changeEmail` reabriría la verificación del correo).
+- **Mi Cuenta (HU-05/HU-57):** `PATCH /api/accounts/me` edita apodo (`displayName`) y país opcional (`countryCode`), ampliación explícita solicitada para e-commerce. Ver [decisión y privacidad](profile-country.md). `firstNames`, `lastNames`, `email` y `avatar` conservan su alcance anterior (cambiar el correo reabriría su verificación).
 - **Preferencias (HU-05):** idioma y apariencia no están implementadas. No existe en el repositorio un vocabulario aprobado de valores; modelarlas con valores inventados sería peor que declarar el bloqueo. `PATCH /api/accounts/me` está preparado para extenderse sin reescribirse.
 - **Suscripciones y métodos de pago (HU-05):** sin operaciones funcionales aprobadas ni ownership definido para `Account`. Fuera del alcance implementable.
 

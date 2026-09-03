@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
+import { startTestPostgres, type TestPostgres } from './postgres-runtime'
 import { sql, type Kysely } from 'kysely'
 
 import { describeError } from '../../src/infrastructure/observability/describe-error'
@@ -12,6 +12,8 @@ import type { Database } from '../../src/adapters/outbound/persistence/schema'
 import { Account } from '../../src/domain/entities/Account'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
+import { CountryCode } from '../../src/domain/value-objects/CountryCode'
+import { UpdateOwnAccount } from '../../src/application/use-cases/UpdateOwnAccount'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
 import { PersonName } from '../../src/domain/value-objects/PersonName'
 import { Role } from '../../src/domain/entities/Role'
@@ -32,7 +34,7 @@ import { JsonAdminAccountExportAdapter } from '../../src/adapters/outbound/expor
  * Un doble de prueba habria pasado con un esquema equivocado.
  */
 describe('PostgresAccountRepository', () => {
-  let container: StartedPostgreSqlContainer
+  let container: TestPostgres
   let db: Kysely<Database>
   let repository: PostgresAccountRepository
 
@@ -135,7 +137,7 @@ describe('PostgresAccountRepository', () => {
   }
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer('postgres:17-alpine').start()
+    container = await startTestPostgres()
     db = createDatabase({ connectionString: container.getConnectionUri() })
 
     const { error } = await migrateToLatest(db)
@@ -157,6 +159,37 @@ describe('PostgresAccountRepository', () => {
     const found = await repository.findById(account.id)
 
     expect(found?.toSnapshot()).toEqual(account.toSnapshot())
+  })
+
+  it('persiste país nullable, preserva campos omitidos y lo incluye en proyección/exportación', async () => {
+    const account = buildAccount()
+    await repository.save(account)
+    expect((await repository.findById(account.id))?.currentCountryCode).toBeNull()
+    const update = new UpdateOwnAccount(repository, new PostgresNicknameBlacklist(db))
+    await update.execute({ subject: account.subject, countryCode: 'co' })
+    await update.execute({ subject: account.subject, displayName: 'Pais Persistente' })
+    const restarted = new PostgresAccountRepository(db)
+    expect((await restarted.findById(account.id))?.toSnapshot()).toMatchObject({
+      countryCode: 'CO',
+      displayName: 'Pais Persistente',
+    })
+    const exported = await new ExportAdminAccounts(
+      new ListAdminAccounts(restarted),
+      new JsonAdminAccountExportAdapter(),
+    ).execute({ id: account.id.value })
+    expect(JSON.parse(exported.content)).toEqual([expect.objectContaining({ countryCode: 'CO' })])
+    account.changeCountryCode(CountryCode.create('US'))
+    await repository.save(account)
+    expect((await restarted.findBySubject(account.subject))?.currentCountryCode?.value).toBe('US')
+    await update.execute({ subject: account.subject, countryCode: null })
+    expect((await restarted.findBySubject(account.subject))?.currentCountryCode).toBeNull()
+    await expect(
+      db
+        .updateTable('accounts')
+        .set({ country_code: 'col' })
+        .where('id', '=', account.id.value)
+        .execute(),
+    ).rejects.toThrow()
   })
 
   it('recupera por correo y por sujeto', async () => {
@@ -677,6 +710,7 @@ describe('PostgresAccountRepository', () => {
   describe('deleteById (HU-43.3, tratamiento durable de eliminacion)', () => {
     it('elimina fisicamente la cuenta y hace cascada sobre roles y respuestas de seguridad', async () => {
       const account = buildAccount()
+      account.changeCountryCode(CountryCode.create('CO'))
       await repository.saveRegistration(account, [
         { questionId: 'sq-01', answerHash: 'f'.repeat(64) },
       ])
