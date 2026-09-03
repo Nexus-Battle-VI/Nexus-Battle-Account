@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql'
+import { startTestPostgres, type TestPostgres } from './postgres-runtime'
 import { sql, type Kysely } from 'kysely'
 
 import { describeError } from '../../src/infrastructure/observability/describe-error'
@@ -12,11 +12,18 @@ import type { Database } from '../../src/adapters/outbound/persistence/schema'
 import { Account } from '../../src/domain/entities/Account'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
+import { CountryCode } from '../../src/domain/value-objects/CountryCode'
+import { UpdateOwnAccount } from '../../src/application/use-cases/UpdateOwnAccount'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
 import { PersonName } from '../../src/domain/value-objects/PersonName'
 import { Role } from '../../src/domain/entities/Role'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { defaultAvatarMetadata } from '../support/account-factory'
+import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
+import { ListAdminAccounts } from '../../src/application/use-cases/ListAdminAccounts'
+import type { AdminAccountQueryCriteria } from '../../src/application/dto/AdminAccountQueryCriteria'
+import { ExportAdminAccounts } from '../../src/application/use-cases/ExportAdminAccounts'
+import { JsonAdminAccountExportAdapter } from '../../src/adapters/outbound/export/JsonAdminAccountExportAdapter'
 
 /**
  * Adaptador de PostgreSQL contra un motor REAL, en contenedor.
@@ -27,7 +34,7 @@ import { defaultAvatarMetadata } from '../support/account-factory'
  * Un doble de prueba habria pasado con un esquema equivocado.
  */
 describe('PostgresAccountRepository', () => {
-  let container: StartedPostgreSqlContainer
+  let container: TestPostgres
   let db: Kysely<Database>
   let repository: PostgresAccountRepository
 
@@ -52,8 +59,85 @@ describe('PostgresAccountRepository', () => {
     })
   }
 
+  interface AdminQuerySeed {
+    readonly id: string
+    readonly subject: string
+    readonly email: string
+    readonly displayName: string
+    readonly firstNames: string
+    readonly lastNames: string
+    readonly status: AccountStatus
+    readonly roles: readonly Role[]
+    readonly registeredAt: Date
+  }
+
+  const ADMIN_QUERY_SEEDS: readonly AdminQuerySeed[] = [
+    {
+      id: 'acc-query-admin',
+      subject: 'subject-query-admin',
+      email: 'query.admin@nexus.test',
+      displayName: 'Capitana Query',
+      firstNames: 'Ada',
+      lastNames: 'Lovelace',
+      status: AccountStatus.Active,
+      roles: [Role.Player, Role.Administrator],
+      registeredAt: new Date('2026-08-10T10:00:00.000Z'),
+    },
+    {
+      id: 'acc-query-super',
+      subject: 'subject-query-super',
+      email: 'query.super@nexus.test',
+      displayName: 'Raiz Query',
+      firstNames: 'Grace',
+      lastNames: 'Hopper',
+      status: AccountStatus.Active,
+      roles: [Role.SuperAdministrator],
+      registeredAt: new Date('2026-08-11T10:00:00.000Z'),
+    },
+    {
+      id: 'acc-query-suspended',
+      subject: 'subject-query-suspended',
+      email: 'query.suspended@nexus.test',
+      displayName: 'Moderadora Query',
+      firstNames: 'Katherine',
+      lastNames: 'Johnson',
+      status: AccountStatus.Suspended,
+      roles: [Role.Player, Role.Moderator],
+      registeredAt: new Date('2026-08-12T10:00:00.000Z'),
+    },
+  ]
+
+  const buildAdminQueryAccount = (seed: AdminQuerySeed): Account =>
+    Account.restore({
+      id: AccountId.create(seed.id),
+      subject: seed.subject,
+      email: EmailAddress.create(seed.email),
+      displayName: DisplayName.create(seed.displayName),
+      firstNames: PersonName.create(seed.firstNames, 'Los nombres'),
+      lastNames: PersonName.create(seed.lastNames, 'Los apellidos'),
+      termsAccepted: true,
+      avatar: defaultAvatarMetadata(seed.id),
+      status: seed.status,
+      roles: seed.roles,
+    })
+
+  const seedAdminQueryAccounts = async (memory?: InMemoryAccountRepository): Promise<void> => {
+    await db.deleteFrom('accounts').execute()
+
+    for (const seed of ADMIN_QUERY_SEEDS) {
+      const account = buildAdminQueryAccount(seed)
+      await memory?.save(account)
+      await repository.save(account)
+      await db
+        .updateTable('accounts')
+        .set({ created_at: seed.registeredAt, updated_at: seed.registeredAt })
+        .where('id', '=', seed.id)
+        .execute()
+    }
+  }
+
   beforeAll(async () => {
-    container = await new PostgreSqlContainer('postgres:17-alpine').start()
+    container = await startTestPostgres()
     db = createDatabase({ connectionString: container.getConnectionUri() })
 
     const { error } = await migrateToLatest(db)
@@ -75,6 +159,37 @@ describe('PostgresAccountRepository', () => {
     const found = await repository.findById(account.id)
 
     expect(found?.toSnapshot()).toEqual(account.toSnapshot())
+  })
+
+  it('persiste país nullable, preserva campos omitidos y lo incluye en proyección/exportación', async () => {
+    const account = buildAccount()
+    await repository.save(account)
+    expect((await repository.findById(account.id))?.currentCountryCode).toBeNull()
+    const update = new UpdateOwnAccount(repository, new PostgresNicknameBlacklist(db))
+    await update.execute({ subject: account.subject, countryCode: 'co' })
+    await update.execute({ subject: account.subject, displayName: 'Pais Persistente' })
+    const restarted = new PostgresAccountRepository(db)
+    expect((await restarted.findById(account.id))?.toSnapshot()).toMatchObject({
+      countryCode: 'CO',
+      displayName: 'Pais Persistente',
+    })
+    const exported = await new ExportAdminAccounts(
+      new ListAdminAccounts(restarted),
+      new JsonAdminAccountExportAdapter(),
+    ).execute({ id: account.id.value })
+    expect(JSON.parse(exported.content)).toEqual([expect.objectContaining({ countryCode: 'CO' })])
+    account.changeCountryCode(CountryCode.create('US'))
+    await repository.save(account)
+    expect((await restarted.findBySubject(account.subject))?.currentCountryCode?.value).toBe('US')
+    await update.execute({ subject: account.subject, countryCode: null })
+    expect((await restarted.findBySubject(account.subject))?.currentCountryCode).toBeNull()
+    await expect(
+      db
+        .updateTable('accounts')
+        .set({ country_code: 'col' })
+        .where('id', '=', account.id.value)
+        .execute(),
+    ).rejects.toThrow()
   })
 
   it('recupera por correo y por sujeto', async () => {
@@ -213,6 +328,99 @@ describe('PostgresAccountRepository', () => {
       .execute()
 
     expect(roles.map((r) => r.role)).toEqual([Role.Player])
+  })
+
+  it('mantiene paridad con memoria para los filtros administrativos soportados', async () => {
+    let nextDate = 0
+    const memory = new InMemoryAccountRepository(
+      () => ADMIN_QUERY_SEEDS[nextDate++]?.registeredAt ?? new Date('2026-08-31T00:00:00.000Z'),
+    )
+
+    await seedAdminQueryAccounts(memory)
+
+    const criteria: readonly AdminAccountQueryCriteria[] = [
+      {},
+      { id: 'acc-query-admin' },
+      { email: 'QUERY.ADMIN@NEXUS.TEST' },
+      { firstNames: 'ada' },
+      { lastNames: 'hopper' },
+      { displayName: 'raiz query' },
+      { role: Role.SuperAdministrator },
+      { status: AccountStatus.Suspended },
+      { role: Role.Player, status: AccountStatus.Active },
+    ]
+
+    const memoryUseCase = new ListAdminAccounts(memory)
+    const postgresUseCase = new ListAdminAccounts(repository)
+
+    for (const criterion of criteria) {
+      await expect(postgresUseCase.execute(criterion)).resolves.toEqual(
+        await memoryUseCase.execute(criterion),
+      )
+    }
+  })
+
+  it('exporta desde PostgreSQL el mismo resultado producido por ListAdminAccounts', async () => {
+    await seedAdminQueryAccounts()
+
+    const criteria: AdminAccountQueryCriteria = {
+      role: Role.Player,
+      status: AccountStatus.Active,
+    }
+    const listAdminAccounts = new ListAdminAccounts(repository)
+    const exportAdminAccounts = new ExportAdminAccounts(
+      listAdminAccounts,
+      new JsonAdminAccountExportAdapter(),
+    )
+    const accountsBefore = await db
+      .selectFrom('accounts')
+      .select([
+        'id',
+        'email',
+        'display_name',
+        'first_names',
+        'last_names',
+        'status',
+        'created_at',
+        'updated_at',
+      ])
+      .orderBy('id')
+      .execute()
+    const rolesBefore = await db
+      .selectFrom('account_roles')
+      .select(['account_id', 'role'])
+      .orderBy('account_id')
+      .orderBy('role')
+      .execute()
+
+    const listed = await listAdminAccounts.execute(criteria)
+    const file = await exportAdminAccounts.execute(criteria)
+    const exported = JSON.parse(file.content) as unknown
+    const accountsAfter = await db
+      .selectFrom('accounts')
+      .select([
+        'id',
+        'email',
+        'display_name',
+        'first_names',
+        'last_names',
+        'status',
+        'created_at',
+        'updated_at',
+      ])
+      .orderBy('id')
+      .execute()
+    const rolesAfter = await db
+      .selectFrom('account_roles')
+      .select(['account_id', 'role'])
+      .orderBy('account_id')
+      .orderBy('role')
+      .execute()
+
+    expect(exported).toEqual(listed.items)
+    expect(listed.items.map((item) => item.id)).toEqual(['acc-query-admin'])
+    expect(accountsAfter).toEqual(accountsBefore)
+    expect(rolesAfter).toEqual(rolesBefore)
   })
 
   describe('Las restricciones viven en el motor, no solo en el codigo', () => {
@@ -496,6 +704,63 @@ describe('PostgresAccountRepository', () => {
           })
           .execute(),
       ).rejects.toThrow()
+    })
+  })
+
+  describe('deleteById (HU-43.3, tratamiento durable de eliminacion)', () => {
+    it('elimina fisicamente la cuenta y hace cascada sobre roles y respuestas de seguridad', async () => {
+      const account = buildAccount()
+      account.changeCountryCode(CountryCode.create('CO'))
+      await repository.saveRegistration(account, [
+        { questionId: 'sq-01', answerHash: 'f'.repeat(64) },
+      ])
+
+      await repository.deleteById(account.id)
+
+      expect(await repository.findById(account.id)).toBeNull()
+      expect(await repository.findSecurityAnswers(account.id)).toEqual([])
+
+      const leftoverRoles = await db
+        .selectFrom('account_roles')
+        .selectAll()
+        .where('account_id', '=', account.id.value)
+        .execute()
+
+      expect(leftoverRoles).toEqual([])
+    })
+
+    it('eliminar una cuenta que ya no existe no falla (idempotente ante reintento)', async () => {
+      await expect(
+        repository.deleteById(AccountId.create('acc-jamas-existio')),
+      ).resolves.toBeUndefined()
+    })
+
+    it('no impide que la cuenta se elimine mientras exista una solicitud de eliminacion asociada (FK desacoplada)', async () => {
+      const account = buildAccount()
+      await repository.save(account)
+
+      await db
+        .insertInto('account_deletion_requests')
+        .values({
+          id: `del-${account.id.value}`,
+          account_id: account.id.value,
+          status: 'IN_PROGRESS',
+        })
+        .execute()
+
+      await repository.deleteById(account.id)
+
+      expect(await repository.findById(account.id)).toBeNull()
+
+      // La solicitud sobrevive: es la evidencia de que existio y cuando se
+      // cerro, independientemente de que la cuenta ya no exista.
+      const solicitud = await db
+        .selectFrom('account_deletion_requests')
+        .selectAll()
+        .where('id', '=', `del-${account.id.value}`)
+        .executeTakeFirst()
+
+      expect(solicitud?.account_id).toBe(account.id.value)
     })
   })
 

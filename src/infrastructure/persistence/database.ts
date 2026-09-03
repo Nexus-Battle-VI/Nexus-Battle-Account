@@ -13,8 +13,11 @@ import * as migrationHu01 from '../../adapters/outbound/persistence/migrations/h
 import * as migrationHu02BlacklistSeed from '../../adapters/outbound/persistence/migrations/hu02-nickname-blacklist-seed'
 import * as migrationHu03SuperAdmin from '../../adapters/outbound/persistence/migrations/hu03-super-administrator-role'
 import * as migrationHu04RecoveryChallenges from '../../adapters/outbound/persistence/migrations/hu04-recovery-challenges'
-import * as migrationHardeningMfaEvidence from '../../adapters/outbound/persistence/migrations/hardening-mfa-evidence'
-import * as migrationHardeningMfaEvidenceMethod from '../../adapters/outbound/persistence/migrations/hardening-mfa-evidence-method'
+import * as migrationHu33MfaEvidence from '../../adapters/outbound/persistence/migrations/hu33-mfa-evidence'
+import * as migrationHu33MfaEvidenceMethod from '../../adapters/outbound/persistence/migrations/hu33-mfa-evidence-method'
+import * as migrationHu43AccountDeletionRequests from '../../adapters/outbound/persistence/migrations/hu43-account-deletion-requests'
+import * as migrationHu43DesvincularSolicitudEliminacion from '../../adapters/outbound/persistence/migrations/hu43-desvincular-solicitud-eliminacion-de-cuenta'
+import * as migrationHu57ProfileCountry from '../../adapters/outbound/persistence/migrations/hu57-profile-country'
 
 export interface DatabaseOptions {
   readonly connectionString: string
@@ -50,6 +53,19 @@ export const createDatabase = (options: DatabaseOptions): Kysely<Database> =>
  * imagen de produccion ese directorio contiene JavaScript compilado con otra
  * ruta. Importarlas explicitamente hace que el compilador las verifique y que
  * el empaquetado no pueda dejarse ninguna fuera en silencio.
+ *
+ * EL NOMBRE DECIDE EL ORDEN, Y NO ES UN DETALLE COSMETICO. Kysely las ordena
+ * alfabeticamente por esta clave y exige que las ya ejecutadas aparezcan en la
+ * misma posicion que cuando se ejecutaron. Una migracion nueva cuyo nombre
+ * quede ANTES que alguna ya aplicada no se aplica: el migrador aborta con
+ * `corrupted migrations` y el servicio no arranca.
+ *
+ * Ocurrio. Las dos ultimas se llamaron `hardening-mfa-evidence*`, y
+ * «hardening» va antes que «hu01» alfabeticamente. En una base vacia -CI,
+ * portatil recien clonado- funcionaba; contra la base de produccion, que ya
+ * tenia `hu01` a `hu04`, el arranque fallaba. Por eso llevan el prefijo de su
+ * historia de usuario, como las demas: asi el orden del nombre coincide con el
+ * orden en que se escribieron. `migrationNames` y su prueba lo vigilan.
  */
 const migrations: MigrationProvider = {
   getMigrations: () =>
@@ -59,10 +75,25 @@ const migrations: MigrationProvider = {
       'hu02-nickname-blacklist-seed': migrationHu02BlacklistSeed,
       'hu03-super-administrator-role': migrationHu03SuperAdmin,
       'hu04-recovery-challenges': migrationHu04RecoveryChallenges,
-      'hardening-mfa-evidence': migrationHardeningMfaEvidence,
-      'hardening-mfa-evidence-method': migrationHardeningMfaEvidenceMethod,
+      'hu33-mfa-evidence': migrationHu33MfaEvidence,
+      'hu33-mfa-evidence-method': migrationHu33MfaEvidenceMethod,
+      'hu43-account-deletion-requests': migrationHu43AccountDeletionRequests,
+      'hu43-desvincular-solicitud-eliminacion-de-cuenta':
+        migrationHu43DesvincularSolicitudEliminacion,
+      'hu57-profile-country': migrationHu57ProfileCountry,
     }),
 }
+
+/**
+ * Los nombres de las migraciones, en el orden en que estan declaradas.
+ *
+ * Se expone para poder comprobar en una prueba que ese orden coincide con el
+ * alfabetico, que es el unico que Kysely respeta. Sin esa comprobacion, el
+ * error solo aparece al desplegar contra una base que ya tiene historial, y
+ * para entonces el servicio ya no arranca.
+ */
+export const migrationNames = async (): Promise<readonly string[]> =>
+  Object.keys(await migrations.getMigrations())
 
 export interface MigrationOutcome {
   readonly applied: readonly string[]

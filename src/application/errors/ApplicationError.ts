@@ -65,3 +65,31 @@ export class IdentityRequiredError extends Error {
     this.name = 'IdentityRequiredError'
   }
 }
+
+export class AuthenticationRequiredError extends Error {
+  constructor() {
+    super('Se requiere autenticacion.')
+    this.name = 'AuthenticationRequiredError'
+  }
+}
+
+export class AccessDeniedError extends Error {
+  constructor() {
+    super('Acceso denegado.')
+    this.name = 'AccessDeniedError'
+  }
+}
+
+/**
+ * Ya existe una solicitud de eliminacion activa para esta cuenta (HU-43.1).
+ *
+ * `Received`, `InProgress` y `Failed` cuentan como activas: un fallo
+ * transitorio no libera la proteccion, porque la solicitud original sigue
+ * pendiente de reintento, no de una nueva solicitud independiente.
+ */
+export class AccountHasActiveDeletionRequestError extends Error {
+  constructor() {
+    super('La cuenta ya tiene una solicitud de eliminacion activa.')
+    this.name = 'AccountHasActiveDeletionRequestError'
+  }
+}

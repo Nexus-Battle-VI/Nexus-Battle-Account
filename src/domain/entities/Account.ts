@@ -2,6 +2,7 @@ import { DomainError } from '../errors/DomainError'
 import type { AccountId } from '../value-objects/AccountId'
 import type { EmailAddress } from '../value-objects/EmailAddress'
 import type { DisplayName } from '../value-objects/DisplayName'
+import type { CountryCode } from '../value-objects/CountryCode'
 import type { PersonName } from '../value-objects/PersonName'
 import type { AvatarMetadata } from '../value-objects/AvatarMetadata'
 import { AccountStatus } from './AccountStatus'
@@ -18,6 +19,7 @@ export interface AccountSnapshot {
   readonly subject: string
   readonly email: string
   readonly displayName: string
+  readonly countryCode: string | null
   readonly firstNames: string
   readonly lastNames: string
   readonly termsAccepted: boolean
@@ -55,6 +57,9 @@ export class Account {
 
   private email: EmailAddress
   private displayName: DisplayName
+  private countryCode: CountryCode | null
+  private countryCodeVersion = 0
+  private persistedCountryCodeVersion = 0
   private readonly firstNames: PersonName
   private readonly lastNames: PersonName
   private readonly termsAccepted: boolean
@@ -68,6 +73,7 @@ export class Account {
     subject: string
     email: EmailAddress
     displayName: DisplayName
+    countryCode?: CountryCode | null
     firstNames: PersonName
     lastNames: PersonName
     termsAccepted: boolean
@@ -79,6 +85,7 @@ export class Account {
     this.subject = params.subject
     this.email = params.email
     this.displayName = params.displayName
+    this.countryCode = params.countryCode ?? null
     this.firstNames = params.firstNames
     this.lastNames = params.lastNames
     this.termsAccepted = params.termsAccepted
@@ -150,6 +157,7 @@ export class Account {
     subject: string
     email: EmailAddress
     displayName: DisplayName
+    countryCode?: CountryCode | null
     firstNames: PersonName
     lastNames: PersonName
     termsAccepted: boolean
@@ -173,6 +181,7 @@ export class Account {
       firstNames: params.firstNames,
       lastNames: params.lastNames,
       termsAccepted: params.termsAccepted,
+      countryCode: params.countryCode ?? null,
       avatar: params.avatar,
       status: params.status,
       roles: new Set<Role>(params.roles),
@@ -185,6 +194,31 @@ export class Account {
 
   get currentDisplayName(): DisplayName {
     return this.displayName
+  }
+
+  get currentCountryCode(): CountryCode | null {
+    return this.countryCode
+  }
+
+  changeCountryCode(countryCode: CountryCode | null): void {
+    this.countryCode = countryCode
+    this.countryCodeVersion += 1
+  }
+
+  /** Una lectura antigua no expresa intencion de escribir el pais. */
+  get hasCountryCodeChange(): boolean {
+    return this.countryCodeVersion !== this.persistedCountryCodeVersion
+  }
+
+  get countryCodePersistenceVersion(): number {
+    return this.countryCodeVersion
+  }
+
+  /** Acepta el valor realmente guardado, sin borrar un cambio local posterior. */
+  acceptPersistedCountryCode(countryCode: CountryCode | null, version: number): void {
+    if (version !== this.countryCodeVersion) return
+    this.countryCode = countryCode
+    this.persistedCountryCodeVersion = version
   }
 
   get currentFirstNames(): PersonName {
@@ -320,6 +354,7 @@ export class Account {
       subject: this.subject,
       email: this.email.value,
       displayName: this.displayName.value,
+      countryCode: this.countryCode?.value ?? null,
       firstNames: this.firstNames.value,
       lastNames: this.lastNames.value,
       termsAccepted: this.termsAccepted,

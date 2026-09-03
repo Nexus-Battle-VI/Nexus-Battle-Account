@@ -1,4 +1,6 @@
 import { DisplayName } from '../../domain/value-objects/DisplayName'
+import { CountryCode } from '../../domain/value-objects/CountryCode'
+import { DomainError } from '../../domain/errors/DomainError'
 import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
 import type { NicknameBlacklistPort } from '../ports/NicknameBlacklistPort'
 import {
@@ -15,7 +17,9 @@ import { type AccountDto, toAccountDto } from '../dto/AccountDto'
  * identificador del cuerpo: es el mismo patron self-service de `GetOwnAccount`,
  * y es lo que impide que quien llama toque una cuenta ajena.
  *
- * Campo soportado: `displayName` (apodo). Reutiliza las mismas reglas ya
+ * Campos soportados: `displayName` y país opcional `countryCode` (HU-57).
+ * La ampliación de país fue solicitada explícitamente para el e-commerce.
+ * El apodo reutiliza las mismas reglas ya
  * aprobadas en el registro -`DisplayName` para el formato, unicidad
  * insensible a mayusculas y lista negra vigente- en lugar de introducir una
  * segunda normalizacion o duplicar la lista negra.
@@ -37,7 +41,8 @@ export class UpdateOwnAccount {
 
   async execute(command: {
     readonly subject: string
-    readonly displayName: string
+    readonly displayName?: string
+    readonly countryCode?: string | null
   }): Promise<AccountDto> {
     const account = await this.accounts.findBySubject(command.subject)
 
@@ -48,29 +53,34 @@ export class UpdateOwnAccount {
       )
     }
 
-    const displayName = DisplayName.create(command.displayName)
-
-    // Edicion idempotente del MISMO valor: nada que comprobar ni que guardar.
-    // Sin esta salida, un apodo identico al actual iria a la comprobacion de
-    // unicidad y chocaria consigo mismo.
-    if (account.currentDisplayName.equals(displayName)) {
-      return toAccountDto(account.toSnapshot())
+    if (command.displayName === undefined && command.countryCode === undefined) {
+      throw new DomainError('Indique displayName o countryCode para actualizar el perfil.')
     }
+    const displayName =
+      command.displayName === undefined ? undefined : DisplayName.create(command.displayName)
+    const countryCode =
+      command.countryCode === undefined
+        ? undefined
+        : command.countryCode === null
+          ? null
+          : CountryCode.create(command.countryCode)
 
-    // La colision se decide por PROPIETARIO, no por existencia: cambiar solo
-    // las mayusculas del propio apodo ("Ana" -> "ANA") lo encontraria el indice
-    // insensible a mayusculas y seria un falso choque con uno mismo.
-    const owner = await this.accounts.findByDisplayName(displayName)
-
-    if (owner !== null && !owner.id.equals(account.id)) {
-      throw new DisplayNameAlreadyTakenError(displayName.value)
+    const rename = displayName !== undefined && !account.currentDisplayName.equals(displayName)
+    if (rename) {
+      // Case-insensitive uniqueness applies to another owner, not this account.
+      const owner = await this.accounts.findByDisplayName(displayName)
+      if (owner !== null && !owner.id.equals(account.id)) {
+        throw new DisplayNameAlreadyTakenError(displayName.value)
+      }
+      if (await this.blacklist.isBlocked(displayName.value)) throw new NicknameBlacklistedError()
     }
+    // Presencia expresa intencion de escribir, incluso null o el valor leido.
+    const changeCountry = countryCode !== undefined
+    if (!rename && !changeCountry) return toAccountDto(account.toSnapshot())
 
-    if (await this.blacklist.isBlocked(displayName.value)) {
-      throw new NicknameBlacklistedError()
-    }
-
-    account.rename(displayName)
+    // Validate both fields before changing the aggregate; omitted fields survive.
+    if (rename) account.rename(displayName)
+    if (changeCountry) account.changeCountryCode(countryCode)
     await this.accounts.save(account)
 
     return toAccountDto(account.toSnapshot())

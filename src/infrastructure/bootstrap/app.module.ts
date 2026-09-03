@@ -5,6 +5,7 @@ import { AccountsController } from '../../adapters/inbound/http/accounts.control
 import { RecoveryController } from '../../adapters/inbound/http/recovery.controller'
 import { MfaController } from '../../adapters/inbound/http/mfa.controller'
 import { PasswordController } from '../../adapters/inbound/http/password.controller'
+import { AccountDeletionController } from '../../adapters/inbound/http/account-deletion.controller'
 import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
 import { InternalMfaEvidenceController } from '../../adapters/inbound/http/internal-mfa-evidence.controller'
 import { InternalServiceGuard } from '../../adapters/inbound/http/auth/internal-service.guard'
@@ -20,6 +21,8 @@ import {
   COMPLETE_SECOND_FACTOR,
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
+  GET_OWN_PERSONAL_DATA,
+  EXPORT_PORTABLE_PERSONAL_DATA,
   UPDATE_OWN_ACCOUNT,
   CHANGE_OWN_PASSWORD,
   LOGIN_ACCOUNT,
@@ -36,6 +39,10 @@ import {
   START_PASSWORD_RECOVERY,
   VERIFY_RECOVERY_ANSWERS,
   VERIFY_RECOVERY_CODE,
+  LIST_ADMIN_ACCOUNTS,
+  EXPORT_ADMIN_ACCOUNTS,
+  REQUEST_ACCOUNT_DELETION,
+  PROCESS_ACCOUNT_DELETION,
 } from '../../adapters/inbound/http/tokens'
 import { READINESS_CHECKS, VERSION_REPORT } from '../../adapters/inbound/http/tokens.health'
 
@@ -45,6 +52,8 @@ import { EnrollTotp } from '../../application/use-cases/EnrollTotp'
 import { ConfirmTotpEnrollment } from '../../application/use-cases/ConfirmTotpEnrollment'
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
+import { GetOwnPersonalData } from '../../application/use-cases/GetOwnPersonalData'
+import { ExportPortablePersonalData } from '../../application/use-cases/ExportPortablePersonalData'
 import { UpdateOwnAccount } from '../../application/use-cases/UpdateOwnAccount'
 import { ChangeOwnPassword } from '../../application/use-cases/ChangeOwnPassword'
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
@@ -58,8 +67,20 @@ import { ChooseSecondFactor } from '../../application/use-cases/ChooseSecondFact
 import { CompleteSecondFactor } from '../../application/use-cases/CompleteSecondFactor'
 import { AssignRole } from '../../application/use-cases/AssignRole'
 import { FindAccountByEmail } from '../../application/use-cases/FindAccountByEmail'
+import { ListAdminAccounts } from '../../application/use-cases/ListAdminAccounts'
+import { ExportAdminAccounts } from '../../application/use-cases/ExportAdminAccounts'
+import { RequestAccountDeletion } from '../../application/use-cases/RequestAccountDeletion'
+import { ProcessAccountDeletion } from '../../application/use-cases/ProcessAccountDeletion'
 import { RevokeRole } from '../../application/use-cases/RevokeRole'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
+import {
+  ADMIN_ACCOUNT_QUERY,
+  type AdminAccountQueryPort,
+} from '../../application/ports/AdminAccountQueryPort'
+import {
+  ADMIN_ACCOUNT_EXPORT,
+  type AdminAccountExportPort,
+} from '../../application/ports/AdminAccountExportPort'
 import { AUTHENTICATION_PROVIDER } from '../../application/ports/AuthenticationProviderPort'
 import { ROLE_DIRECTORY, type RoleDirectoryPort } from '../../application/ports/RoleDirectoryPort'
 import {
@@ -86,6 +107,8 @@ import {
 } from '../../application/ports/IdentityPasswordResetPort'
 import { RECOVERY_CHALLENGE_REPOSITORY } from '../../application/ports/RecoveryChallengeRepositoryPort'
 import type { RecoveryChallengeRepositoryPort } from '../../application/ports/RecoveryChallengeRepositoryPort'
+import { ACCOUNT_DELETION_REQUEST_REPOSITORY } from '../../application/ports/AccountDeletionRequestRepositoryPort'
+import type { AccountDeletionRequestRepositoryPort } from '../../application/ports/AccountDeletionRequestRepositoryPort'
 import { RECOVERY_OTP } from '../../application/ports/RecoveryOtpPort'
 import type { RecoveryOtpPort } from '../../application/ports/RecoveryOtpPort'
 import { CLOCK } from '../../application/ports/ClockPort'
@@ -116,6 +139,7 @@ import { PostgresNicknameBlacklist } from '../../adapters/outbound/persistence/P
 import { InMemorySecurityQuestionCatalog } from '../../adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
 import { PostgresSecurityQuestionCatalog } from '../../adapters/outbound/persistence/PostgresSecurityQuestionCatalog'
 import { LocalAvatarStorage } from '../../adapters/outbound/storage/LocalAvatarStorage'
+import { JsonAdminAccountExportAdapter } from '../../adapters/outbound/export/JsonAdminAccountExportAdapter'
 import { createDatabase } from '../persistence/database'
 import type { Database } from '../../adapters/outbound/persistence/schema'
 import type { Kysely } from 'kysely'
@@ -137,12 +161,17 @@ import { LoggingNotificationRequester } from '../../adapters/outbound/messaging/
 import { HttpNotificationRequester } from '../../adapters/outbound/messaging/HttpNotificationRequester'
 import { InMemoryRecoveryChallengeRepository } from '../../adapters/outbound/persistence/InMemoryRecoveryChallengeRepository'
 import { PostgresRecoveryChallengeRepository } from '../../adapters/outbound/persistence/PostgresRecoveryChallengeRepository'
+import { InMemoryAccountDeletionRequestRepository } from '../../adapters/outbound/persistence/InMemoryAccountDeletionRequestRepository'
+import { PostgresAccountDeletionRequestRepository } from '../../adapters/outbound/persistence/PostgresAccountDeletionRequestRepository'
 import { FixedRecoveryOtp } from '../../adapters/outbound/identity/FixedRecoveryOtp'
 import { RandomRecoveryOtp } from '../../adapters/outbound/identity/RandomRecoveryOtp'
 import { CognitoIdentityPasswordReset } from '../../adapters/outbound/identity/CognitoIdentityPasswordReset'
 import { SystemClock } from '../../adapters/outbound/system/SystemClock'
+import { JsonPrivacySerializer } from '../../adapters/outbound/export/JsonPrivacySerializer'
+import { XmlPrivacySerializer } from '../../adapters/outbound/export/XmlPrivacySerializer'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
 
+import { AccountDeletionProcessingScheduler } from '../scheduling/AccountDeletionProcessingScheduler'
 import { createLogger, type Logger } from '../observability/logger'
 import {
   AuthenticationDriver,
@@ -171,6 +200,7 @@ export const DATABASE = Symbol('Database')
     RecoveryController,
     MfaController,
     PasswordController,
+    AccountDeletionController,
     SessionsController,
     InternalMfaEvidenceController,
     HealthController,
@@ -216,6 +246,14 @@ export const DATABASE = Symbol('Database')
       useFactory: (db: Kysely<Database> | null): AccountRepositoryPort =>
         db === null ? new InMemoryAccountRepository() : new PostgresAccountRepository(db),
       inject: [DATABASE],
+    },
+    {
+      provide: ADMIN_ACCOUNT_QUERY,
+      useExisting: ACCOUNT_REPOSITORY,
+    },
+    {
+      provide: ADMIN_ACCOUNT_EXPORT,
+      useFactory: (): AdminAccountExportPort => new JsonAdminAccountExportAdapter(),
     },
     {
       provide: NICKNAME_BLACKLIST,
@@ -552,6 +590,20 @@ export const DATABASE = Symbol('Database')
       inject: [ACCOUNT_REPOSITORY, MFA_STATUS],
     },
     {
+      provide: LIST_ADMIN_ACCOUNTS,
+      useFactory: (accounts: AdminAccountQueryPort): ListAdminAccounts =>
+        new ListAdminAccounts(accounts),
+      inject: [ADMIN_ACCOUNT_QUERY],
+    },
+    {
+      provide: EXPORT_ADMIN_ACCOUNTS,
+      useFactory: (
+        listAdminAccounts: ListAdminAccounts,
+        exporter: AdminAccountExportPort,
+      ): ExportAdminAccounts => new ExportAdminAccounts(listAdminAccounts, exporter),
+      inject: [LIST_ADMIN_ACCOUNTS, ADMIN_ACCOUNT_EXPORT],
+    },
+    {
       provide: ASSIGN_ROLE,
       useFactory: (
         accounts: AccountRepositoryPort,
@@ -573,6 +625,28 @@ export const DATABASE = Symbol('Database')
       provide: GET_OWN_ACCOUNT,
       useFactory: (accounts: AccountRepositoryPort): GetOwnAccount => new GetOwnAccount(accounts),
       inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: GET_OWN_PERSONAL_DATA,
+      useFactory: (accounts: AccountRepositoryPort): GetOwnPersonalData =>
+        new GetOwnPersonalData(accounts),
+      inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: EXPORT_PORTABLE_PERSONAL_DATA,
+      useFactory: (
+        getOwnPersonalData: GetOwnPersonalData,
+        clock: ClockPort,
+      ): ExportPortablePersonalData =>
+        new ExportPortablePersonalData({
+          getOwnPersonalData,
+          clock,
+          serializers: {
+            json: new JsonPrivacySerializer(),
+            xml: new XmlPrivacySerializer(),
+          },
+        }),
+      inject: [GET_OWN_PERSONAL_DATA, CLOCK],
     },
     {
       provide: UPDATE_OWN_ACCOUNT,
@@ -657,6 +731,84 @@ export const DATABASE = Symbol('Database')
           ? new InMemoryRecoveryChallengeRepository()
           : new PostgresRecoveryChallengeRepository(db),
       inject: [DATABASE],
+    },
+    {
+      // HU-43.1 (Management #303): persistencia de la solicitud durable,
+      // con el mismo `PERSISTENCE_DRIVER` que el resto de repositorios. Ver
+      // ADR-014 Decision 5 y EN-011 (Management #197).
+      provide: ACCOUNT_DELETION_REQUEST_REPOSITORY,
+      useFactory: (db: Kysely<Database> | null): AccountDeletionRequestRepositoryPort =>
+        db === null
+          ? new InMemoryAccountDeletionRequestRepository()
+          : new PostgresAccountDeletionRequestRepository(db),
+      inject: [DATABASE],
+    },
+    {
+      // HU-43.2 (Management #304): solicitud segura + confirmacion de
+      // recepcion, sobre la persistencia de HU-43.1. Sigue sin ejecutar el
+      // tratamiento de datos personales ni cerrar la solicitud.
+      provide: REQUEST_ACCOUNT_DELETION,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        deletionRequests: AccountDeletionRequestRepositoryPort,
+        clock: ClockPort,
+        ids: IdGeneratorPort,
+      ): RequestAccountDeletion =>
+        new RequestAccountDeletion({ accounts, deletionRequests, clock, ids }),
+      inject: [ACCOUNT_REPOSITORY, ACCOUNT_DELETION_REQUEST_REPOSITORY, CLOCK, ID_GENERATOR],
+    },
+    {
+      // HU-43.3 (Management #305): tratamiento durable de datos personales y
+      // cierre. Sin ruta HTTP: lo invoca unicamente
+      // `AccountDeletionProcessingScheduler`.
+      provide: PROCESS_ACCOUNT_DELETION,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        deletionRequests: AccountDeletionRequestRepositoryPort,
+        avatars: AvatarStoragePort,
+        notifications: NotificationRequestPort,
+        clock: ClockPort,
+        logger: Logger,
+      ): ProcessAccountDeletion =>
+        new ProcessAccountDeletion({
+          accounts,
+          deletionRequests,
+          avatars,
+          notifications,
+          clock,
+          logger,
+        }),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        ACCOUNT_DELETION_REQUEST_REPOSITORY,
+        AVATAR_STORAGE,
+        NOTIFICATION_REQUEST,
+        CLOCK,
+        LOGGER,
+      ],
+    },
+    {
+      // Arranca (o no) segun `ACCOUNT_DELETION_PROCESSING_ENABLED`. Es un
+      // provider mas de la raiz de composicion: Nest invoca sus ganchos de
+      // ciclo de vida (`onModuleInit`/`onModuleDestroy`) sobre CUALQUIER
+      // instancia de provider que los implemente, sin exigir `@Injectable()`
+      // ni una clase registrada de otra forma -mismo patron de clase plana
+      // que el resto de casos de uso de este modulo.
+      provide: AccountDeletionProcessingScheduler,
+      useFactory: (
+        config: AppConfig,
+        deletionRequests: AccountDeletionRequestRepositoryPort,
+        processAccountDeletion: ProcessAccountDeletion,
+        logger: Logger,
+      ): AccountDeletionProcessingScheduler =>
+        new AccountDeletionProcessingScheduler({
+          enabled: config.accountDeletionProcessingEnabled,
+          intervalMs: config.accountDeletionProcessingIntervalMs,
+          deletionRequests,
+          processAccountDeletion,
+          logger,
+        }),
+      inject: [APP_CONFIG, ACCOUNT_DELETION_REQUEST_REPOSITORY, PROCESS_ACCOUNT_DELETION, LOGGER],
     },
     {
       // Con proveedor de identidad real, el codigo debe ser impredecible
