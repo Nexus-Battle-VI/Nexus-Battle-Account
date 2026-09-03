@@ -18,6 +18,7 @@ import { MFA_STATUS } from '../../src/application/ports/MfaStatusPort'
 import { SESSION_REVOCATION } from '../../src/application/ports/SessionRevocationPort'
 import { PASSWORD_CHANGE } from '../../src/application/ports/PasswordChangePort'
 import { ACCOUNT_REPOSITORY } from '../../src/application/ports/AccountRepositoryPort'
+import { CLOCK, type ClockPort } from '../../src/application/ports/ClockPort'
 import type { AccountRepositoryPort } from '../../src/application/ports/AccountRepositoryPort'
 import { InMemoryIdentitySignUp } from '../../src/adapters/outbound/identity/InMemoryIdentitySignUp'
 import { InMemoryRoleDirectory } from '../../src/adapters/outbound/identity/InMemoryRoleDirectory'
@@ -38,6 +39,8 @@ import { buildActiveAccount } from '../support/account-factory'
  */
 const CURRENT_PASSWORD = 'Contrasena-Actual-Ficticia-1'
 const CURRENT_PASSWORD_B = 'Contrasena-Actual-Ficticia-B-1'
+const EXPORT_GENERATED_AT = '2026-09-02T18:45:30.000Z'
+const fixedClock: ClockPort = { now: () => new Date(EXPORT_GENERATED_AT) }
 
 const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
   // El sujeto es el que deriva el alta (`sub:<correo>`), para que /me encuentre
@@ -63,6 +66,14 @@ const IDENTITIES: Readonly<Record<string, VerifiedIdentity>> = {
     jti: null,
     expiresAt: null,
   },
+  // Testimonio valido sin cuenta local asociada: HU-45.1 debe cerrar con 404
+  // generico y sin filtrar el subject del proveedor de identidad.
+  'token-sin-cuenta': {
+    subject: 'sub:sin-cuenta@nexus.test',
+    roles: new Set([Role.Player]),
+    jti: null,
+    expiresAt: null,
+  },
 }
 
 const stubVerifier: TokenVerifierPort = {
@@ -80,6 +91,7 @@ const bearer = (token: string): string => `Bearer ${token}`
 describe('API self-service de la cuenta propia (HU-05)', () => {
   let app: INestApplication
   let previousEnv: Record<string, string | undefined>
+  let beatrizAccountId: string
   const passwords = new InMemoryPasswordChange()
 
   beforeAll(async () => {
@@ -109,6 +121,8 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
       .useValue(new InMemorySessionRevocation())
       .overrideProvider(PASSWORD_CHANGE)
       .useValue(passwords)
+      .overrideProvider(CLOCK)
+      .useValue(fixedClock)
       .compile()
 
     app = moduleRef.createNestApplication()
@@ -134,7 +148,11 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
 
     // Usuario B (CA-08): segunda cuenta poblada y autenticable, creada por el
     // mismo alta publica (`sub:beatriz@nexus.test`).
-    await registerAccountRequest(app, { email: 'beatriz@nexus.test', nickname: 'Beatriz Lopez' })
+    const beatriz = await registerAccountRequest(app, {
+      email: 'beatriz@nexus.test',
+      nickname: 'Beatriz Lopez',
+    })
+    beatrizAccountId = String(beatriz.body.id)
 
     // Cuenta SUSPENDIDA (CA-01): se restaura activa y se suspende a traves del
     // propio agregado, ya que no hay endpoint publico que suspenda.
@@ -167,6 +185,179 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
     request(app.getHttpServer())
       .get('/api/accounts/me')
       .set('authorization', bearer('token-jugador'))
+
+  const getOwnPrivacy = (token = 'token-jugador') =>
+    request(app.getHttpServer()).get('/api/accounts/me/privacy').set('authorization', bearer(token))
+
+  describe('GET /api/accounts/me/privacy', () => {
+    it('devuelve los datos personales permitidos del titular autenticado', async () => {
+      const response = await getOwnPrivacy()
+
+      expect(response.status).toBe(200)
+      expect(response.body).toEqual({
+        email: 'ana@nexus.test',
+        displayName: 'Ana Ramirez',
+        firstNames: 'Ana',
+        lastNames: 'Ramirez',
+        roles: [Role.Player],
+        termsAccepted: true,
+      })
+    })
+
+    it('responde 401 sin testimonio', async () => {
+      const response = await request(app.getHttpServer()).get('/api/accounts/me/privacy')
+
+      expect(response.status).toBe(401)
+    })
+
+    it('resuelve siempre la cuenta del subject del JWT y mantiene aislamiento A/B', async () => {
+      const a = await getOwnPrivacy('token-jugador')
+      const b = await getOwnPrivacy('token-jugador-b')
+
+      expect(a.status).toBe(200)
+      expect(b.status).toBe(200)
+      expect(a.body).toMatchObject({ email: 'ana@nexus.test' })
+      expect(b.body).toMatchObject({ email: 'beatriz@nexus.test' })
+      expect(JSON.stringify(a.body)).not.toContain('beatriz@nexus.test')
+      expect(JSON.stringify(b.body)).not.toContain('ana@nexus.test')
+    })
+
+    it('ignora accountId en query y no permite leer otra cuenta', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/accounts/me/privacy?accountId=${beatrizAccountId}`)
+        .set('authorization', bearer('token-jugador'))
+
+      expect(response.status).toBe(200)
+      expect(response.body).toMatchObject({ email: 'ana@nexus.test' })
+      expect(JSON.stringify(response.body)).not.toContain('beatriz@nexus.test')
+    })
+
+    it('no expone campos sensibles ni internos', async () => {
+      const response = await getOwnPrivacy()
+
+      expect(response.status).toBe(200)
+      expect(Object.keys(response.body).sort()).toEqual([
+        'displayName',
+        'email',
+        'firstNames',
+        'lastNames',
+        'roles',
+        'termsAccepted',
+      ])
+      for (const field of [
+        'id',
+        'subject',
+        'status',
+        'avatarStorageKey',
+        'password',
+        'token',
+        'secret',
+        'hash',
+        'credential',
+      ]) {
+        expect(response.body).not.toHaveProperty(field)
+      }
+    })
+
+    it('responde 404 sin filtrar el subject cuando el testimonio no tiene cuenta local', async () => {
+      const response = await getOwnPrivacy('token-sin-cuenta')
+
+      expect(response.status).toBe(404)
+      expect(JSON.stringify(response.body)).not.toContain('sub:sin-cuenta@nexus.test')
+      expect(JSON.stringify(response.body)).not.toContain('ana@nexus.test')
+      expect(JSON.stringify(response.body)).not.toContain('beatriz@nexus.test')
+    })
+  })
+
+  describe('GET /api/accounts/me/privacy/export', () => {
+    const exportPrivacy = (format: string, token = 'token-jugador') =>
+      request(app.getHttpServer())
+        .get(`/api/accounts/me/privacy/export?format=${format}`)
+        .set('authorization', bearer(token))
+
+    it('descarga JSON canónico del titular autenticado', async () => {
+      const response = await exportPrivacy('json')
+
+      expect(response.status).toBe(200)
+      expect(response.headers['content-type']).toBe('application/json; charset=utf-8')
+      expect(response.headers['content-disposition']).toBe(
+        'attachment; filename="nexus-battles-personal-data.json"',
+      )
+      expect(response.body).toEqual({
+        schemaVersion: '1.0',
+        generatedAt: EXPORT_GENERATED_AT,
+        personalData: {
+          email: 'ana@nexus.test',
+          displayName: 'Ana Ramirez',
+          firstNames: 'Ana',
+          lastNames: 'Ramirez',
+          roles: [Role.Player],
+          termsAccepted: true,
+        },
+      })
+    })
+
+    it('descarga XML equivalente con UTF-8 y datos escapados', async () => {
+      const response = await exportPrivacy('xml')
+
+      expect(response.status).toBe(200)
+      expect(response.headers['content-type']).toBe('application/xml; charset=utf-8')
+      expect(response.headers['content-disposition']).toBe(
+        'attachment; filename="nexus-battles-personal-data.xml"',
+      )
+      expect(response.text).toContain('<privacyExport schemaVersion="1.0">')
+      expect(response.text).toContain(`<generatedAt>${EXPORT_GENERATED_AT}</generatedAt>`)
+      expect(response.text).toContain('<email>ana@nexus.test</email>')
+      expect(response.text).toContain('<role>PLAYER</role>')
+      expect(response.text).toContain('<termsAccepted>true</termsAccepted>')
+    })
+
+    it('resuelve exportaciones diferentes exclusivamente desde cada subject verificado', async () => {
+      const a = await exportPrivacy('json', 'token-jugador')
+      const b = await exportPrivacy('json', 'token-jugador-b')
+
+      expect(a.body.personalData.email).toBe('ana@nexus.test')
+      expect(b.body.personalData.email).toBe('beatriz@nexus.test')
+      expect(JSON.stringify(a.body)).not.toContain('beatriz@nexus.test')
+      expect(JSON.stringify(b.body)).not.toContain('ana@nexus.test')
+    })
+
+    it('responde 401 sin testimonio', async () => {
+      const response = await request(app.getHttpServer()).get(
+        '/api/accounts/me/privacy/export?format=json',
+      )
+
+      expect(response.status).toBe(401)
+    })
+
+    it.each(['accountId', 'ownerId', 'customerId', 'subject', 'userId'])(
+      'rechaza el selector de titular manipulable %s',
+      async (selector) => {
+        const response = await request(app.getHttpServer())
+          .get(`/api/accounts/me/privacy/export?format=json&${selector}=otro-titular`)
+          .set('authorization', bearer('token-jugador'))
+
+        expect(response.status).toBe(400)
+        expect(JSON.stringify(response.body)).not.toContain('otro-titular')
+      },
+    )
+
+    it('rechaza formatos no soportados', async () => {
+      const response = await exportPrivacy('csv')
+
+      expect(response.status).toBe(400)
+    })
+
+    it('no muta la cuenta al exportar JSON y XML', async () => {
+      const before = await getOwnPrivacy()
+
+      await exportPrivacy('json')
+      await exportPrivacy('xml')
+
+      const after = await getOwnPrivacy()
+      expect(after.body).toEqual(before.body)
+    })
+  })
 
   describe('PATCH /api/accounts/me', () => {
     it('guarda país propio normalizado y permite borrarlo sin cambiar el apodo ni otra cuenta', async () => {
