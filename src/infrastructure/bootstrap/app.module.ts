@@ -5,6 +5,7 @@ import { AccountsController } from '../../adapters/inbound/http/accounts.control
 import { RecoveryController } from '../../adapters/inbound/http/recovery.controller'
 import { MfaController } from '../../adapters/inbound/http/mfa.controller'
 import { PasswordController } from '../../adapters/inbound/http/password.controller'
+import { AccountDeletionController } from '../../adapters/inbound/http/account-deletion.controller'
 import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
 import { InternalMfaEvidenceController } from '../../adapters/inbound/http/internal-mfa-evidence.controller'
 import { InternalServiceGuard } from '../../adapters/inbound/http/auth/internal-service.guard'
@@ -38,6 +39,7 @@ import {
   VERIFY_RECOVERY_CODE,
   LIST_ADMIN_ACCOUNTS,
   EXPORT_ADMIN_ACCOUNTS,
+  REQUEST_ACCOUNT_DELETION,
 } from '../../adapters/inbound/http/tokens'
 import { READINESS_CHECKS, VERSION_REPORT } from '../../adapters/inbound/http/tokens.health'
 
@@ -62,6 +64,7 @@ import { AssignRole } from '../../application/use-cases/AssignRole'
 import { FindAccountByEmail } from '../../application/use-cases/FindAccountByEmail'
 import { ListAdminAccounts } from '../../application/use-cases/ListAdminAccounts'
 import { ExportAdminAccounts } from '../../application/use-cases/ExportAdminAccounts'
+import { RequestAccountDeletion } from '../../application/use-cases/RequestAccountDeletion'
 import { RevokeRole } from '../../application/use-cases/RevokeRole'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import {
@@ -188,6 +191,7 @@ export const DATABASE = Symbol('Database')
     RecoveryController,
     MfaController,
     PasswordController,
+    AccountDeletionController,
     SessionsController,
     InternalMfaEvidenceController,
     HealthController,
@@ -698,16 +702,29 @@ export const DATABASE = Symbol('Database')
       inject: [DATABASE],
     },
     {
-      // HU-43.1: sin caso de uso ni endpoint todavia (ver ADR-014 Decision 5
-      // y EN-011, Management #197). Se registra aqui, con el mismo
-      // `PERSISTENCE_DRIVER`, para que HU-43.2 pueda inyectarla sin volver a
-      // tocar la raiz de composicion.
+      // HU-43.1 (Management #303): persistencia de la solicitud durable,
+      // con el mismo `PERSISTENCE_DRIVER` que el resto de repositorios. Ver
+      // ADR-014 Decision 5 y EN-011 (Management #197).
       provide: ACCOUNT_DELETION_REQUEST_REPOSITORY,
       useFactory: (db: Kysely<Database> | null): AccountDeletionRequestRepositoryPort =>
         db === null
           ? new InMemoryAccountDeletionRequestRepository()
           : new PostgresAccountDeletionRequestRepository(db),
       inject: [DATABASE],
+    },
+    {
+      // HU-43.2 (Management #304): solicitud segura + confirmacion de
+      // recepcion, sobre la persistencia de HU-43.1. Sigue sin ejecutar el
+      // tratamiento de datos personales ni cerrar la solicitud.
+      provide: REQUEST_ACCOUNT_DELETION,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        deletionRequests: AccountDeletionRequestRepositoryPort,
+        clock: ClockPort,
+        ids: IdGeneratorPort,
+      ): RequestAccountDeletion =>
+        new RequestAccountDeletion({ accounts, deletionRequests, clock, ids }),
+      inject: [ACCOUNT_REPOSITORY, ACCOUNT_DELETION_REQUEST_REPOSITORY, CLOCK, ID_GENERATOR],
     },
     {
       // Con proveedor de identidad real, el codigo debe ser impredecible

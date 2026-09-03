@@ -384,3 +384,26 @@ export class ChangePasswordRequest {
   @MinLength(1)
   newPassword!: string
 }
+
+/**
+ * Confirma RECEPCION de la solicitud de eliminacion (HU-43.2), nunca cierre.
+ * No incluye `accountId`: quien pregunta ya es el titular, resuelto desde el
+ * testimonio, no desde un identificador que el cliente aporte.
+ */
+export class AccountDeletionRequestResponse {
+  @ApiProperty({ example: '3b2f6f2a-8b8a-4a7a-9d3f-2f6a1e0c9b7d' })
+  readonly id!: string
+
+  @ApiProperty({
+    example: 'RECEIVED',
+    enum: ['RECEIVED', 'IN_PROGRESS', 'FAILED', 'CLOSED'],
+    description: 'Estado interno del tratamiento dentro de Account (ADR-014 Decision 5).',
+  })
+  readonly status!: string
+
+  @ApiProperty({
+    example: '2026-09-03T12:00:00.000Z',
+    description: 'Fecha y hora de recepcion, generada por el backend.',
+  })
+  readonly receivedAt!: string
+}
