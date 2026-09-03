@@ -399,6 +399,24 @@ describe('loadConfig', () => {
     ).toBe('http://127.0.0.1:3001/dev/enqueue')
   })
 
+  /**
+   * `catalog` y `community` son los dos consumidores previstos hoy del
+   * contrato interno de evidencia MFA. Sin este valor por defecto, el
+   * endurecimiento de Community (`INTERNAL_SERVICE_NAME=community` en ese
+   * servicio) fallaria cerrado en cualquier entorno que no configurara la
+   * variable explicitamente -sintoma dificil de atribuir: 401 sin motivo
+   * visible en los logs de Community-.
+   */
+  it('permite catalog y community por defecto en el contrato interno', () => {
+    expect(loadConfig({}).internalServiceAllowed).toEqual(['catalog', 'community'])
+  })
+
+  it('una lista explicita reemplaza el valor por defecto, normalizada', () => {
+    expect(
+      loadConfig({ INTERNAL_SERVICE_ALLOWED_SERVICES: ' Catalog , OTRO ' }).internalServiceAllowed,
+    ).toEqual(['catalog', 'otro'])
+  })
+
   // Produccion exige autenticacion configurada: `loadConfig` rechaza arrancar
   // sin ella. Estas pruebas la aportan porque su objeto es la documentacion
   // interactiva, no la autenticacion, que se ejercita en auth.spec.ts.
