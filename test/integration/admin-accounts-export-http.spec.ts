@@ -259,6 +259,47 @@ describe('Exportacion administrativa de cuentas HU-44.4', () => {
   })
 
   it.each([
+    ['busqueda', '?nickname=raiz%20panel%20export', ['acc-export-panel-super']],
+    ['filtro', '?role=MODERATOR', ['acc-export-panel-suspended']],
+    ['AND', '?role=ADMINISTRATOR&status=ACTIVE', ['acc-export-panel-admin']],
+    ['vacio', '?role=SUPER_ADMINISTRATOR&status=SUSPENDED', []],
+  ])(
+    'mantiene paridad panel/export para %s con IDs y orden iguales',
+    async (_case, query, expectedIds) => {
+      const listed = await request(app.getHttpServer())
+        .get(list(query))
+        .set('Authorization', bearer('token-admin'))
+      const exported = await request(app.getHttpServer())
+        .get(exportUsers(query))
+        .set('Authorization', bearer('token-admin'))
+
+      const listedItems = (listed.body as { readonly items: readonly Record<string, unknown>[] })
+        .items
+      const exportedItems = parseJsonFile(exported)
+
+      expect(listed.status).toBe(200)
+      expect(exported.status).toBe(200)
+      expect(exportedItems).toEqual(listedItems)
+      expect(exportedItems.map((item) => item.id)).toEqual(expectedIds)
+      expect(exportedItems.map((item) => item.id)).toEqual(listedItems.map((item) => item.id))
+    },
+  )
+
+  it.each([
+    ['correo invalido', '?email=no-es-correo'],
+    ['rol invalido', '?role=INVENTADO'],
+    ['estado invalido', '?status=INVENTADO'],
+  ])('rechaza %s con 400 sin contenido exportable', async (_case, query) => {
+    const response = await request(app.getHttpServer())
+      .get(exportUsers(query))
+      .set('Authorization', bearer('token-admin'))
+
+    expect(response.status).toBe(400)
+    expect(response.headers['content-disposition']).toBeUndefined()
+    expect(response.text).not.toContain('acc-export-panel')
+  })
+
+  it.each([
     ['MODERATOR', 'token-moderator'],
     ['PLAYER', 'token-player'],
   ])('rechaza a %s con 403 sin contenido exportable', async (_role, token) => {

@@ -144,25 +144,43 @@ describe('ListAdminAccounts', () => {
     expect(result.items.map((item) => item.id)).toEqual(expectedIds)
   })
 
-  it('filtra por rol y permite SUPER_ADMINISTRATOR como rol consultable', async () => {
+  it.each([
+    [Role.Player, ['acc-admin-active', 'acc-moderator-suspended', 'acc-player-pending']],
+    [Role.Moderator, ['acc-moderator-suspended']],
+    [Role.Administrator, ['acc-admin-active']],
+    [Role.SuperAdministrator, ['acc-super-active']],
+  ])('filtra por rol %s', async (role, expectedIds) => {
     const { useCase } = await createHarness()
 
-    const result = await useCase.execute({ role: Role.SuperAdministrator })
+    const result = await useCase.execute({ role })
 
-    expect(result.items.map((item) => item.id)).toEqual(['acc-super-active'])
+    expect(result.items.map((item) => item.id)).toEqual(expectedIds)
   })
 
-  it('filtra por estado usando solo estados reales del dominio', async () => {
+  it.each([
+    [
+      AccountStatus.PendingVerification,
+      ['acc-player-pending'],
+      { pendingVerification: 1, active: 0, suspended: 0 },
+    ],
+    [
+      AccountStatus.Active,
+      ['acc-admin-active', 'acc-super-active'],
+      { pendingVerification: 0, active: 2, suspended: 0 },
+    ],
+    [
+      AccountStatus.Suspended,
+      ['acc-moderator-suspended'],
+      { pendingVerification: 0, active: 0, suspended: 1 },
+    ],
+  ])('filtra por estado real %s', async (status, expectedIds, expectedCounts) => {
     const { useCase } = await createHarness()
 
-    const result = await useCase.execute({ status: AccountStatus.Suspended })
+    const result = await useCase.execute({ status })
 
-    expect(result.items.map((item) => item.id)).toEqual(['acc-moderator-suspended'])
-    expect(result.statusCounts).toEqual({
-      pendingVerification: 0,
-      active: 0,
-      suspended: 1,
-    })
+    expect(result.items.map((item) => item.id)).toEqual(expectedIds)
+    expect(result.statusCounts).toEqual(expectedCounts)
+    expect(result.statusCounts).not.toHaveProperty('banned')
   })
 
   it('combina criterios presentes con AND', async () => {
@@ -193,6 +211,43 @@ describe('ListAdminAccounts', () => {
         suspended: 0,
       },
     })
+  })
+
+  it.each([
+    ['ID', { id: 'acc-inexistente' }],
+    ['correo', { email: 'nadie@nexus.test' }],
+    ['nombres', { firstNames: 'Nombre Inexistente' }],
+    ['apellidos', { lastNames: 'Apellido Inexistente' }],
+    ['apodo', { displayName: 'Apodo Inexistente' }],
+  ])(
+    'devuelve vacio cuando la busqueda por %s no tiene coincidencias',
+    async (_field, criteria) => {
+      const { useCase } = await createHarness()
+
+      const result = await useCase.execute(criteria)
+
+      expect(result).toEqual({
+        items: [],
+        statusCounts: {
+          pendingVerification: 0,
+          active: 0,
+          suspended: 0,
+        },
+      })
+    },
+  )
+
+  it('consultar no muta campos administrativos ni roles', async () => {
+    const { useCase } = await createHarness()
+    const before = await useCase.execute()
+
+    await useCase.execute({ email: 'ADMIN.ACTIVE@NEXUS.TEST' })
+    await useCase.execute({ firstNames: 'ana   maria' })
+    await useCase.execute({ role: Role.Player, status: AccountStatus.Active })
+
+    const after = await useCase.execute()
+
+    expect(after).toEqual(before)
   })
 
   it('no observa mutaciones del agregado no guardadas ni comparte roles mutables', async () => {

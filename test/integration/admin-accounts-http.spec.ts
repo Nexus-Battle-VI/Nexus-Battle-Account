@@ -244,6 +244,20 @@ describe('Listado administrativo de cuentas HU-44.2', () => {
   })
 
   it.each([
+    ['correo invalido', '?email=no-es-correo'],
+    ['rol invalido', '?role=INVENTADO'],
+    ['estado invalido', '?status=INVENTADO'],
+  ])('rechaza %s con 400 sin payload administrativo', async (_case, query) => {
+    const response = await request(app.getHttpServer())
+      .get(list(query))
+      .set('Authorization', bearer('token-admin'))
+
+    expect(response.status).toBe(400)
+    expect(response.body).not.toHaveProperty('items')
+    expect(response.body).not.toHaveProperty('statusCounts')
+  })
+
+  it.each([
     ['MODERATOR', 'token-moderator'],
     ['PLAYER', 'token-player'],
   ])('rechaza a %s con 403 sin payload administrativo', async (_role, token) => {
