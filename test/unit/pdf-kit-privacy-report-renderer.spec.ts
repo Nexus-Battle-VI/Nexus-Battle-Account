@@ -1,5 +1,6 @@
 import { PdfKitPrivacyReportRenderer } from '../../src/adapters/outbound/export/PdfKitPrivacyReportRenderer'
 import type { PrivacyReportSections } from '../../src/application/ports/PdfPrivacyReportRendererPort'
+import { privacyPdfText } from '../support/privacy-export-evidence'
 
 const BASE_SECTIONS: PrivacyReportSections = {
   generatedAt: '2026-09-04T10:00:00.000Z',
@@ -47,7 +48,18 @@ describe('PdfKitPrivacyReportRenderer (HU-45.3)', () => {
       transactions: { available: false, orders: [] },
     }
 
-    await expect(new PdfKitPrivacyReportRenderer().render(sections)).resolves.toBeInstanceOf(Buffer)
+    const text = privacyPdfText(await new PdfKitPrivacyReportRenderer().render(sections))
+    expect(text).toContain(
+      'Inventario Sección no disponible: no se pudo consultar el servicio de inventario',
+    )
+    expect(text).toContain(
+      'Comentarios Sección no disponible: no se pudo consultar el servicio de comunidad',
+    )
+    expect(text).toContain(
+      'Historial de transacciones Sección no disponible: no se pudo consultar el servicio de comercio',
+    )
+    expect(text).not.toContain('No tienes')
+    expect(text).not.toContain('No has publicado')
   })
 
   it('no lanza cuando las secciones estan disponibles pero vacias (sin registros)', async () => {
@@ -58,20 +70,23 @@ describe('PdfKitPrivacyReportRenderer (HU-45.3)', () => {
       transactions: { available: true, orders: [] },
     }
 
-    await expect(new PdfKitPrivacyReportRenderer().render(sections)).resolves.toBeInstanceOf(Buffer)
+    const text = privacyPdfText(await new PdfKitPrivacyReportRenderer().render(sections))
+    expect(text).toContain('Inventario No tienes ítems en tu inventario.')
+    expect(text).toContain('Comentarios No has publicado ningún comentario.')
+    expect(text).toContain('Historial de transacciones No tienes pedidos registrados.')
   })
 
-  it('genera un PDF mas grande cuando hay mas contenido que describir', async () => {
-    const vacio = await new PdfKitPrivacyReportRenderer().render({
-      ...BASE_SECTIONS,
-      inventory: { available: true, items: [] },
-      comments: { available: true, posts: [] },
-      transactions: { available: true, orders: [] },
-    })
-    const conDatos = await new PdfKitPrivacyReportRenderer().render(BASE_SECTIONS)
+  it('escribe identidad y contenido de las fuentes, con Statistics explícitamente no disponible', async () => {
+    const text = privacyPdfText(await new PdfKitPrivacyReportRenderer().render(BASE_SECTIONS))
 
-    // Prueba indirecta de que el contenido de cada seccion SI se escribe en
-    // el documento: mas informacion produce un PDF de mayor tamano.
-    expect(conDatos.length).toBeGreaterThan(vacio.length)
+    expect(text).toContain('Correo: ana@nexus.test')
+    expect(text).toContain('Inventario')
+    expect(text).toContain('Espada — cantidad: 1')
+    expect(text).toContain('2026-08-01T00:00:00.000Z — Hola')
+    expect(text).toContain('Historial de transacciones')
+    expect(text).toContain('Pedido ord-1 — CONFIRMED — 1000 COP (1 artículos)')
+    expect(text.split('Estadísticas ')[1]?.split(' Comentarios')[0]).toBe(
+      'Sección no disponible: todavía no existe una fuente de datos de estadísticas del jugador en el sistema.',
+    )
   })
 })

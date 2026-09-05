@@ -139,12 +139,20 @@ describe('GeneratePrivacyPdfReport (HU-45.3)', () => {
     expect(harness.renderer.render).toHaveBeenCalledTimes(1)
   })
 
-  it('no altera los datos de origen: solo lee, nunca escribe en ningun puerto', () => {
+  it('no altera los datos de origen al ejecutar la generación', async () => {
     const harness = buildHarness()
+    const before = structuredClone([
+      PERSONAL_DATA,
+      AVAILABLE_INVENTORY,
+      AVAILABLE_COMMENTS,
+      AVAILABLE_ORDERS,
+    ])
 
-    expect(Object.keys(harness.inventory)).toEqual(['listOwnItems'])
-    expect(Object.keys(harness.community)).toEqual(['listOwnPosts'])
-    expect(Object.keys(harness.commerce)).toEqual(['listOwnOrders'])
+    await harness.useCase.execute('sub:ana', 'token-de-ana')
+
+    expect([PERSONAL_DATA, AVAILABLE_INVENTORY, AVAILABLE_COMMENTS, AVAILABLE_ORDERS]).toEqual(
+      before,
+    )
   })
 
   it('ownership: sus dependencias no incluyen ningun puerto de escritura ni de otro dato de Account', () => {
