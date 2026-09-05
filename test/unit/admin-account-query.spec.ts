@@ -101,6 +101,37 @@ const createHarness = async (): Promise<{
 }
 
 describe('ListAdminAccounts', () => {
+  it.each(['save', 'saveRegistration'] as const)(
+    'conserva la fecha del primer %s al avanzar el reloj, actualizar y consultar',
+    async (method) => {
+      const clock = new Date('2026-08-01T10:23:45.678Z')
+      const registeredAt = clock.toISOString()
+      const repository = new InMemoryAccountRepository(() => clock)
+      const account = buildAccount(ADMIN_ACTIVE)
+      await repository[method](account, [])
+
+      // El reloj entrega la misma referencia mutable; el repositorio debe copiarla.
+      clock.setTime(Date.parse('2026-09-05T16:00:00.000Z'))
+      const useCase = new ListAdminAccounts(repository)
+      expect((await useCase.execute({ id: account.id.value })).items[0]?.registeredAt).toBe(
+        registeredAt,
+      )
+
+      account.rename(DisplayName.create('Capitana Actualizada'))
+      await repository.save(account)
+      const before = account.toSnapshot()
+      clock.setTime(Date.parse('2026-09-06T16:00:00.000Z'))
+
+      const listed = await useCase.execute({ id: account.id.value })
+      expect(listed.items[0]).toMatchObject({
+        displayName: 'Capitana Actualizada',
+        registeredAt,
+      })
+      expect(await useCase.execute({ id: account.id.value })).toEqual(listed)
+      expect((await repository.findById(account.id))?.toSnapshot()).toEqual(before)
+    },
+  )
+
   it('lista cuentas sin filtros y calcula estadisticas de estados representables', async () => {
     const { useCase } = await createHarness()
 

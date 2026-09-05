@@ -161,6 +161,51 @@ describe('PostgresAccountRepository', () => {
     expect(found?.toSnapshot()).toEqual(account.toSnapshot())
   })
 
+  it.each(['save', 'saveRegistration'] as const)(
+    'conserva created_at generado por PostgreSQL en %s tras actualizar y recrear el repositorio',
+    async (method) => {
+      const account = buildAccount()
+      const databaseTime = async (): Promise<Date> => {
+        const result = await sql<{ now: Date }>`select clock_timestamp() as now`.execute(db)
+        return result.rows[0]!.now
+      }
+      const beforeInsert = await databaseTime()
+      await repository[method](account, [])
+      const afterInsert = await databaseTime()
+      const readStored = () =>
+        db
+          .selectFrom('accounts')
+          .selectAll()
+          .where('id', '=', account.id.value)
+          .executeTakeFirstOrThrow()
+      const inserted = await readStored()
+
+      expect(inserted.created_at.getTime()).toBeGreaterThanOrEqual(beforeInsert.getTime())
+      expect(inserted.created_at.getTime()).toBeLessThanOrEqual(afterInsert.getTime())
+
+      const updatedName = `Fecha ${method}`
+      account.rename(DisplayName.create(updatedName))
+      await repository.save(account)
+      const updated = await readStored()
+      expect(updated.display_name).toBe(updatedName)
+      expect(updated.created_at).toEqual(inserted.created_at)
+
+      const restarted = new PostgresAccountRepository(db)
+      const list = new ListAdminAccounts(restarted)
+      const listed = await list.execute({ id: account.id.value })
+      expect(listed.items).toEqual([
+        expect.objectContaining({ registeredAt: inserted.created_at.toISOString() }),
+      ])
+      const file = await new ExportAdminAccounts(list, new JsonAdminAccountExportAdapter()).execute(
+        {
+          id: account.id.value,
+        },
+      )
+      expect(JSON.parse(file.content)).toEqual(listed.items)
+      expect(await readStored()).toEqual(updated)
+    },
+  )
+
   it('persiste país nullable, preserva campos omitidos y lo incluye en proyección/exportación', async () => {
     const account = buildAccount()
     await repository.save(account)
