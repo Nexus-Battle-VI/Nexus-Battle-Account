@@ -15,6 +15,7 @@ import type { NotificationRequestPort } from '../../src/application/ports/Notifi
 import type { AccountRepositoryPort } from '../../src/application/ports/AccountRepositoryPort'
 import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
 import { InMemoryMfaEvidenceRepository } from '../../src/adapters/outbound/persistence/InMemoryMfaEvidenceRepository'
+import { InMemorySanctionRepository } from '../../src/adapters/outbound/persistence/InMemorySanctionRepository'
 import type { MfaEvidenceRepositoryPort } from '../../src/application/ports/MfaEvidenceRepositoryPort'
 import type {
   TokenVerifierPort,
@@ -41,6 +42,8 @@ import {
 import { InMemoryAvatarStorage } from '../../src/adapters/outbound/storage/InMemoryAvatarStorage'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { Role } from '../../src/domain/entities/Role'
+import { Sanction } from '../../src/domain/entities/Sanction'
+import { SanctionType } from '../../src/domain/entities/SanctionType'
 import { DomainError } from '../../src/domain/errors/DomainError'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
 import { AVATAR_MAX_BYTES } from '../../src/domain/value-objects/AvatarMetadata'
@@ -537,6 +540,7 @@ interface LoginHarness {
   accounts: InMemoryAccountRepository
   authProvider: FakeAuthenticationProvider
   mfaEvidence: InMemoryMfaEvidenceRepository
+  sanctions: InMemorySanctionRepository
   loginAccount: LoginAccount
   completeSecondFactor: CompleteSecondFactor
   avisos: string[]
@@ -574,6 +578,7 @@ const buildLoginHarness = (
   const accounts = new InMemoryAccountRepository()
   const authProvider = new FakeAuthenticationProvider(sequence('token'))
   const mfaEvidence = new InMemoryMfaEvidenceRepository()
+  const sanctions = new InMemorySanctionRepository()
   const avisos: string[] = []
   let ultimoSujeto = ''
 
@@ -602,8 +607,14 @@ const buildLoginHarness = (
     accounts,
     authProvider,
     mfaEvidence,
+    sanctions,
     avisos,
-    loginAccount: new LoginAccount({ accounts, authenticationProvider: authProvider }),
+    loginAccount: new LoginAccount({
+      accounts,
+      authenticationProvider: authProvider,
+      sanctions,
+      clock: deps.clock,
+    }),
     completeSecondFactor: new CompleteSecondFactor(deps),
   }
 }
@@ -699,6 +710,122 @@ describe('LoginAccount', () => {
     await expect(
       harness.loginAccount.execute({ identifier: 'jugador@nexus.test', password: VALID_PASSWORD }),
     ).resolves.toEqual({ kind: 'invalidCredentials' })
+  })
+
+  it('rechaza el login mientras una suspension temporal siga vigente', async () => {
+    const harness = buildLoginHarness()
+    const account = buildActiveAccount({
+      id: 'account-suspendida',
+      subject: 'subject-suspendido',
+      email: 'jugador@nexus.test',
+    })
+
+    account.suspend()
+    await harness.accounts.save(account)
+
+    await harness.sanctions.save(
+      Sanction.create({
+        id: 'sanction-temporal-activa',
+        targetAccountId: account.id.value,
+        actorAccountId: 'admin-1',
+        type: SanctionType.TemporarySuspension,
+        reason: 'Suspension temporal vigente.',
+        createdAt: new Date(AHORA.getTime() - 30 * 60_000),
+        expiresAt: new Date(AHORA.getTime() + 30 * 60_000),
+      }),
+    )
+
+    harness.authProvider.seed({
+      email: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    await expect(
+      harness.loginAccount.execute({
+        identifier: 'jugador@nexus.test',
+        password: VALID_PASSWORD,
+      }),
+    ).resolves.toEqual({ kind: 'invalidCredentials' })
+
+    const persisted = await harness.accounts.findByEmail(
+      EmailAddress.create('jugador@nexus.test'),
+    )
+
+    expect(persisted?.currentStatus).toBe(AccountStatus.Suspended)
+  })
+
+  it('reactiva la cuenta y permite login cuando la suspension temporal ya vencio', async () => {
+    const harness = buildLoginHarness()
+    const account = buildActiveAccount({
+      id: 'account-suspension-vencida',
+      subject: 'subject-suspension-vencida',
+      email: 'jugador@nexus.test',
+    })
+
+    account.suspend()
+    await harness.accounts.save(account)
+
+    await harness.sanctions.save(
+      Sanction.create({
+        id: 'sanction-temporal-vencida',
+        targetAccountId: account.id.value,
+        actorAccountId: 'admin-1',
+        type: SanctionType.TemporarySuspension,
+        reason: 'Suspension temporal vencida.',
+        createdAt: new Date(AHORA.getTime() - 120 * 60_000),
+        expiresAt: new Date(AHORA.getTime() - 60 * 60_000),
+      }),
+    )
+
+    harness.authProvider.seed({
+      email: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    await expect(
+      harness.loginAccount.execute({
+        identifier: 'jugador@nexus.test',
+        password: VALID_PASSWORD,
+      }),
+    ).resolves.toMatchObject({ kind: 'authenticated' })
+
+    const persisted = await harness.accounts.findByEmail(
+      EmailAddress.create('jugador@nexus.test'),
+    )
+
+    expect(persisted?.currentStatus).toBe(AccountStatus.Active)
+    expect(persisted?.canAuthenticate).toBe(true)
+  })
+
+  it('rechaza permanentemente el login de una cuenta baneada', async () => {
+    const harness = buildLoginHarness()
+    const account = buildActiveAccount({
+      id: 'account-baneada',
+      subject: 'subject-baneado',
+      email: 'jugador@nexus.test',
+    })
+
+    account.ban()
+    await harness.accounts.save(account)
+
+    harness.authProvider.seed({
+      email: 'jugador@nexus.test',
+      password: VALID_PASSWORD,
+    })
+
+    await expect(
+      harness.loginAccount.execute({
+        identifier: 'jugador@nexus.test',
+        password: VALID_PASSWORD,
+      }),
+    ).resolves.toEqual({ kind: 'invalidCredentials' })
+
+    const persisted = await harness.accounts.findByEmail(
+      EmailAddress.create('jugador@nexus.test'),
+    )
+
+    expect(persisted?.currentStatus).toBe(AccountStatus.Banned)
+    expect(persisted?.canAuthenticate).toBe(false)
   })
 
   /**

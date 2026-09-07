@@ -60,11 +60,12 @@ export class SanctionsController {
   ): Promise<SanctionResponse> {
     try {
       const sanction = await this.applySanction.execute({
-        actorSubject: identity.subject,
-        targetAccountId,
-        type: body.type,
-        reason: body.reason,
-      })
+  actorSubject: identity.subject,
+  targetAccountId,
+  type: body.type,
+  reason: body.reason,
+  suspensionDurationMinutes: body.suspensionDurationMinutes,
+})
 
       return sanction.toSnapshot()
     } catch (error: unknown) {

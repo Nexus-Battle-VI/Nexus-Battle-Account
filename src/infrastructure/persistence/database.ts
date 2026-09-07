@@ -19,6 +19,8 @@ import * as migrationHu42Sanctions from '../../adapters/outbound/persistence/mig
 import * as migrationHu43AccountDeletionRequests from '../../adapters/outbound/persistence/migrations/hu43-account-deletion-requests'
 import * as migrationHu43DesvincularSolicitudEliminacion from '../../adapters/outbound/persistence/migrations/hu43-desvincular-solicitud-eliminacion-de-cuenta'
 import * as migrationHu57ProfileCountry from '../../adapters/outbound/persistence/migrations/hu57-profile-country'
+import * as migrationHu42AccountBanStatus from '../../adapters/outbound/persistence/migrations/z20260906-hu42-account-ban-status'
+import * as migrationHu42SanctionExpiration from '../../adapters/outbound/persistence/migrations/z20260906-hu42-sanction-expiration'
 
 export interface DatabaseOptions {
   readonly connectionString: string
@@ -83,6 +85,8 @@ const migrations: MigrationProvider = {
       'hu43-desvincular-solicitud-eliminacion-de-cuenta':
         migrationHu43DesvincularSolicitudEliminacion,
       'hu57-profile-country': migrationHu57ProfileCountry,
+      'z20260906-hu42-account-ban-status': migrationHu42AccountBanStatus,
+      'z20260906-hu42-sanction-expiration': migrationHu42SanctionExpiration,
     }),
 }
 

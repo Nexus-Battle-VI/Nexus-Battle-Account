@@ -262,6 +262,10 @@ export class Account {
       throw new DomainError(`La cuenta ${this.id.value} esta suspendida y no puede verificarse.`)
     }
 
+    if (this.status === AccountStatus.Banned) {
+      throw new DomainError(`La cuenta ${this.id.value} esta baneada y no puede verificarse.`)
+    }
+
     if (this.status === AccountStatus.Active) {
       throw new DomainError(`La cuenta ${this.id.value} ya fue verificada.`)
     }
@@ -277,11 +281,23 @@ export class Account {
   }
 
   suspend(): void {
+    if (this.status === AccountStatus.Banned) {
+      throw new DomainError(`La cuenta ${this.id.value} esta baneada y no puede suspenderse.`)
+    }
+
     if (this.status === AccountStatus.Suspended) {
       throw new DomainError(`La cuenta ${this.id.value} ya esta suspendida.`)
     }
 
     this.status = AccountStatus.Suspended
+  }
+
+  ban(): void {
+    if (this.status === AccountStatus.Banned) {
+      throw new DomainError(`La cuenta ${this.id.value} ya esta baneada.`)
+    }
+
+    this.status = AccountStatus.Banned
   }
 
   reinstate(): void {
@@ -301,6 +317,18 @@ export class Account {
    * todavia no ha demostrado pertenecer a la persona titular.
    */
   changeEmail(email: EmailAddress, occurredAt: Date): boolean {
+    if (this.status === AccountStatus.Suspended) {
+      throw new DomainError(
+        `La cuenta ${this.id.value} esta suspendida y no puede cambiar su correo.`,
+      )
+    }
+
+    if (this.status === AccountStatus.Banned) {
+      throw new DomainError(
+        `La cuenta ${this.id.value} esta baneada y no puede cambiar su correo.`,
+      )
+    }
+
     if (this.email.equals(email)) {
       return false
     }

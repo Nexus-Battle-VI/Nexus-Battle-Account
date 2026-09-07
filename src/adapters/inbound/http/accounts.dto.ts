@@ -114,7 +114,7 @@ export class AccountResponse {
 
   @ApiProperty({
     example: 'PENDING_VERIFICATION',
-    enum: ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED'],
+    enum: ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'BANNED'],
   })
   readonly status!: string
 
@@ -287,6 +287,9 @@ export class AdminAccountStatusCountsResponse implements AdminAccountStatusCount
 
   @ApiProperty({ example: 2 })
   readonly suspended!: number
+
+  @ApiProperty({ example: 1 })
+  readonly banned!: number
 }
 
 export class AdminAccountsResponse {

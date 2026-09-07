@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Inject,
   Injectable,
   UnauthorizedException,
@@ -12,6 +13,19 @@ import {
   TokenVerificationError,
   type TokenVerifierPort,
 } from '../../../../application/ports/TokenVerifierPort'
+import {
+  ACCOUNT_REPOSITORY,
+  type AccountRepositoryPort,
+} from '../../../../application/ports/AccountRepositoryPort'
+import {
+  SANCTION_REPOSITORY,
+  type SanctionRepositoryPort,
+} from '../../../../application/ports/SanctionRepositoryPort'
+import {
+  CLOCK,
+  type ClockPort,
+} from '../../../../application/ports/ClockPort'
+import { AccountStatus } from '../../../../domain/entities/AccountStatus'
 import { IS_PUBLIC, type RequestWithIdentity } from './decorators'
 
 interface RequestWithAuthHeader extends RequestWithIdentity {
@@ -31,6 +45,9 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     @Inject(TOKEN_VERIFIER) private readonly verifier: TokenVerifierPort,
+    @Inject(ACCOUNT_REPOSITORY) private readonly accounts: AccountRepositoryPort,
+    @Inject(SANCTION_REPOSITORY) private readonly sanctions: SanctionRepositoryPort,
+    @Inject(CLOCK) private readonly clock: ClockPort,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -52,6 +69,7 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       request.identity = await this.verifier.verify(token)
+
       // Se conserva el token crudo, ya verificado, para las rutas que deben
       // reenviarlo al proveedor (inscripcion TOTP self-service). Va DESPUES de
       // verificar: nunca se guarda un token cuya firma no se comprobo.
@@ -65,6 +83,30 @@ export class JwtAuthGuard implements CanActivate {
       // traducirse a 401: eso diria que el testimonio es invalido cuando lo que
       // ocurre es que no se ha podido comprobar. Se propaga como 500.
       throw error
+    }
+
+    const account = await this.accounts.findBySubject(request.identity.subject)
+
+    if (account === null) {
+      throw new UnauthorizedException('La cuenta asociada al testimonio no existe.')
+    }
+
+    if (account.currentStatus === AccountStatus.Banned) {
+      throw new ForbiddenException('La cuenta tiene un baneo permanente.')
+    }
+
+    if (account.currentStatus === AccountStatus.Suspended) {
+      const activeSuspension = await this.sanctions.findActiveTemporarySuspension(
+        account.id.value,
+        this.clock.now(),
+      )
+
+      if (activeSuspension !== null) {
+        throw new ForbiddenException('La cuenta tiene una suspension temporal activa.')
+      }
+
+      account.reinstate()
+      await this.accounts.save(account)
     }
 
     return true

@@ -134,6 +134,10 @@ import {
   SANCTION_REPOSITORY,
   type SanctionRepositoryPort,
 } from '../../application/ports/SanctionRepositoryPort'
+import {
+  SANCTION_PERSISTENCE,
+  type SanctionPersistencePort,
+} from '../../application/ports/SanctionPersistencePort'
 import type { AuthenticationProviderPort } from '../../application/ports/AuthenticationProviderPort'
 import type { NotificationRequestPort } from '../../application/ports/NotificationRequestPort'
 import type { ClockPort } from '../../application/ports/ClockPort'
@@ -153,6 +157,8 @@ import { InMemoryAccountRepository } from '../../adapters/outbound/persistence/I
 import { PostgresAccountRepository } from '../../adapters/outbound/persistence/PostgresAccountRepository'
 import { InMemorySanctionRepository } from '../../adapters/outbound/persistence/InMemorySanctionRepository'
 import { PostgresSanctionRepository } from '../../adapters/outbound/persistence/PostgresSanctionRepository'
+import { InMemorySanctionPersistence } from '../../adapters/outbound/persistence/InMemorySanctionPersistence'
+import { PostgresSanctionPersistence } from '../../adapters/outbound/persistence/PostgresSanctionPersistence'
 import { InMemoryNicknameBlacklist } from '../../adapters/outbound/persistence/InMemoryNicknameBlacklist'
 import { PostgresNicknameBlacklist } from '../../adapters/outbound/persistence/PostgresNicknameBlacklist'
 import { InMemorySecurityQuestionCatalog } from '../../adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
@@ -278,6 +284,18 @@ export const DATABASE = Symbol('Database')
       inject: [DATABASE],
     },
     {
+      provide: SANCTION_PERSISTENCE,
+      useFactory: (
+        db: Kysely<Database> | null,
+        accounts: AccountRepositoryPort,
+        sanctions: SanctionRepositoryPort,
+      ): SanctionPersistencePort =>
+        db === null
+          ? new InMemorySanctionPersistence(accounts, sanctions)
+          : new PostgresSanctionPersistence(db),
+      inject: [DATABASE, ACCOUNT_REPOSITORY, SANCTION_REPOSITORY],
+    },
+    {
       provide: ADMIN_ACCOUNT_QUERY,
       useExisting: ACCOUNT_REPOSITORY,
     },
@@ -400,13 +418,29 @@ export const DATABASE = Symbol('Database')
         config: AppConfig,
         reflector: Reflector,
         verifier: TokenVerifierPort,
+        accounts: AccountRepositoryPort,
+        sanctions: SanctionRepositoryPort,
+        clock: ClockPort,
       ): CanActivate =>
         config.authMode === AuthMode.Jwt
-          ? new JwtAuthGuard(reflector, verifier)
+          ? new JwtAuthGuard(
+              reflector,
+              verifier,
+              accounts,
+              sanctions,
+              clock,
+            )
           : // Sin proveedor no se deja pasar sin mas: se atribuye la identidad
             // anonima, para que lo que se guarde diga que nadie fue verificado.
             new AnonymousIdentityGuard(),
-      inject: [APP_CONFIG, Reflector, TOKEN_VERIFIER],
+      inject: [
+        APP_CONFIG,
+        Reflector,
+        TOKEN_VERIFIER,
+        ACCOUNT_REPOSITORY,
+        SANCTION_REPOSITORY,
+        CLOCK,
+      ],
     },
     {
       provide: APP_GUARD,
@@ -646,10 +680,22 @@ export const DATABASE = Symbol('Database')
       provide: APPLY_SANCTION,
       useFactory: (
         accounts: AccountRepositoryPort,
-        sanctions: SanctionRepositoryPort,
+        persistence: SanctionPersistencePort,
         ids: IdGeneratorPort,
-      ): ApplySanction => new ApplySanction(accounts, sanctions, ids),
-      inject: [ACCOUNT_REPOSITORY, SANCTION_REPOSITORY, ID_GENERATOR],
+        clock: ClockPort,
+      ): ApplySanction =>
+        new ApplySanction(
+          accounts,
+          persistence,
+          ids,
+          clock,
+        ),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        SANCTION_PERSISTENCE,
+        ID_GENERATOR,
+        CLOCK,
+      ],
     },
     {
       provide: REVOKE_ROLE,
@@ -764,8 +810,21 @@ export const DATABASE = Symbol('Database')
       useFactory: (
         accounts: AccountRepositoryPort,
         authenticationProvider: AuthenticationProviderPort,
-      ): LoginAccount => new LoginAccount({ accounts, authenticationProvider }),
-      inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
+        sanctions: SanctionRepositoryPort,
+        clock: ClockPort,
+      ): LoginAccount =>
+        new LoginAccount({
+          accounts,
+          authenticationProvider,
+          sanctions,
+          clock,
+        }),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        AUTHENTICATION_PROVIDER,
+        SANCTION_REPOSITORY,
+        CLOCK,
+      ],
     },
     {
       provide: COMPLETE_SECOND_FACTOR,

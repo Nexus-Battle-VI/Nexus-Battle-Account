@@ -134,6 +134,7 @@ export interface SanctionsTable {
   readonly type: string
   readonly reason: string
   readonly created_at: Generated<Date>
+  readonly expires_at: Date | null
 }
 
 export interface Database {

@@ -12,12 +12,18 @@ import {
   currentIdentityOf,
 } from '../../src/adapters/inbound/http/auth/decorators'
 import { Role } from '../../src/domain/entities/Role'
+import { AccountStatus } from '../../src/domain/entities/AccountStatus'
+import { Sanction } from '../../src/domain/entities/Sanction'
+import { SanctionType } from '../../src/domain/entities/SanctionType'
 import {
   TokenVerificationError,
   type TokenVerifierPort,
   type VerifiedIdentity,
 } from '../../src/application/ports/TokenVerifierPort'
 import { AuthMode, ConfigurationError, loadConfig } from '../../src/infrastructure/config/env'
+import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
+import { InMemorySanctionRepository } from '../../src/adapters/outbound/persistence/InMemorySanctionRepository'
+import { buildActiveAccount } from '../support/account-factory'
 
 interface FakeRequest {
   headers: Record<string, string | undefined>
@@ -100,6 +106,8 @@ describe('Traduccion del token a identidad verificada', () => {
 })
 
 describe('JwtAuthGuard', () => {
+  const NOW = new Date('2026-09-06T12:00:00.000Z')
+
   const identity: VerifiedIdentity = {
     subject: 'sujeto-1',
     roles: new Set([Role.Player]),
@@ -109,9 +117,39 @@ describe('JwtAuthGuard', () => {
 
   const verifier = (impl: TokenVerifierPort['verify']): TokenVerifierPort => ({ verify: impl })
 
+  const buildGuard = async (
+    reflector: Reflector,
+    tokenVerifier: TokenVerifierPort,
+  ) => {
+    const accounts = new InMemoryAccountRepository()
+    const sanctions = new InMemorySanctionRepository()
+
+    await accounts.save(
+      buildActiveAccount({
+        id: 'account-1',
+        subject: 'sujeto-1',
+        email: 'jugador@nexus.test',
+        displayName: 'Jugador Uno',
+        roles: [Role.Player],
+      }),
+    )
+
+    return {
+      accounts,
+      sanctions,
+      guard: new JwtAuthGuard(
+        reflector,
+        tokenVerifier,
+        accounts,
+        sanctions,
+        { now: (): Date => NOW },
+      ),
+    }
+  }
+
   it('deja pasar una ruta publica sin mirar la cabecera', async () => {
     const { context, reflector } = contextFor({ headers: {} }, { [IS_PUBLIC]: true })
-    const guard = new JwtAuthGuard(
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.reject(new Error('no deberia llamarse'))),
     )
@@ -121,7 +159,7 @@ describe('JwtAuthGuard', () => {
 
   it('rechaza cuando falta la cabecera', async () => {
     const { context, reflector } = contextFor({ headers: {} })
-    const guard = new JwtAuthGuard(
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.resolve(identity)),
     )
@@ -140,7 +178,7 @@ describe('JwtAuthGuard', () => {
     ['con solo el esquema', 'Bearer'],
   ])('rechaza una cabecera %s', async (_caso, authorization) => {
     const { context, reflector } = contextFor({ headers: { authorization } })
-    const guard = new JwtAuthGuard(
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.resolve(identity)),
     )
@@ -151,7 +189,7 @@ describe('JwtAuthGuard', () => {
   it('acepta el esquema en cualquier combinacion de mayusculas', async () => {
     const request: FakeRequest = { headers: { authorization: 'bEaReR token-valido' } }
     const { context, reflector } = contextFor(request)
-    const guard = new JwtAuthGuard(
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.resolve(identity)),
     )
@@ -162,7 +200,7 @@ describe('JwtAuthGuard', () => {
 
   it('traduce un fallo de verificacion a 401', async () => {
     const { context, reflector } = contextFor({ headers: { authorization: 'Bearer falso' } })
-    const guard = new JwtAuthGuard(
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.reject(new TokenVerificationError())),
     )
@@ -178,12 +216,130 @@ describe('JwtAuthGuard', () => {
    */
   it('no convierte un fallo de red en 401', async () => {
     const { context, reflector } = contextFor({ headers: { authorization: 'Bearer t' } })
-    const guard = new JwtAuthGuard(
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.reject(new Error('JWKS inalcanzable'))),
     )
 
     await expect(guard.canActivate(context)).rejects.not.toBeInstanceOf(UnauthorizedException)
+  })
+
+  it('permite acceso a una cuenta activa', async () => {
+    const request: FakeRequest = { headers: { authorization: 'Bearer valido' } }
+    const { context, reflector } = contextFor(request)
+    const { guard } = await buildGuard(
+      reflector,
+      verifier(() => Promise.resolve(identity)),
+    )
+
+    await expect(guard.canActivate(context)).resolves.toBe(true)
+  })
+
+  it('bloquea una suspension temporal vigente', async () => {
+    const request: FakeRequest = { headers: { authorization: 'Bearer valido' } }
+    const { context, reflector } = contextFor(request)
+
+    const { guard, accounts, sanctions } = await buildGuard(
+      reflector,
+      verifier(() => Promise.resolve(identity)),
+    )
+
+    const account = await accounts.findBySubject('sujeto-1')
+    expect(account).not.toBeNull()
+
+    account!.suspend()
+    await accounts.save(account!)
+
+    await sanctions.save(
+      Sanction.create({
+        id: 'sanction-active',
+        targetAccountId: account!.id.value,
+        actorAccountId: 'admin-1',
+        type: SanctionType.TemporarySuspension,
+        reason: 'Suspension temporal de prueba.',
+        createdAt: NOW,
+        expiresAt: new Date('2026-09-06T13:00:00.000Z'),
+      }),
+    )
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException)
+
+    const persisted = await accounts.findBySubject('sujeto-1')
+    expect(persisted?.currentStatus).toBe(AccountStatus.Suspended)
+  })
+
+  it('reactiva una cuenta cuando la suspension temporal ya vencio', async () => {
+    const request: FakeRequest = { headers: { authorization: 'Bearer valido' } }
+    const { context, reflector } = contextFor(request)
+
+    const { guard, accounts, sanctions } = await buildGuard(
+      reflector,
+      verifier(() => Promise.resolve(identity)),
+    )
+
+    const account = await accounts.findBySubject('sujeto-1')
+    expect(account).not.toBeNull()
+
+    account!.suspend()
+    await accounts.save(account!)
+
+    await sanctions.save(
+      Sanction.create({
+        id: 'sanction-expired',
+        targetAccountId: account!.id.value,
+        actorAccountId: 'admin-1',
+        type: SanctionType.TemporarySuspension,
+        reason: 'Suspension temporal vencida.',
+        createdAt: new Date('2026-09-06T10:00:00.000Z'),
+        expiresAt: new Date('2026-09-06T11:00:00.000Z'),
+      }),
+    )
+
+    await expect(guard.canActivate(context)).resolves.toBe(true)
+
+    const persisted = await accounts.findBySubject('sujeto-1')
+    expect(persisted?.currentStatus).toBe(AccountStatus.Active)
+    expect(persisted?.canAuthenticate).toBe(true)
+  })
+
+  it('bloquea definitivamente una cuenta baneada', async () => {
+    const request: FakeRequest = { headers: { authorization: 'Bearer valido' } }
+    const { context, reflector } = contextFor(request)
+
+    const { guard, accounts } = await buildGuard(
+      reflector,
+      verifier(() => Promise.resolve(identity)),
+    )
+
+    const account = await accounts.findBySubject('sujeto-1')
+    expect(account).not.toBeNull()
+
+    account!.ban()
+    await accounts.save(account!)
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException)
+
+    const persisted = await accounts.findBySubject('sujeto-1')
+    expect(persisted?.currentStatus).toBe(AccountStatus.Banned)
+    expect(persisted?.canAuthenticate).toBe(false)
+  })
+
+  it('rechaza una identidad valida que no tiene cuenta asociada', async () => {
+    const request: FakeRequest = { headers: { authorization: 'Bearer valido' } }
+    const { context, reflector } = contextFor(request)
+
+    const accounts = new InMemoryAccountRepository()
+    const sanctions = new InMemorySanctionRepository()
+
+    const guard = new JwtAuthGuard(
+      reflector,
+      verifier(() => Promise.resolve(identity)),
+      accounts,
+      sanctions,
+      { now: (): Date => NOW },
+    )
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException)
   })
 })
 
