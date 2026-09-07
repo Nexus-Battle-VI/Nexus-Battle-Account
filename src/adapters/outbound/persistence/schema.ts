@@ -127,6 +127,15 @@ export interface AccountDeletionRequestsTable {
   readonly closed_at: Date | null
 }
 
+export interface SanctionsTable {
+  readonly id: string
+  readonly target_account_id: string
+  readonly actor_account_id: string
+  readonly type: string
+  readonly reason: string
+  readonly created_at: Generated<Date>
+}
+
 export interface Database {
   readonly accounts: AccountsTable
   readonly account_roles: AccountRolesTable
@@ -136,4 +145,5 @@ export interface Database {
   readonly recovery_challenges: RecoveryChallengesTable
   readonly mfa_evidences: MfaEvidencesTable
   readonly account_deletion_requests: AccountDeletionRequestsTable
+  readonly sanctions: SanctionsTable
 }
