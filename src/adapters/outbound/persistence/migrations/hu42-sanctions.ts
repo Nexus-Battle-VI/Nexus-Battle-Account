@@ -20,17 +20,12 @@ export const up = async (db: Kysely<unknown>): Promise<void> => {
     .addColumn('actor_account_id', 'text', (col) => col.notNull())
     .addColumn('type', 'text', (col) => col.notNull())
     .addColumn('reason', 'text', (col) => col.notNull())
-    .addColumn('created_at', 'timestamptz', (col) =>
-      col.notNull().defaultTo(sql`now()`),
-    )
+    .addColumn('created_at', 'timestamptz', (col) => col.notNull().defaultTo(sql`now()`))
     .addCheckConstraint(
       'sanctions_tipo_conocido',
       sql`type in ('WARNING', 'TEMPORARY_SUSPENSION', 'PERMANENT_BAN')`,
     )
-    .addCheckConstraint(
-      'sanctions_causal_no_vacia',
-      sql`length(trim(reason)) > 0`,
-    )
+    .addCheckConstraint('sanctions_causal_no_vacia', sql`length(trim(reason)) > 0`)
     .execute()
 
   await db.schema

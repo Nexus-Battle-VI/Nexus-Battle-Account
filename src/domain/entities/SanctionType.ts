@@ -4,8 +4,7 @@ export const SanctionType = {
   PermanentBan: 'PERMANENT_BAN',
 } as const
 
-export type SanctionType =
-  (typeof SanctionType)[keyof typeof SanctionType]
+export type SanctionType = (typeof SanctionType)[keyof typeof SanctionType]
 
 export const ALL_SANCTION_TYPES: readonly SanctionType[] = [
   SanctionType.Warning,
@@ -13,7 +12,5 @@ export const ALL_SANCTION_TYPES: readonly SanctionType[] = [
   SanctionType.PermanentBan,
 ]
 
-export const isSanctionType = (
-  value: string,
-): value is SanctionType =>
+export const isSanctionType = (value: string): value is SanctionType =>
   (ALL_SANCTION_TYPES as readonly string[]).includes(value)

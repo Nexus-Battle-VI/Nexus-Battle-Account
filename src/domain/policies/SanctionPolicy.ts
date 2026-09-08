@@ -13,8 +13,7 @@ export const SanctionPolicy = {
 
     if (actorRoles.has(Role.Moderator)) {
       return (
-        sanctionType === SanctionType.Warning ||
-        sanctionType === SanctionType.TemporarySuspension
+        sanctionType === SanctionType.Warning || sanctionType === SanctionType.TemporarySuspension
       )
     }
 

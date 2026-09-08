@@ -10,12 +10,7 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common'
-import {
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger'
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger'
 
 import { ApplySanction } from '../../../application/use-cases/ApplySanction'
 import { AccountNotFoundError } from '../../../application/errors/ApplicationError'
@@ -24,10 +19,7 @@ import { Role } from '../../../domain/entities/Role'
 import { CurrentIdentity, Roles } from './auth/decorators'
 import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
 import { APPLY_SANCTION } from './tokens'
-import {
-  ApplySanctionRequest,
-  SanctionResponse,
-} from './sanctions.dto'
+import { ApplySanctionRequest, SanctionResponse } from './sanctions.dto'
 
 @ApiTags('sanctions')
 @ApiBearerAuth()
@@ -38,11 +30,7 @@ export class SanctionsController {
     private readonly applySanction: ApplySanction,
   ) {}
 
-  @Roles(
-    Role.Moderator,
-    Role.Administrator,
-    Role.SuperAdministrator,
-  )
+  @Roles(Role.Moderator, Role.Administrator, Role.SuperAdministrator)
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({

@@ -30,18 +30,14 @@ export class ApplySanction {
       )
     }
 
-    const target = await this.accounts.findById(
-      AccountId.create(command.targetAccountId),
-    )
+    const target = await this.accounts.findById(AccountId.create(command.targetAccountId))
 
     if (target === null) {
       throw new AccountNotFoundError(command.targetAccountId)
     }
 
     if (!SanctionPolicy.canApply(new Set(actor.currentRoles), command.type)) {
-      throw new DomainError(
-        'El actor no tiene permisos para aplicar este tipo de sancion.',
-      )
+      throw new DomainError('El actor no tiene permisos para aplicar este tipo de sancion.')
     }
 
     const sanction = Sanction.create({
