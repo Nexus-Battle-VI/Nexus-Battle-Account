@@ -24,6 +24,10 @@ import { ListAdminAccounts } from '../../src/application/use-cases/ListAdminAcco
 import type { AdminAccountQueryCriteria } from '../../src/application/dto/AdminAccountQueryCriteria'
 import { ExportAdminAccounts } from '../../src/application/use-cases/ExportAdminAccounts'
 import { JsonAdminAccountExportAdapter } from '../../src/adapters/outbound/export/JsonAdminAccountExportAdapter'
+import { InMemorySanctionRepository } from '../../src/adapters/outbound/persistence/InMemorySanctionRepository'
+import { PostgresSanctionRepository } from '../../src/adapters/outbound/persistence/PostgresSanctionRepository'
+import { Sanction } from '../../src/domain/entities/Sanction'
+import { SanctionType } from '../../src/domain/entities/SanctionType'
 
 /**
  * Adaptador de PostgreSQL contra un motor REAL, en contenedor.
@@ -403,6 +407,264 @@ describe('PostgresAccountRepository', () => {
         await memoryUseCase.execute(criterion),
       )
     }
+  })
+
+  it('filtra historial real HU-42 con paridad, sin duplicados ni mutaciones', async () => {
+    const sanctions = new PostgresSanctionRepository(db)
+    const memorySanctions = new InMemorySanctionRepository()
+    let nextDate = 0
+    const memory = new InMemoryAccountRepository(
+      () => ADMIN_QUERY_SEEDS[nextDate++]?.registeredAt ?? AT,
+      memorySanctions,
+    )
+    await seedAdminQueryAccounts(memory)
+    await db.deleteFrom('sanctions').execute()
+    const banned = buildAdminQueryAccount({
+      id: 'acc-query-banned',
+      subject: 'subject-query-banned',
+      email: 'banned@nexus.test',
+      displayName: 'Jugador Baneado',
+      firstNames: 'Diego',
+      lastNames: 'Torres',
+      status: AccountStatus.Banned,
+      roles: [Role.Player],
+      registeredAt: AT,
+    })
+    await repository.save(banned)
+    await memory.save(banned)
+    await db
+      .updateTable('accounts')
+      .set({ created_at: AT })
+      .where('id', '=', banned.id.value)
+      .execute()
+
+    for (const [id, targetAccountId, type] of [
+      ['warning', 'acc-query-admin', SanctionType.Warning],
+      ['warning-again', 'acc-query-admin', SanctionType.Warning],
+      ['expired', 'acc-query-suspended', SanctionType.TemporarySuspension],
+      ['ban', 'acc-query-banned', SanctionType.PermanentBan],
+      ['deleted', 'acc-deleted', SanctionType.Warning],
+    ] as const) {
+      const sanction = Sanction.create({
+        id,
+        targetAccountId,
+        actorAccountId: 'acc-query-super',
+        type,
+        reason: 'Causal sintetica HU-44.2',
+        createdAt: new Date('2020-01-01T00:00:00.000Z'),
+        expiresAt:
+          type === SanctionType.TemporarySuspension ? new Date('2020-01-02T00:00:00.000Z') : null,
+      })
+      await sanctions.save(sanction)
+      await memorySanctions.save(sanction)
+    }
+    const readStored = async () => ({
+      accounts: await db.selectFrom('accounts').selectAll().orderBy('id').execute(),
+      roles: await db
+        .selectFrom('account_roles')
+        .selectAll()
+        .orderBy('account_id')
+        .orderBy('role')
+        .execute(),
+      sanctions: await db.selectFrom('sanctions').selectAll().orderBy('id').execute(),
+    })
+    const before = await readStored()
+    const memoryUseCase = new ListAdminAccounts(memory)
+    const postgresUseCase = new ListAdminAccounts(repository)
+    const exporter = new ExportAdminAccounts(postgresUseCase, new JsonAdminAccountExportAdapter())
+    const cases: readonly [AdminAccountQueryCriteria, readonly string[]][] = [
+      [
+        { hasSanctionHistory: true },
+        ['acc-query-admin', 'acc-query-banned', 'acc-query-suspended'],
+      ],
+      [{ hasSanctionHistory: false }, ['acc-query-super']],
+      [{ hasSanctionHistory: true, id: 'acc-query-admin' }, ['acc-query-admin']],
+      [{ hasSanctionHistory: true, status: AccountStatus.Suspended }, ['acc-query-suspended']],
+      [{ hasSanctionHistory: true, status: AccountStatus.Banned }, ['acc-query-banned']],
+      [{ hasSanctionHistory: true, role: Role.Moderator }, ['acc-query-suspended']],
+      [{ hasSanctionHistory: false, role: Role.SuperAdministrator }, ['acc-query-super']],
+      [
+        {
+          hasSanctionHistory: true,
+          displayName: 'capitana query',
+          role: Role.Administrator,
+          status: AccountStatus.Active,
+        },
+        ['acc-query-admin'],
+      ],
+      [{ hasSanctionHistory: false, email: 'query.admin@nexus.test' }, []],
+    ]
+    for (const [criteria, ids] of cases) {
+      const listed = await postgresUseCase.execute(criteria)
+      expect(listed.items.map((item) => item.id)).toEqual(ids)
+      expect(listed).toEqual(await memoryUseCase.execute(criteria))
+      expect(JSON.parse((await exporter.execute(criteria)).content)).toEqual(listed.items)
+    }
+    expect((await postgresUseCase.execute({ hasSanctionHistory: true })).statusCounts).toEqual({
+      pendingVerification: 0,
+      active: 1,
+      suspended: 1,
+      banned: 1,
+    })
+    expect(await sanctions.findAccountIdsWithHistory([])).toEqual([])
+    const candidates = [
+      'acc-query-admin',
+      'acc-query-admin',
+      'acc-query-super',
+      'acc-query-suspended',
+    ]
+    expect([...(await sanctions.findAccountIdsWithHistory(candidates))].sort()).toEqual(
+      [...(await memorySanctions.findAccountIdsWithHistory(candidates))].sort(),
+    )
+    expect(await readStored()).toEqual(before)
+  })
+
+  it('aplica limites inclusivos sobre timestamptz con paridad, AND y exportacion sin mutaciones', async () => {
+    const memorySanctions = new InMemorySanctionRepository()
+    const sanctions = new PostgresSanctionRepository(db)
+    let nextDate = 0
+    const memory = new InMemoryAccountRepository(
+      () => ADMIN_QUERY_SEEDS[nextDate++]?.registeredAt ?? AT,
+      memorySanctions,
+    )
+    await seedAdminQueryAccounts(memory)
+    await db.deleteFrom('sanctions').execute()
+    const sanction = Sanction.create({
+      id: 'date-range-warning',
+      targetAccountId: 'acc-query-admin',
+      actorAccountId: 'acc-query-super',
+      type: SanctionType.Warning,
+      reason: 'Causal sintetica',
+      createdAt: AT,
+    })
+    await sanctions.save(sanction)
+    await memorySanctions.save(sanction)
+    const column = await sql<{ data_type: string }>`select data_type from information_schema.columns
+      where table_schema = 'public' and table_name = 'accounts' and column_name = 'created_at'`.execute(
+      db,
+    )
+    expect(column.rows[0]?.data_type).toBe('timestamp with time zone')
+
+    const readStored = async () => ({
+      accounts: await db.selectFrom('accounts').selectAll().orderBy('id').execute(),
+      roles: await db
+        .selectFrom('account_roles')
+        .selectAll()
+        .orderBy('account_id')
+        .orderBy('role')
+        .execute(),
+      sanctions: await db.selectFrom('sanctions').selectAll().orderBy('id').execute(),
+    })
+    const before = await readStored()
+    const list = new ListAdminAccounts(repository)
+    const memoryList = new ListAdminAccounts(memory)
+    const exportAccounts = new ExportAdminAccounts(list, new JsonAdminAccountExportAdapter())
+    const cases: readonly [AdminAccountQueryCriteria, readonly string[]][] = [
+      [{}, ['acc-query-admin', 'acc-query-super', 'acc-query-suspended']],
+      [
+        { registeredFrom: new Date('2026-08-11T10:00:00Z') },
+        ['acc-query-super', 'acc-query-suspended'],
+      ],
+      [{ registeredTo: new Date('2026-08-11T10:00:00Z') }, ['acc-query-admin', 'acc-query-super']],
+      [
+        {
+          registeredFrom: new Date('2026-08-10T10:00:00Z'),
+          registeredTo: new Date('2026-08-11T10:00:00Z'),
+        },
+        ['acc-query-admin', 'acc-query-super'],
+      ],
+      [
+        {
+          registeredFrom: new Date('2026-08-11T05:00:00-05:00'),
+          registeredTo: new Date('2026-08-11T10:00:00Z'),
+        },
+        ['acc-query-super'],
+      ],
+      [{ registeredFrom: new Date('2026-08-11T10:00:00.001Z') }, ['acc-query-suspended']],
+      [{ registeredTo: new Date('2026-08-11T09:59:59.999Z') }, ['acc-query-admin']],
+      [
+        {
+          registeredFrom: new Date('2027-01-01T00:00:00Z'),
+          registeredTo: new Date('2027-02-01T00:00:00Z'),
+        },
+        [],
+      ],
+      [
+        { registeredFrom: new Date('2026-08-10T10:00:00Z'), firstNames: 'ada' },
+        ['acc-query-admin'],
+      ],
+      [
+        { registeredTo: new Date('2026-08-11T10:00:00Z'), role: Role.SuperAdministrator },
+        ['acc-query-super'],
+      ],
+      [
+        { registeredFrom: new Date('2026-08-11T10:00:00Z'), status: AccountStatus.Suspended },
+        ['acc-query-suspended'],
+      ],
+      [
+        { registeredTo: new Date('2026-08-11T10:00:00Z'), hasSanctionHistory: true },
+        ['acc-query-admin'],
+      ],
+      [
+        {
+          registeredFrom: new Date('2026-08-11T10:00:00Z'),
+          registeredTo: new Date('2026-08-12T10:00:00Z'),
+          hasSanctionHistory: false,
+        },
+        ['acc-query-super', 'acc-query-suspended'],
+      ],
+      [
+        {
+          registeredFrom: new Date('2026-08-10T10:00:00Z'),
+          registeredTo: new Date('2026-08-11T10:00:00Z'),
+          displayName: 'capitana query',
+          role: Role.Administrator,
+          status: AccountStatus.Active,
+          hasSanctionHistory: true,
+        },
+        ['acc-query-admin'],
+      ],
+      [
+        {
+          registeredFrom: new Date('2026-08-11T10:00:00Z'),
+          role: Role.Administrator,
+          hasSanctionHistory: true,
+        },
+        [],
+      ],
+    ]
+    for (const [criteria, ids] of cases) {
+      const result = await list.execute(criteria)
+      expect(result.items.map((item) => item.id)).toEqual(ids)
+      expect(result).toEqual(await memoryList.execute(criteria))
+      expect(JSON.parse((await exportAccounts.execute(criteria)).content)).toEqual(result.items)
+    }
+    expect(await readStored()).toEqual(before)
+  })
+
+  it('compara el timestamptz almacenado sin truncar sus microsegundos al filtrar', async () => {
+    await seedAdminQueryAccounts()
+    await sql`update accounts set created_at = '2026-08-10T10:00:00.000001Z'::timestamptz
+      where id = 'acc-query-admin'`.execute(db)
+    const criteria = { id: 'acc-query-admin' }
+    const list = new ListAdminAccounts(repository)
+    expect(
+      (await list.execute({ ...criteria, registeredTo: new Date('2026-08-10T10:00:00.000Z') }))
+        .items,
+    ).toEqual([])
+    expect(
+      (await list.execute({ ...criteria, registeredFrom: new Date('2026-08-10T10:00:00.001Z') }))
+        .items,
+    ).toEqual([])
+    expect(
+      (
+        await list.execute({
+          ...criteria,
+          registeredFrom: new Date('2026-08-10T10:00:00.000Z'),
+          registeredTo: new Date('2026-08-10T10:00:00.001Z'),
+        })
+      ).items.map((item) => item.id),
+    ).toEqual(['acc-query-admin'])
   })
 
   it('exporta desde PostgreSQL el mismo resultado producido por ListAdminAccounts', async () => {

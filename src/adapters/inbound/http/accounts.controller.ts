@@ -39,6 +39,7 @@ import {
   IdentityAlreadyRegisteredError,
   IdentityRequiredError,
   NicknameBlacklistedError,
+  InvalidAdminAccountQueryError,
 } from '../../../application/errors/ApplicationError'
 import { RoleDirectoryError } from '../../../application/ports/RoleDirectoryPort'
 import { MfaStatusError } from '../../../application/ports/MfaStatusPort'
@@ -62,7 +63,13 @@ import { FindAccountByEmail } from '../../../application/use-cases/FindAccountBy
 import { RevokeRole } from '../../../application/use-cases/RevokeRole'
 import type { AdminAccountQueryCriteria } from '../../../application/dto/AdminAccountQueryCriteria'
 import { Role, isRole } from '../../../domain/entities/Role'
-import { CurrentAccessToken, CurrentIdentity, Public, Roles } from './auth/decorators'
+import {
+  CurrentAccessToken,
+  CurrentIdentity,
+  Public,
+  ReadOnlyAccountQuery,
+  Roles,
+} from './auth/decorators'
 import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
 import {
   REGISTER_ACCOUNT,
@@ -210,6 +217,7 @@ export class AccountsController {
   }
 
   @Roles(Role.Administrator)
+  @ReadOnlyAccountQuery()
   @Get()
   @ApiOperation({ summary: 'Lista cuentas para el panel administrativo (HU-44.2)' })
   @ApiResponse({ status: 200, description: 'Listado administrativo', type: AdminAccountsResponse })
@@ -224,6 +232,7 @@ export class AccountsController {
   }
 
   @Roles(Role.Administrator)
+  @ReadOnlyAccountQuery()
   @Get('export')
   @ApiProduces('application/json')
   @ApiOperation({
@@ -453,7 +462,10 @@ export class AccountsController {
       return new ConflictException(error.message)
     }
 
-    if (error instanceof NicknameBlacklistedError) {
+    if (
+      error instanceof NicknameBlacklistedError ||
+      error instanceof InvalidAdminAccountQueryError
+    ) {
       return new BadRequestException(error.message)
     }
 
@@ -509,6 +521,9 @@ const toAdminAccountCriteria = (query: ListAdminAccountsQuery): AdminAccountQuer
   displayName: query.nickname,
   role: query.role,
   status: query.status,
+  hasSanctionHistory: query.hasSanctionHistory,
+  registeredFrom: query.registeredFrom === undefined ? undefined : new Date(query.registeredFrom),
+  registeredTo: query.registeredTo === undefined ? undefined : new Date(query.registeredTo),
 })
 
 const asAttachment = (filename: string): string => `attachment; filename="${filename}"`

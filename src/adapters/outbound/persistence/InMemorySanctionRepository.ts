@@ -5,6 +5,17 @@ import { SanctionType } from '../../../domain/entities/SanctionType'
 export class InMemorySanctionRepository implements SanctionRepositoryPort {
   private readonly sanctions = new Map<string, Sanction>()
 
+  findAccountIdsWithHistory(accountIds: readonly string[]): Promise<readonly string[]> {
+    const candidates = new Set(accountIds)
+    const found = new Set<string>()
+    for (const sanction of this.sanctions.values()) {
+      if (candidates.has(sanction.targetAccountId)) {
+        found.add(sanction.targetAccountId)
+      }
+    }
+    return Promise.resolve([...found])
+  }
+
   save(sanction: Sanction): Promise<void> {
     this.sanctions.set(sanction.id, sanction)
 

@@ -23,7 +23,7 @@ import {
 } from '../../../../application/ports/SanctionRepositoryPort'
 import { CLOCK, type ClockPort } from '../../../../application/ports/ClockPort'
 import { AccountStatus } from '../../../../domain/entities/AccountStatus'
-import { IS_PUBLIC, type RequestWithIdentity } from './decorators'
+import { IS_PUBLIC, READ_ONLY_ACCOUNT_QUERY, type RequestWithIdentity } from './decorators'
 
 interface RequestWithAuthHeader extends RequestWithIdentity {
   headers: Record<string, string | string[] | undefined>
@@ -107,7 +107,11 @@ export class JwtAuthGuard implements CanActivate {
         account.id.value,
       )
 
-      if (latestTemporarySuspension !== null) {
+      const readOnly = this.reflector.getAllAndOverride<boolean | undefined>(
+        READ_ONLY_ACCOUNT_QUERY,
+        [context.getHandler()],
+      )
+      if (latestTemporarySuspension !== null && readOnly !== true) {
         account.reinstate()
         await this.accounts.save(account)
       }

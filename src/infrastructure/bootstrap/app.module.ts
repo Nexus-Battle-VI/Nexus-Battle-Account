@@ -267,9 +267,14 @@ export const DATABASE = Symbol('Database')
     },
     {
       provide: ACCOUNT_REPOSITORY,
-      useFactory: (db: Kysely<Database> | null): AccountRepositoryPort =>
-        db === null ? new InMemoryAccountRepository() : new PostgresAccountRepository(db),
-      inject: [DATABASE],
+      useFactory: (
+        db: Kysely<Database> | null,
+        sanctions: SanctionRepositoryPort,
+      ): AccountRepositoryPort =>
+        db === null
+          ? new InMemoryAccountRepository(undefined, sanctions)
+          : new PostgresAccountRepository(db),
+      inject: [DATABASE, SANCTION_REPOSITORY],
     },
     {
       provide: SANCTION_REPOSITORY,

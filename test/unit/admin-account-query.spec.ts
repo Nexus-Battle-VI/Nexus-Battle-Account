@@ -8,6 +8,10 @@ import { DisplayName } from '../../src/domain/value-objects/DisplayName'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
 import { PersonName } from '../../src/domain/value-objects/PersonName'
 import { defaultAvatarMetadata } from '../support/account-factory'
+import { InMemorySanctionRepository } from '../../src/adapters/outbound/persistence/InMemorySanctionRepository'
+import { Sanction } from '../../src/domain/entities/Sanction'
+import { SanctionType } from '../../src/domain/entities/SanctionType'
+import { InvalidAdminAccountQueryError } from '../../src/application/errors/ApplicationError'
 
 interface AccountSeed {
   readonly id: string
@@ -97,12 +101,15 @@ const buildAccount = (seed: AccountSeed): Account =>
 
 const createHarness = async (): Promise<{
   readonly repository: InMemoryAccountRepository
+  readonly sanctions: InMemorySanctionRepository
   readonly useCase: ListAdminAccounts
 }> => {
   let nextDate = 0
+  const sanctions = new InMemorySanctionRepository()
 
   const repository = new InMemoryAccountRepository(
     () => SEEDS[nextDate++]?.registeredAt ?? new Date('2026-08-31T00:00:00.000Z'),
+    sanctions,
   )
 
   for (const seed of SEEDS) {
@@ -111,11 +118,237 @@ const createHarness = async (): Promise<{
 
   return {
     repository,
+    sanctions,
     useCase: new ListAdminAccounts(repository),
   }
 }
 
 describe('ListAdminAccounts', () => {
+  const seedSanctions = async (sanctions: InMemorySanctionRepository): Promise<void> => {
+    for (const [id, targetAccountId, type] of [
+      ['warning', 'acc-admin-active', SanctionType.Warning],
+      ['another-warning', 'acc-admin-active', SanctionType.Warning],
+      ['expired', 'acc-moderator-suspended', SanctionType.TemporarySuspension],
+      ['ban', 'acc-player-banned', SanctionType.PermanentBan],
+      ['deleted', 'acc-deleted', SanctionType.Warning],
+    ] as const) {
+      await sanctions.save(
+        Sanction.create({
+          id,
+          targetAccountId,
+          actorAccountId: 'acc-super-active',
+          type,
+          reason: 'Causal sintetica HU-44.2',
+          createdAt: new Date('2020-01-01T00:00:00.000Z'),
+          expiresAt:
+            type === SanctionType.TemporarySuspension ? new Date('2020-01-02T00:00:00.000Z') : null,
+        }),
+      )
+    }
+  }
+
+  it.each([
+    [true, ['acc-admin-active', 'acc-moderator-suspended', 'acc-player-banned']],
+    [false, ['acc-player-pending', 'acc-super-active']],
+  ])(
+    'filtra historial recibido %s sin duplicados ni confundir actor con sancionado',
+    async (hasSanctionHistory, ids) => {
+      const { useCase, sanctions } = await createHarness()
+      await seedSanctions(sanctions)
+      expect((await useCase.execute({ hasSanctionHistory })).items.map((item) => item.id)).toEqual(
+        ids,
+      )
+    },
+  )
+
+  it.each([
+    [{ firstNames: 'ana maria', role: Role.Administrator }, ['acc-admin-active']],
+    [{ lastNames: 'vega', status: AccountStatus.Active }, ['acc-admin-active', 'acc-super-active']],
+    [{ role: Role.Moderator, status: AccountStatus.Suspended }, ['acc-moderator-suspended']],
+    [{ displayName: 'capitana uno', hasSanctionHistory: true }, ['acc-admin-active']],
+    [{ role: Role.Moderator, hasSanctionHistory: true }, ['acc-moderator-suspended']],
+    [{ status: AccountStatus.Banned, hasSanctionHistory: true }, ['acc-player-banned']],
+    [{ role: Role.SuperAdministrator, hasSanctionHistory: false }, ['acc-super-active']],
+    [
+      {
+        email: 'ADMIN.ACTIVE@NEXUS.TEST',
+        role: Role.Player,
+        status: AccountStatus.Active,
+        hasSanctionHistory: true,
+      },
+      ['acc-admin-active'],
+    ],
+    [{ email: 'ADMIN.ACTIVE@NEXUS.TEST', hasSanctionHistory: false }, []],
+  ])('combina los criterios %j mediante AND', async (criteria, ids) => {
+    const { useCase, sanctions } = await createHarness()
+    await seedSanctions(sanctions)
+    expect((await useCase.execute(criteria)).items.map((item) => item.id)).toEqual(ids)
+  })
+
+  it('consulta historial sin modificar snapshots, metadatos o sanciones', async () => {
+    const { useCase, sanctions, repository } = await createHarness()
+    await seedSanctions(sanctions)
+    const readSnapshots = () =>
+      Promise.all(
+        SEEDS.map(async (seed) =>
+          (await repository.findById(AccountId.create(seed.id)))?.toSnapshot(),
+        ),
+      )
+    const before = await readSnapshots()
+    const summaries = await useCase.execute()
+    const history = structuredClone(sanctions.findAll().map((sanction) => sanction.toSnapshot()))
+    await useCase.execute({ hasSanctionHistory: true })
+    await useCase.execute({ hasSanctionHistory: false, role: Role.Player })
+    expect(await readSnapshots()).toEqual(before)
+    expect(await useCase.execute()).toEqual(summaries)
+    expect(sanctions.findAll().map((sanction) => sanction.toSnapshot())).toEqual(history)
+  })
+
+  it('consulta en lote solo IDs candidatos y devuelve un subconjunto sin duplicados', async () => {
+    const { sanctions } = await createHarness()
+    await seedSanctions(sanctions)
+    expect(await sanctions.findAccountIdsWithHistory([])).toEqual([])
+    expect(
+      await sanctions.findAccountIdsWithHistory([
+        'acc-admin-active',
+        'acc-admin-active',
+        'acc-super-active',
+      ]),
+    ).toEqual(['acc-admin-active'])
+  })
+
+  it('no interpreta la falta de la fuente de sanciones como historial vacio', async () => {
+    const repository = new InMemoryAccountRepository()
+    await repository.save(buildAccount(ADMIN_ACTIVE))
+    await expect(repository.query({ hasSanctionHistory: false })).rejects.toThrow(
+      'repositorio de sanciones',
+    )
+  })
+
+  it('sin sanciones persistidas distingue true, false y criterio omitido', async () => {
+    const { useCase } = await createHarness()
+    expect((await useCase.execute({ hasSanctionHistory: true })).items).toEqual([])
+    expect(await useCase.execute({ hasSanctionHistory: false })).toEqual(await useCase.execute())
+  })
+  it.each([
+    [
+      'solo desde',
+      { registeredFrom: new Date('2026-08-03T10:00:00Z') },
+      ['acc-player-banned', 'acc-player-pending', 'acc-super-active'],
+    ],
+    [
+      'solo hasta',
+      { registeredTo: new Date('2026-08-02T10:00:00Z') },
+      ['acc-admin-active', 'acc-moderator-suspended'],
+    ],
+    [
+      'rango inclusivo',
+      {
+        registeredFrom: new Date('2026-08-01T10:00:00Z'),
+        registeredTo: new Date('2026-08-02T10:00:00Z'),
+      },
+      ['acc-admin-active', 'acc-moderator-suspended'],
+    ],
+    [
+      'limites iguales',
+      {
+        registeredFrom: new Date('2026-08-02T10:00:00Z'),
+        registeredTo: new Date('2026-08-02T10:00:00Z'),
+      },
+      ['acc-moderator-suspended'],
+    ],
+    [
+      'excluye por debajo',
+      { registeredFrom: new Date('2026-08-04T10:00:00.001Z') },
+      ['acc-player-banned'],
+    ],
+    [
+      'excluye por encima',
+      { registeredTo: new Date('2026-08-02T09:59:59.999Z') },
+      ['acc-admin-active'],
+    ],
+    [
+      'sin resultados',
+      {
+        registeredFrom: new Date('2027-01-01T00:00:00Z'),
+        registeredTo: new Date('2027-02-01T00:00:00Z'),
+      },
+      [],
+    ],
+    [
+      'busqueda',
+      { registeredFrom: new Date('2026-08-02T10:00:00Z'), lastNames: 'vega' },
+      ['acc-super-active'],
+    ],
+    [
+      'rol',
+      { registeredTo: new Date('2026-08-02T10:00:00Z'), role: Role.Moderator },
+      ['acc-moderator-suspended'],
+    ],
+    [
+      'estado',
+      { registeredFrom: new Date('2026-08-02T10:00:00Z'), status: AccountStatus.Active },
+      ['acc-super-active'],
+    ],
+    [
+      'historial',
+      { registeredFrom: new Date('2026-08-03T10:00:00Z'), hasSanctionHistory: true },
+      ['acc-player-banned'],
+    ],
+    [
+      'multiples criterios AND',
+      {
+        registeredFrom: new Date('2026-08-01T10:00:00Z'),
+        registeredTo: new Date('2026-08-03T10:00:00Z'),
+        displayName: 'moderadora sur',
+        role: Role.Moderator,
+        status: AccountStatus.Suspended,
+        hasSanctionHistory: true,
+      },
+      ['acc-moderator-suspended'],
+    ],
+    [
+      'fecha excluye otros criterios',
+      {
+        registeredFrom: new Date('2026-08-02T10:00:00Z'),
+        role: Role.Administrator,
+        hasSanctionHistory: true,
+      },
+      [],
+    ],
+  ])('filtra por fecha: %s', async (_case, criteria, ids) => {
+    const { useCase, sanctions } = await createHarness()
+    await seedSanctions(sanctions)
+    const before = await useCase.execute()
+    const history = structuredClone(sanctions.findAll().map((sanction) => sanction.toSnapshot()))
+    expect((await useCase.execute(criteria)).items.map((item) => item.id)).toEqual(ids)
+    expect(await useCase.execute()).toEqual(before)
+    expect(sanctions.findAll().map((sanction) => sanction.toSnapshot())).toEqual(history)
+  })
+
+  it.each([
+    { registeredFrom: new Date('invalida') },
+    { registeredTo: new Date('invalida') },
+    {
+      registeredFrom: new Date('2026-08-03T00:00:00Z'),
+      registeredTo: new Date('2026-08-02T00:00:00Z'),
+    },
+  ])('rechaza fechas invalidas o rango invertido tambien fuera de HTTP: %j', async (criteria) => {
+    const { useCase } = await createHarness()
+    await expect(useCase.execute(criteria)).rejects.toBeInstanceOf(InvalidAdminAccountQueryError)
+  })
+
+  it('copia los limites para no observar cambios del llamador durante una consulta asincrona', async () => {
+    const { useCase, sanctions } = await createHarness()
+    await seedSanctions(sanctions)
+    const registeredFrom = new Date('2026-08-01T10:00:00Z')
+    const registeredTo = new Date('2026-08-01T10:00:00Z')
+    const query = useCase.execute({ registeredFrom, registeredTo, hasSanctionHistory: true })
+    registeredFrom.setUTCFullYear(2030)
+    registeredTo.setUTCFullYear(2030)
+    expect((await query).items.map((item) => item.id)).toEqual(['acc-admin-active'])
+  })
+
   it.each(['save', 'saveRegistration'] as const)(
     'conserva la fecha del primer %s al avanzar el reloj, actualizar y consultar',
     async (method) => {

@@ -8,6 +8,17 @@ import type { Database } from './schema'
 export class PostgresSanctionRepository implements SanctionRepositoryPort {
   constructor(private readonly db: Kysely<Database>) {}
 
+  async findAccountIdsWithHistory(accountIds: readonly string[]): Promise<readonly string[]> {
+    if (accountIds.length === 0) return []
+    const rows = await this.db
+      .selectFrom('sanctions')
+      .select('target_account_id')
+      .distinct()
+      .where('target_account_id', 'in', accountIds)
+      .execute()
+    return rows.map((row) => row.target_account_id)
+  }
+
   async save(sanction: Sanction): Promise<void> {
     const snapshot = sanction.toSnapshot()
 

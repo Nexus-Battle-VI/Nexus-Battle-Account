@@ -9,4 +9,9 @@ export interface AdminAccountQueryCriteria {
   readonly displayName?: string
   readonly role?: Role
   readonly status?: AccountStatus
+  /** Existencia de sanciones recibidas, incluidas las vencidas; omitido no filtra. */
+  readonly hasSanctionHistory?: boolean
+  /** Limites opcionales e inclusivos del instante de registro, en UTC. */
+  readonly registeredFrom?: Date
+  readonly registeredTo?: Date
 }

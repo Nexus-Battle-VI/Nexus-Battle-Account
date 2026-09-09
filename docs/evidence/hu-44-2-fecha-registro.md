@@ -2,6 +2,20 @@
 
 Fecha de auditoría: 2026-09-05.
 
+Actualización 2026-09-09: **la ambigüedad temporal queda resuelta** por la decisión
+funcional aprobada en el prompt del responsable. El rango registeredFrom y
+registeredTo está implementado: ambos opcionales e independientes, inclusivos,
+instantes ISO 8601 con zona explícita normalizados a UTC, combinados mediante AND
+con búsqueda, rol, estado e historial. La exportación comparte los criterios.
+
+PostgreSQL real validado: `npm run test:db`, 5 suites y 68 pruebas correctas,
+incluidos límites inclusivos sobre timestamptz, paridad con InMemory y no mutación
+de created_at. El [informe vigente](hu-44-2-consultas-historial.md) contiene el
+contrato HTTP, errores 400, matriz CA-01 a CA-04 y todos los resultados finales.
+
+El resto de este documento conserva la auditoría histórica del 5 de septiembre;
+sus referencias a filtros pendientes describen esa fecha, no el estado actual.
+
 Refs Nexus-Battle-VI/Nexus-Battle-Management#38
 
 Refs Nexus-Battle-VI/Nexus-Battle-Management#120
