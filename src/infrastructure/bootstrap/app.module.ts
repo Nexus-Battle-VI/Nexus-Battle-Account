@@ -215,14 +215,6 @@ export const APP_CONFIG = Symbol('AppConfig')
 export const LOGGER = Symbol('Logger')
 export const DATABASE = Symbol('Database')
 
-/**
- * Raiz de composicion.
- *
- * Es el unico lugar donde se eligen implementaciones concretas. Los casos de
- * uso son clases planas sin decoradores de NestJS: se registran con fabricas
- * explicitas, de modo que la capa de aplicacion permanece independiente del
- * framework y podria ejecutarse fuera de el sin cambios.
- */
 @Module({
   controllers: [
     AccountsController,
@@ -265,7 +257,9 @@ export const DATABASE = Symbol('Database')
           throw new Error('DATABASE_URL es obligatorio con PERSISTENCE_DRIVER=postgres.')
         }
 
-        logger.info('postgres_persistence', { detail: 'Adaptador PostgreSQL activo.' })
+        logger.info('postgres_persistence', {
+          detail: 'Adaptador PostgreSQL activo.',
+        })
 
         return createDatabase({ connectionString: config.databaseUrl })
       },
@@ -328,14 +322,6 @@ export const DATABASE = Symbol('Database')
       useFactory: (): IdGeneratorPort => new UuidGenerator(),
     },
     {
-      // `AUTHENTICATION_DRIVER` decide el adaptador, igual que
-      // `PERSISTENCE_DRIVER` decide el repositorio. `loadConfig` ya impide
-      // "fake" con NODE_ENV=production: un binario de produccion no puede
-      // aceptar cualquier cuenta sembrada en memoria como si fuera real.
-      //
-      // Con "fake", sin sembrar (`seed`), no autentica a nadie: es la raiz de
-      // composicion, no el arnes de pruebas, y aqui no hay credenciales de
-      // prueba que sembrar.
       provide: AUTHENTICATION_PROVIDER,
       useFactory: (
         config: AppConfig,
@@ -347,7 +333,9 @@ export const DATABASE = Symbol('Database')
             throw new Error('AUTHENTICATION_DRIVER=cognito exige COGNITO_USER_POOL_ID/CLIENT_ID.')
           }
 
-          logger.info('authentication_provider', { driver: 'cognito' })
+          logger.info('authentication_provider', {
+            driver: 'cognito',
+          })
 
           return new CognitoAuthenticationProvider(config.cognito)
         }
@@ -366,9 +354,6 @@ export const DATABASE = Symbol('Database')
       provide: TOKEN_VERIFIER,
       useFactory: (config: AppConfig, logger: Logger): TokenVerifierPort => {
         if (config.cognito === null) {
-          // No se devuelve un verificador que acepte cualquier cosa: sin
-          // proveedor, el guard directamente no se registra. Un verificador
-          // permisivo daria la apariencia de que hay comprobacion.
           logger.warn('authentication_disabled', {
             detail:
               'AUTH_MODE=disabled: ninguna ruta verifica quien realiza la peticion. BLOCKER de ADR-004.',
@@ -385,13 +370,6 @@ export const DATABASE = Symbol('Database')
       },
       inject: [APP_CONFIG, LOGGER],
     },
-    // El contrato interno se comprueba ANTES que la identidad de usuario: sus
-    // rutas no llevan testimonio y no tienen nada que hacer en los guards
-    // siguientes. Solo actua sobre las marcadas con `@InternalOnly()`.
-    //
-    // A diferencia de los otros dos, este se registra HAYA O NO proveedor de
-    // identidad: la proteccion del contrato interno no depende de como se
-    // autentiquen las personas.
     {
       provide: APP_GUARD,
       useFactory: (
@@ -409,9 +387,6 @@ export const DATABASE = Symbol('Database')
         }),
       inject: [APP_CONFIG, Reflector, CLOCK, LOGGER],
     },
-    // Los guards se registran de forma global SOLO cuando hay proveedor. El
-    // orden importa: JwtAuthGuard deja la identidad verificada en la peticion y
-    // RolesGuard la lee. NestJS los ejecuta en el orden de declaracion.
     {
       provide: APP_GUARD,
       useFactory: (
@@ -424,9 +399,7 @@ export const DATABASE = Symbol('Database')
       ): CanActivate =>
         config.authMode === AuthMode.Jwt
           ? new JwtAuthGuard(reflector, verifier, accounts, sanctions, clock)
-          : // Sin proveedor no se deja pasar sin mas: se atribuye la identidad
-            // anonima, para que lo que se guarde diga que nadie fue verificado.
-            new AnonymousIdentityGuard(),
+          : new AnonymousIdentityGuard(),
       inject: [
         APP_CONFIG,
         Reflector,
@@ -460,9 +433,6 @@ export const DATABASE = Symbol('Database')
       useFactory: (): ClockPort => new SystemClock(),
     },
     {
-      // El pool refleja lo que Account decide, nunca al reves. Sin proveedor
-      // configurado no hay donde reflejar -ni testimonios que puedan divergir-
-      // asi que el doble en memoria es la respuesta correcta, no un parche.
       provide: ROLE_DIRECTORY,
       useFactory: (config: AppConfig, logger: Logger): RoleDirectoryPort => {
         if (config.cognito === null) {
@@ -475,17 +445,17 @@ export const DATABASE = Symbol('Database')
           return new InMemoryRoleDirectory()
         }
 
-        logger.info('role_directory', { driver: 'cognito' })
+        logger.info('role_directory', {
+          driver: 'cognito',
+        })
 
-        return new CognitoRoleDirectory({ userPoolId: config.cognito.userPoolId })
+        return new CognitoRoleDirectory({
+          userPoolId: config.cognito.userPoolId,
+        })
       },
       inject: [APP_CONFIG, LOGGER],
     },
     {
-      // El alta de identidad ocurre detras de la UI de Web (ADR-004, "Alta
-      // server-side"): este puerto crea la identidad en Cognito y confirma su
-      // correo. Sin proveedor configurado, el doble en memoria reproduce el
-      // contrato completo -incluida la confirmacion por codigo- para desarrollo.
       provide: IDENTITY_SIGN_UP,
       useFactory: (config: AppConfig, logger: Logger): IdentitySignUpPort => {
         if (config.cognito === null) {
@@ -497,16 +467,15 @@ export const DATABASE = Symbol('Database')
           return new InMemoryIdentitySignUp()
         }
 
-        logger.info('identity_sign_up', { driver: 'cognito' })
+        logger.info('identity_sign_up', {
+          driver: 'cognito',
+        })
 
         return new CognitoIdentitySignUp(config.cognito)
       },
       inject: [APP_CONFIG, LOGGER],
     },
     {
-      // Inscripcion TOTP self-service. Actua sobre el testimonio del usuario, no
-      // sobre credenciales de AWS; sin proveedor configurado, el doble en memoria
-      // reproduce el contrato (asociar -> confirmar con codigo fijo).
       provide: TOTP_ENROLLMENT,
       useFactory: (config: AppConfig, logger: Logger): TotpEnrollmentPort => {
         if (config.cognito === null) {
@@ -518,9 +487,13 @@ export const DATABASE = Symbol('Database')
           return new InMemoryTotpEnrollment()
         }
 
-        logger.info('totp_enrollment', { driver: 'cognito' })
+        logger.info('totp_enrollment', {
+          driver: 'cognito',
+        })
 
-        return new CognitoTotpEnrollment({ userPoolId: config.cognito.userPoolId })
+        return new CognitoTotpEnrollment({
+          userPoolId: config.cognito.userPoolId,
+        })
       },
       inject: [APP_CONFIG, LOGGER],
     },
@@ -536,7 +509,9 @@ export const DATABASE = Symbol('Database')
           return new InMemoryMfaStatus()
         }
 
-        return new CognitoMfaStatus({ userPoolId: config.cognito.userPoolId })
+        return new CognitoMfaStatus({
+          userPoolId: config.cognito.userPoolId,
+        })
       },
       inject: [APP_CONFIG, LOGGER],
     },
@@ -552,14 +527,13 @@ export const DATABASE = Symbol('Database')
           return new InMemorySessionRevocation()
         }
 
-        return new CognitoSessionRevocation({ userPoolId: config.cognito.userPoolId })
+        return new CognitoSessionRevocation({
+          userPoolId: config.cognito.userPoolId,
+        })
       },
       inject: [APP_CONFIG, LOGGER],
     },
     {
-      // Cambio de contrasena self-service (HU-05). Actua sobre el testimonio del
-      // usuario, no sobre credenciales de AWS; sin proveedor configurado, el
-      // doble en memoria reproduce el contrato (actual correcta -> cambiada).
       provide: PASSWORD_CHANGE,
       useFactory: (config: AppConfig, logger: Logger): PasswordChangePort => {
         if (config.cognito === null) {
@@ -571,9 +545,13 @@ export const DATABASE = Symbol('Database')
           return new InMemoryPasswordChange()
         }
 
-        logger.info('password_change', { driver: 'cognito' })
+        logger.info('password_change', {
+          driver: 'cognito',
+        })
 
-        return new CognitoPasswordChange({ userPoolId: config.cognito.userPoolId })
+        return new CognitoPasswordChange({
+          userPoolId: config.cognito.userPoolId,
+        })
       },
       inject: [APP_CONFIG, LOGGER],
     },
@@ -582,13 +560,19 @@ export const DATABASE = Symbol('Database')
       useFactory: (
         totpEnrollment: TotpEnrollmentPort,
         accounts: AccountRepositoryPort,
-      ): EnrollTotp => new EnrollTotp({ totpEnrollment, accounts }),
+      ): EnrollTotp =>
+        new EnrollTotp({
+          totpEnrollment,
+          accounts,
+        }),
       inject: [TOTP_ENROLLMENT, ACCOUNT_REPOSITORY],
     },
     {
       provide: CONFIRM_TOTP_ENROLLMENT,
       useFactory: (totpEnrollment: TotpEnrollmentPort): ConfirmTotpEnrollment =>
-        new ConfirmTotpEnrollment({ totpEnrollment }),
+        new ConfirmTotpEnrollment({
+          totpEnrollment,
+        }),
       inject: [TOTP_ENROLLMENT],
     },
     {
@@ -633,7 +617,12 @@ export const DATABASE = Symbol('Database')
         accounts: AccountRepositoryPort,
         identitySignUp: IdentitySignUpPort,
         clock: ClockPort,
-      ): ConfirmRegistration => new ConfirmRegistration({ accounts, identitySignUp, clock }),
+      ): ConfirmRegistration =>
+        new ConfirmRegistration({
+          accounts,
+          identitySignUp,
+          clock,
+        }),
       inject: [ACCOUNT_REPOSITORY, IDENTITY_SIGN_UP, CLOCK],
     },
     {
@@ -670,6 +659,9 @@ export const DATABASE = Symbol('Database')
       ): AssignRole => new AssignRole(accounts, roleDirectory, mfaStatus),
       inject: [ACCOUNT_REPOSITORY, ROLE_DIRECTORY, MFA_STATUS],
     },
+
+    // HU-42.3:
+    // ApplySanction utiliza ahora el puerto de notificaciones ya existente.
     {
       provide: APPLY_SANCTION,
       useFactory: (
@@ -677,9 +669,11 @@ export const DATABASE = Symbol('Database')
         persistence: SanctionPersistencePort,
         ids: IdGeneratorPort,
         clock: ClockPort,
-      ): ApplySanction => new ApplySanction(accounts, persistence, ids, clock),
-      inject: [ACCOUNT_REPOSITORY, SANCTION_PERSISTENCE, ID_GENERATOR, CLOCK],
+        notifications: NotificationRequestPort,
+      ): ApplySanction => new ApplySanction(accounts, persistence, ids, clock, notifications),
+      inject: [ACCOUNT_REPOSITORY, SANCTION_PERSISTENCE, ID_GENERATOR, CLOCK, NOTIFICATION_REQUEST],
     },
+
     {
       provide: REVOKE_ROLE,
       useFactory: (
@@ -717,24 +711,30 @@ export const DATABASE = Symbol('Database')
       inject: [GET_OWN_PERSONAL_DATA, CLOCK],
     },
     {
-      // HU-45.3 (Management #135): lectura de solo API sobre el servicio
-      // publico de Player-Inventory. `null` sin configurar: la seccion se
-      // genera igual, marcada como no disponible (ver ADR-014 Decision 4).
       provide: PLAYER_INVENTORY_REPORT,
       useFactory: (config: AppConfig, logger: Logger): PlayerInventoryReportPort =>
-        new HttpPlayerInventoryReportAdapter({ baseUrl: config.playerInventoryBaseUrl, logger }),
+        new HttpPlayerInventoryReportAdapter({
+          baseUrl: config.playerInventoryBaseUrl,
+          logger,
+        }),
       inject: [APP_CONFIG, LOGGER],
     },
     {
       provide: COMMUNITY_REPORT,
       useFactory: (config: AppConfig, logger: Logger): CommunityReportPort =>
-        new HttpCommunityReportAdapter({ baseUrl: config.communityBaseUrl, logger }),
+        new HttpCommunityReportAdapter({
+          baseUrl: config.communityBaseUrl,
+          logger,
+        }),
       inject: [APP_CONFIG, LOGGER],
     },
     {
       provide: COMMERCE_REPORT,
       useFactory: (config: AppConfig, logger: Logger): CommerceReportPort =>
-        new HttpCommerceReportAdapter({ baseUrl: config.commerceBaseUrl, logger }),
+        new HttpCommerceReportAdapter({
+          baseUrl: config.commerceBaseUrl,
+          logger,
+        }),
       inject: [APP_CONFIG, LOGGER],
     },
     {
@@ -779,13 +779,18 @@ export const DATABASE = Symbol('Database')
     {
       provide: CHANGE_OWN_PASSWORD,
       useFactory: (passwords: PasswordChangePort): ChangeOwnPassword =>
-        new ChangeOwnPassword({ passwords }),
+        new ChangeOwnPassword({
+          passwords,
+        }),
       inject: [PASSWORD_CHANGE],
     },
     {
       provide: VERIFY_ACCOUNT,
       useFactory: (accounts: AccountRepositoryPort, clock: ClockPort): VerifyAccount =>
-        new VerifyAccount({ accounts, clock }),
+        new VerifyAccount({
+          accounts,
+          clock,
+        }),
       inject: [ACCOUNT_REPOSITORY, CLOCK],
     },
     {
@@ -832,7 +837,6 @@ export const DATABASE = Symbol('Database')
       ],
     },
     {
-      // La evidencia acompana a la cuenta: mismo motor, misma transaccionalidad.
       provide: MFA_EVIDENCE_REPOSITORY,
       useFactory: (db: Kysely<Database> | null): MfaEvidenceRepositoryPort =>
         db === null ? new InMemoryMfaEvidenceRepository() : new PostgresMfaEvidenceRepository(db),
@@ -841,7 +845,10 @@ export const DATABASE = Symbol('Database')
     {
       provide: VERIFY_MFA_EVIDENCE,
       useFactory: (mfaEvidence: MfaEvidenceRepositoryPort, clock: ClockPort): VerifyMfaEvidence =>
-        new VerifyMfaEvidence({ mfaEvidence, clock }),
+        new VerifyMfaEvidence({
+          mfaEvidence,
+          clock,
+        }),
       inject: [MFA_EVIDENCE_REPOSITORY, CLOCK],
     },
     {
@@ -849,7 +856,11 @@ export const DATABASE = Symbol('Database')
       useFactory: (
         accounts: AccountRepositoryPort,
         authenticationProvider: AuthenticationProviderPort,
-      ): ChooseSecondFactor => new ChooseSecondFactor({ accounts, authenticationProvider }),
+      ): ChooseSecondFactor =>
+        new ChooseSecondFactor({
+          accounts,
+          authenticationProvider,
+        }),
       inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER],
     },
     {
@@ -861,9 +872,6 @@ export const DATABASE = Symbol('Database')
       inject: [DATABASE],
     },
     {
-      // HU-43.1 (Management #303): persistencia de la solicitud durable,
-      // con el mismo `PERSISTENCE_DRIVER` que el resto de repositorios. Ver
-      // ADR-014 Decision 5 y EN-011 (Management #197).
       provide: ACCOUNT_DELETION_REQUEST_REPOSITORY,
       useFactory: (db: Kysely<Database> | null): AccountDeletionRequestRepositoryPort =>
         db === null
@@ -872,9 +880,6 @@ export const DATABASE = Symbol('Database')
       inject: [DATABASE],
     },
     {
-      // HU-43.2 (Management #304): solicitud segura + confirmacion de
-      // recepcion, sobre la persistencia de HU-43.1. Sigue sin ejecutar el
-      // tratamiento de datos personales ni cerrar la solicitud.
       provide: REQUEST_ACCOUNT_DELETION,
       useFactory: (
         accounts: AccountRepositoryPort,
@@ -882,13 +887,15 @@ export const DATABASE = Symbol('Database')
         clock: ClockPort,
         ids: IdGeneratorPort,
       ): RequestAccountDeletion =>
-        new RequestAccountDeletion({ accounts, deletionRequests, clock, ids }),
+        new RequestAccountDeletion({
+          accounts,
+          deletionRequests,
+          clock,
+          ids,
+        }),
       inject: [ACCOUNT_REPOSITORY, ACCOUNT_DELETION_REQUEST_REPOSITORY, CLOCK, ID_GENERATOR],
     },
     {
-      // HU-43.3 (Management #305): tratamiento durable de datos personales y
-      // cierre. Sin ruta HTTP: lo invoca unicamente
-      // `AccountDeletionProcessingScheduler`.
       provide: PROCESS_ACCOUNT_DELETION,
       useFactory: (
         accounts: AccountRepositoryPort,
@@ -916,12 +923,6 @@ export const DATABASE = Symbol('Database')
       ],
     },
     {
-      // Arranca (o no) segun `ACCOUNT_DELETION_PROCESSING_ENABLED`. Es un
-      // provider mas de la raiz de composicion: Nest invoca sus ganchos de
-      // ciclo de vida (`onModuleInit`/`onModuleDestroy`) sobre CUALQUIER
-      // instancia de provider que los implemente, sin exigir `@Injectable()`
-      // ni una clase registrada de otra forma -mismo patron de clase plana
-      // que el resto de casos de uso de este modulo.
       provide: AccountDeletionProcessingScheduler,
       useFactory: (
         config: AppConfig,
@@ -939,10 +940,6 @@ export const DATABASE = Symbol('Database')
       inject: [APP_CONFIG, ACCOUNT_DELETION_REQUEST_REPOSITORY, PROCESS_ACCOUNT_DELETION, LOGGER],
     },
     {
-      // Con proveedor de identidad real, el codigo debe ser impredecible
-      // (`RandomRecoveryOtp`): uno fijo en produccion seria adivinable por
-      // construccion. Sin proveedor configurado se mantiene el fijo `000000`,
-      // igual que la confirmacion de HU-01.
       provide: RECOVERY_OTP,
       useFactory: (config: AppConfig, logger: Logger): RecoveryOtpPort => {
         if (config.cognito === null) {
@@ -954,7 +951,9 @@ export const DATABASE = Symbol('Database')
           return new FixedRecoveryOtp()
         }
 
-        logger.info('recovery_otp', { driver: 'aleatorio' })
+        logger.info('recovery_otp', {
+          driver: 'aleatorio',
+        })
 
         return new RandomRecoveryOtp()
       },
@@ -978,11 +977,18 @@ export const DATABASE = Symbol('Database')
           })
 
           return {
-            setPassword: (): Promise<{ kind: 'failed' }> => Promise.resolve({ kind: 'failed' }),
+            setPassword: (): Promise<{
+              kind: 'failed'
+            }> =>
+              Promise.resolve({
+                kind: 'failed',
+              }),
           }
         }
 
-        logger.info('identity_password_reset', { driver: 'cognito' })
+        logger.info('identity_password_reset', {
+          driver: 'cognito',
+        })
 
         return new CognitoIdentityPasswordReset({
           userPoolId: config.cognito.userPoolId,
@@ -1000,7 +1006,13 @@ export const DATABASE = Symbol('Database')
         ids: IdGeneratorPort,
         clock: ClockPort,
       ): StartPasswordRecovery =>
-        new StartPasswordRecovery({ accounts, challenges, questions, ids, clock }),
+        new StartPasswordRecovery({
+          accounts,
+          challenges,
+          questions,
+          ids,
+          clock,
+        }),
       inject: [
         ACCOUNT_REPOSITORY,
         RECOVERY_CHALLENGE_REPOSITORY,
@@ -1018,7 +1030,13 @@ export const DATABASE = Symbol('Database')
         notifications: NotificationRequestPort,
         logger: Logger,
       ): VerifyRecoveryAnswers =>
-        new VerifyRecoveryAnswers({ accounts, challenges, otp, notifications, logger }),
+        new VerifyRecoveryAnswers({
+          accounts,
+          challenges,
+          otp,
+          notifications,
+          logger,
+        }),
       inject: [
         ACCOUNT_REPOSITORY,
         RECOVERY_CHALLENGE_REPOSITORY,
@@ -1040,7 +1058,11 @@ export const DATABASE = Symbol('Database')
         passwords: IdentityPasswordResetPort,
         notifications: NotificationRequestPort,
       ): ResetRecoveryPassword =>
-        new ResetRecoveryPassword({ challenges, passwords, notifications }),
+        new ResetRecoveryPassword({
+          challenges,
+          passwords,
+          notifications,
+        }),
       inject: [RECOVERY_CHALLENGE_REPOSITORY, IDENTITY_PASSWORD_RESET, NOTIFICATION_REQUEST],
     },
     {
@@ -1052,8 +1074,6 @@ export const DATABASE = Symbol('Database')
     {
       provide: READINESS_CHECKS,
       useFactory: (accounts: AccountRepositoryPort): readonly ReadinessCheck[] => [
-        // La comprobacion ejercita el repositorio de verdad: si el almacen no
-        // responde, la sonda falla. No se declara `ok` de forma incondicional.
         {
           name: 'accounts-repository',
           check: (): boolean => typeof accounts.existsByEmail === 'function',

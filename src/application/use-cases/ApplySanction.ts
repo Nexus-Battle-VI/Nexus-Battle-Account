@@ -2,6 +2,7 @@ import { AccountNotFoundError } from '../errors/ApplicationError'
 import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
 import type { ClockPort } from '../ports/ClockPort'
 import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
+import type { NotificationRequestPort } from '../ports/NotificationRequestPort'
 import type { SanctionPersistencePort } from '../ports/SanctionPersistencePort'
 import { Sanction } from '../../domain/entities/Sanction'
 import {
@@ -12,12 +13,17 @@ import { SanctionPolicy } from '../../domain/policies/SanctionPolicy'
 import { DomainError } from '../../domain/errors/DomainError'
 import { AccountId } from '../../domain/value-objects/AccountId'
 
+const SANCTION_NOTIFICATION_TEMPLATE = 'account-sanction-applied'
+
+const APPEAL_WINDOW_DAYS = 30
+
 export class ApplySanction {
   constructor(
     private readonly accounts: AccountRepositoryPort,
     private readonly persistence: SanctionPersistencePort,
     private readonly ids: IdGeneratorPort,
     private readonly clock: ClockPort,
+    private readonly notifications: NotificationRequestPort,
   ) {}
 
   async execute(command: {
@@ -49,6 +55,7 @@ export class ApplySanction {
     }
 
     const createdAt = this.clock.now()
+
     let expiresAt: Date | null = null
 
     if (command.type === SanctionType.TemporarySuspension) {
@@ -91,6 +98,22 @@ export class ApplySanction {
     }
 
     await this.persistence.saveAppliedSanction(sanction, target, accountStatusChanged)
+
+    await this.notifications.request({
+      notificationId: `sanction-${sanction.id}`,
+      recipient: target.currentEmail.value,
+      templateId: SANCTION_NOTIFICATION_TEMPLATE,
+      variables: {
+        displayName: target.currentDisplayName.value,
+        sanctionId: sanction.id,
+        sanctionType: sanction.type,
+        reason: sanction.reason,
+        appliedAt: sanction.createdAt.toISOString(),
+        appealDeadline: sanction.appealDeadline.toISOString(),
+        appealWindowDays: APPEAL_WINDOW_DAYS,
+        expiresAt: sanction.expiresAt?.toISOString() ?? '',
+      },
+    })
 
     return sanction
   }

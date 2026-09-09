@@ -58,4 +58,11 @@ export class SanctionResponse {
       'Fecha de finalizacion de una suspension temporal. Es null para advertencias y baneos.',
   })
   readonly expiresAt!: Date | null
+
+  @ApiProperty({
+    description:
+      'Fecha limite hasta la cual el usuario sancionado puede ejercer la opcion de apelacion. Corresponde a 30 dias desde la aplicacion de la sancion.',
+    example: '2026-10-06T12:00:00.000Z',
+  })
+  readonly appealDeadline!: Date
 }

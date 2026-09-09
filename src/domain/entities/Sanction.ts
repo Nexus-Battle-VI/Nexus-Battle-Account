@@ -1,6 +1,9 @@
 import { DomainError } from '../errors/DomainError'
 import { SanctionType, type SanctionType as SanctionTypeValue } from './SanctionType'
 
+const APPEAL_WINDOW_DAYS = 30
+const APPEAL_WINDOW_MS = APPEAL_WINDOW_DAYS * 24 * 60 * 60 * 1000
+
 export interface SanctionSnapshot {
   readonly id: string
   readonly targetAccountId: string
@@ -9,7 +12,10 @@ export interface SanctionSnapshot {
   readonly reason: string
   readonly createdAt: Date
   readonly expiresAt: Date | null
+  readonly appealDeadline: Date
 }
+
+export type PersistedSanctionSnapshot = Omit<SanctionSnapshot, 'appealDeadline'>
 
 export class Sanction {
   private constructor(
@@ -76,7 +82,7 @@ export class Sanction {
     )
   }
 
-  static restore(snapshot: SanctionSnapshot): Sanction {
+  static restore(snapshot: PersistedSanctionSnapshot): Sanction {
     return new Sanction(
       snapshot.id,
       snapshot.targetAccountId,
@@ -90,6 +96,16 @@ export class Sanction {
 
   get isTemporary(): boolean {
     return this.type === SanctionType.TemporarySuspension
+  }
+
+  get appealDeadline(): Date {
+    return new Date(this.createdAt.getTime() + APPEAL_WINDOW_MS)
+  }
+
+  canAppeal(at: Date): boolean {
+    const timestamp = at.getTime()
+
+    return timestamp >= this.createdAt.getTime() && timestamp <= this.appealDeadline.getTime()
   }
 
   isExpired(at: Date): boolean {
@@ -109,6 +125,7 @@ export class Sanction {
       reason: this.reason,
       createdAt: this.createdAt,
       expiresAt: this.expiresAt,
+      appealDeadline: this.appealDeadline,
     }
   }
 }
