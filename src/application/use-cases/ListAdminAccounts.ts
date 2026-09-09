@@ -45,12 +45,9 @@ const cloneSummary = (item: AdminAccountSummaryDto): AdminAccountSummaryDto => (
   roles: [...item.roles],
 })
 
-const countStatuses = (
-  items: readonly AdminAccountSummaryDto[],
-): AdminAccountStatusCountsDto => ({
-  pendingVerification: items.filter(
-    (item) => item.status === AccountStatus.PendingVerification,
-  ).length,
+const countStatuses = (items: readonly AdminAccountSummaryDto[]): AdminAccountStatusCountsDto => ({
+  pendingVerification: items.filter((item) => item.status === AccountStatus.PendingVerification)
+    .length,
   active: items.filter((item) => item.status === AccountStatus.Active).length,
   suspended: items.filter((item) => item.status === AccountStatus.Suspended).length,
   banned: items.filter((item) => item.status === AccountStatus.Banned).length,

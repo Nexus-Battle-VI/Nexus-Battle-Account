@@ -21,10 +21,7 @@ import {
   SANCTION_REPOSITORY,
   type SanctionRepositoryPort,
 } from '../../../../application/ports/SanctionRepositoryPort'
-import {
-  CLOCK,
-  type ClockPort,
-} from '../../../../application/ports/ClockPort'
+import { CLOCK, type ClockPort } from '../../../../application/ports/ClockPort'
 import { AccountStatus } from '../../../../domain/entities/AccountStatus'
 import { IS_PUBLIC, type RequestWithIdentity } from './decorators'
 

@@ -264,10 +264,7 @@ describe('Account', () => {
     account.suspend()
 
     expect(() => {
-      account.changeEmail(
-        EmailAddress.create('nuevo@nexus.test'),
-        AT,
-      )
+      account.changeEmail(EmailAddress.create('nuevo@nexus.test'), AT)
     }).toThrow(/suspendida/)
 
     expect(account.currentStatus).toBe(AccountStatus.Suspended)
@@ -280,10 +277,7 @@ describe('Account', () => {
     account.ban()
 
     expect(() => {
-      account.changeEmail(
-        EmailAddress.create('nuevo@nexus.test'),
-        AT,
-      )
+      account.changeEmail(EmailAddress.create('nuevo@nexus.test'), AT)
     }).toThrow(/baneada/)
 
     expect(account.currentStatus).toBe(AccountStatus.Banned)

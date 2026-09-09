@@ -747,9 +747,7 @@ describe('LoginAccount', () => {
       }),
     ).resolves.toEqual({ kind: 'invalidCredentials' })
 
-    const persisted = await harness.accounts.findByEmail(
-      EmailAddress.create('jugador@nexus.test'),
-    )
+    const persisted = await harness.accounts.findByEmail(EmailAddress.create('jugador@nexus.test'))
 
     expect(persisted?.currentStatus).toBe(AccountStatus.Suspended)
   })
@@ -789,9 +787,7 @@ describe('LoginAccount', () => {
       }),
     ).resolves.toMatchObject({ kind: 'authenticated' })
 
-    const persisted = await harness.accounts.findByEmail(
-      EmailAddress.create('jugador@nexus.test'),
-    )
+    const persisted = await harness.accounts.findByEmail(EmailAddress.create('jugador@nexus.test'))
 
     expect(persisted?.currentStatus).toBe(AccountStatus.Active)
     expect(persisted?.canAuthenticate).toBe(true)
@@ -820,9 +816,7 @@ describe('LoginAccount', () => {
       }),
     ).resolves.toEqual({ kind: 'invalidCredentials' })
 
-    const persisted = await harness.accounts.findByEmail(
-      EmailAddress.create('jugador@nexus.test'),
-    )
+    const persisted = await harness.accounts.findByEmail(EmailAddress.create('jugador@nexus.test'))
 
     expect(persisted?.currentStatus).toBe(AccountStatus.Banned)
     expect(persisted?.canAuthenticate).toBe(false)

@@ -11,10 +11,7 @@ export class InMemorySanctionRepository implements SanctionRepositoryPort {
     return Promise.resolve()
   }
 
-  findActiveTemporarySuspension(
-    targetAccountId: string,
-    at: Date,
-  ): Promise<Sanction | null> {
+  findActiveTemporarySuspension(targetAccountId: string, at: Date): Promise<Sanction | null> {
     const suspension = [...this.sanctions.values()]
       .filter(
         (sanction) =>

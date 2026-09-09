@@ -423,13 +423,7 @@ export const DATABASE = Symbol('Database')
         clock: ClockPort,
       ): CanActivate =>
         config.authMode === AuthMode.Jwt
-          ? new JwtAuthGuard(
-              reflector,
-              verifier,
-              accounts,
-              sanctions,
-              clock,
-            )
+          ? new JwtAuthGuard(reflector, verifier, accounts, sanctions, clock)
           : // Sin proveedor no se deja pasar sin mas: se atribuye la identidad
             // anonima, para que lo que se guarde diga que nadie fue verificado.
             new AnonymousIdentityGuard(),
@@ -683,19 +677,8 @@ export const DATABASE = Symbol('Database')
         persistence: SanctionPersistencePort,
         ids: IdGeneratorPort,
         clock: ClockPort,
-      ): ApplySanction =>
-        new ApplySanction(
-          accounts,
-          persistence,
-          ids,
-          clock,
-        ),
-      inject: [
-        ACCOUNT_REPOSITORY,
-        SANCTION_PERSISTENCE,
-        ID_GENERATOR,
-        CLOCK,
-      ],
+      ): ApplySanction => new ApplySanction(accounts, persistence, ids, clock),
+      inject: [ACCOUNT_REPOSITORY, SANCTION_PERSISTENCE, ID_GENERATOR, CLOCK],
     },
     {
       provide: REVOKE_ROLE,
@@ -819,12 +802,7 @@ export const DATABASE = Symbol('Database')
           sanctions,
           clock,
         }),
-      inject: [
-        ACCOUNT_REPOSITORY,
-        AUTHENTICATION_PROVIDER,
-        SANCTION_REPOSITORY,
-        CLOCK,
-      ],
+      inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER, SANCTION_REPOSITORY, CLOCK],
     },
     {
       provide: COMPLETE_SECOND_FACTOR,

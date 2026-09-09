@@ -16,10 +16,7 @@ const TARGET_ID = AccountId.create('target-1')
 const buildHarness = () => {
   const accounts = new InMemoryAccountRepository()
   const sanctions = new InMemorySanctionRepository()
-  const persistence = new InMemorySanctionPersistence(
-    accounts,
-    sanctions,
-  )
+  const persistence = new InMemorySanctionPersistence(accounts, sanctions)
 
   let counter = 0
 
@@ -40,12 +37,7 @@ const buildHarness = () => {
     sanctions,
     persistence,
     clock,
-    applySanction: new ApplySanction(
-      accounts,
-      persistence,
-      ids,
-      clock,
-    ),
+    applySanction: new ApplySanction(accounts, persistence, ids, clock),
   }
 }
 
@@ -78,10 +70,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
   it('permite a un moderador registrar una advertencia sin restringir el acceso', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.Moderator],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
 
     const sanction = await harness.applySanction.execute({
       actorSubject: 'actor-subject',
@@ -99,17 +88,11 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       expiresAt: null,
     })
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(1)
+    expect(harness.sanctions.findAll()).toHaveLength(1)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Active,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Active)
 
     expect(target?.canAuthenticate).toBe(true)
   })
@@ -117,10 +100,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
   it('permite a un moderador registrar una suspension temporal y restringe el acceso', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.Moderator],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
 
     const sanction = await harness.applySanction.execute({
       actorSubject: 'actor-subject',
@@ -130,27 +110,15 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       suspensionDurationMinutes: 60,
     })
 
-    expect(sanction.type).toBe(
-      SanctionType.TemporarySuspension,
-    )
+    expect(sanction.type).toBe(SanctionType.TemporarySuspension)
 
-    expect(
-      sanction.toSnapshot().expiresAt,
-    ).toEqual(
-      new Date('2026-09-06T13:00:00.000Z'),
-    )
+    expect(sanction.toSnapshot().expiresAt).toEqual(new Date('2026-09-06T13:00:00.000Z'))
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(1)
+    expect(harness.sanctions.findAll()).toHaveLength(1)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Suspended,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Suspended)
 
     expect(target?.canAuthenticate).toBe(false)
   })
@@ -158,10 +126,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
   it('permite configurar la duracion de una suspension temporal', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.Moderator],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
 
     const sanction = await harness.applySanction.execute({
       actorSubject: 'actor-subject',
@@ -171,20 +136,13 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       suspensionDurationMinutes: 90,
     })
 
-    expect(
-      sanction.toSnapshot().expiresAt,
-    ).toEqual(
-      new Date('2026-09-06T13:30:00.000Z'),
-    )
+    expect(sanction.toSnapshot().expiresAt).toEqual(new Date('2026-09-06T13:30:00.000Z'))
   })
 
   it('rechaza una suspension temporal sin duracion y no restringe el acceso', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.Moderator],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
 
     await expect(
       harness.applySanction.execute({
@@ -195,17 +153,11 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(0)
+    expect(harness.sanctions.findAll()).toHaveLength(0)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Active,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Active)
 
     expect(target?.canAuthenticate).toBe(true)
   })
@@ -213,10 +165,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
   it('rechaza una duracion invalida de suspension y no restringe el acceso', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.Moderator],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
 
     await expect(
       harness.applySanction.execute({
@@ -228,17 +177,11 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(0)
+    expect(harness.sanctions.findAll()).toHaveLength(0)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Active,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Active)
 
     expect(target?.canAuthenticate).toBe(true)
   })
@@ -246,10 +189,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
   it('rechaza que una advertencia reciba duracion de suspension', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.Moderator],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
 
     await expect(
       harness.applySanction.execute({
@@ -261,17 +201,11 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(0)
+    expect(harness.sanctions.findAll()).toHaveLength(0)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Active,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Active)
 
     expect(target?.canAuthenticate).toBe(true)
   })
@@ -279,10 +213,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
   it('rechaza que un moderador aplique un baneo permanente y no altera el acceso', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.Moderator],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
 
     await expect(
       harness.applySanction.execute({
@@ -293,17 +224,11 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(0)
+    expect(harness.sanctions.findAll()).toHaveLength(0)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Active,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Active)
 
     expect(target?.canAuthenticate).toBe(true)
   })
@@ -311,10 +236,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
   it('permite a un administrador aplicar un baneo permanente y restringe definitivamente el acceso', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.Administrator],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.Administrator])
 
     const sanction = await harness.applySanction.execute({
       actorSubject: 'actor-subject',
@@ -323,25 +245,15 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       reason: 'Incumplimiento grave y reiterado.',
     })
 
-    expect(sanction.type).toBe(
-      SanctionType.PermanentBan,
-    )
+    expect(sanction.type).toBe(SanctionType.PermanentBan)
 
-    expect(
-      sanction.toSnapshot().expiresAt,
-    ).toBeNull()
+    expect(sanction.toSnapshot().expiresAt).toBeNull()
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(1)
+    expect(harness.sanctions.findAll()).toHaveLength(1)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Banned,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Banned)
 
     expect(target?.canAuthenticate).toBe(false)
   })
@@ -349,10 +261,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
   it('permite a un super administrador aplicar un baneo permanente', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.SuperAdministrator],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.SuperAdministrator])
 
     const sanction = await harness.applySanction.execute({
       actorSubject: 'actor-subject',
@@ -361,17 +270,11 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       reason: 'Violacion grave de las reglas.',
     })
 
-    expect(sanction.type).toBe(
-      SanctionType.PermanentBan,
-    )
+    expect(sanction.type).toBe(SanctionType.PermanentBan)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Banned,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Banned)
 
     expect(target?.canAuthenticate).toBe(false)
   })
@@ -379,10 +282,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
   it('rechaza sanciones aplicadas por un jugador y mantiene la cuenta activa', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.Player],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.Player])
 
     await expect(
       harness.applySanction.execute({
@@ -393,17 +293,11 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(0)
+    expect(harness.sanctions.findAll()).toHaveLength(0)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Active,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Active)
 
     expect(target?.canAuthenticate).toBe(true)
   })
@@ -427,21 +321,13 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
         type: SanctionType.Warning,
         reason: 'Motivo de prueba.',
       }),
-    ).rejects.toBeInstanceOf(
-      AccountNotFoundError,
-    )
+    ).rejects.toBeInstanceOf(AccountNotFoundError)
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(0)
+    expect(harness.sanctions.findAll()).toHaveLength(0)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Active,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Active)
   })
 
   it('rechaza una sancion cuando el usuario objetivo no existe', async () => {
@@ -463,22 +349,15 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
         type: SanctionType.Warning,
         reason: 'Motivo de prueba.',
       }),
-    ).rejects.toBeInstanceOf(
-      AccountNotFoundError,
-    )
+    ).rejects.toBeInstanceOf(AccountNotFoundError)
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(0)
+    expect(harness.sanctions.findAll()).toHaveLength(0)
   })
 
   it('rechaza una causal vacia y no deja registros parciales', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(
-      harness.accounts,
-      [Role.Moderator],
-    )
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
 
     await expect(
       harness.applySanction.execute({
@@ -489,17 +368,11 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
-    expect(
-      harness.sanctions.findAll(),
-    ).toHaveLength(0)
+    expect(harness.sanctions.findAll()).toHaveLength(0)
 
-    const target = await harness.accounts.findById(
-      TARGET_ID,
-    )
+    const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(
-      AccountStatus.Active,
-    )
+    expect(target?.currentStatus).toBe(AccountStatus.Active)
 
     expect(target?.canAuthenticate).toBe(true)
   })

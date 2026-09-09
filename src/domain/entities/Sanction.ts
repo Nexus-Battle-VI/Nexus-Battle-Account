@@ -51,9 +51,7 @@ export class Sanction {
 
     if (params.type === SanctionType.TemporarySuspension) {
       if (expiresAt === null) {
-        throw new DomainError(
-          'Una suspension temporal debe indicar su fecha de finalizacion.',
-        )
+        throw new DomainError('Una suspension temporal debe indicar su fecha de finalizacion.')
       }
 
       if (expiresAt.getTime() <= params.createdAt.getTime()) {
@@ -63,13 +61,8 @@ export class Sanction {
       }
     }
 
-    if (
-      params.type !== SanctionType.TemporarySuspension &&
-      expiresAt !== null
-    ) {
-      throw new DomainError(
-        'Solo una suspension temporal puede tener fecha de finalizacion.',
-      )
+    if (params.type !== SanctionType.TemporarySuspension && expiresAt !== null) {
+      throw new DomainError('Solo una suspension temporal puede tener fecha de finalizacion.')
     }
 
     return new Sanction(

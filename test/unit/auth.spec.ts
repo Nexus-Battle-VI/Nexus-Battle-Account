@@ -117,10 +117,7 @@ describe('JwtAuthGuard', () => {
 
   const verifier = (impl: TokenVerifierPort['verify']): TokenVerifierPort => ({ verify: impl })
 
-  const buildGuard = async (
-    reflector: Reflector,
-    tokenVerifier: TokenVerifierPort,
-  ) => {
+  const buildGuard = async (reflector: Reflector, tokenVerifier: TokenVerifierPort) => {
     const accounts = new InMemoryAccountRepository()
     const sanctions = new InMemorySanctionRepository()
 
@@ -137,13 +134,9 @@ describe('JwtAuthGuard', () => {
     return {
       accounts,
       sanctions,
-      guard: new JwtAuthGuard(
-        reflector,
-        tokenVerifier,
-        accounts,
-        sanctions,
-        { now: (): Date => NOW },
-      ),
+      guard: new JwtAuthGuard(reflector, tokenVerifier, accounts, sanctions, {
+        now: (): Date => NOW,
+      }),
     }
   }
 

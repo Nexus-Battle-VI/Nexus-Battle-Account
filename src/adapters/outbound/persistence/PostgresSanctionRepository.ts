@@ -25,10 +25,7 @@ export class PostgresSanctionRepository implements SanctionRepositoryPort {
       .execute()
   }
 
-  async findActiveTemporarySuspension(
-    targetAccountId: string,
-    at: Date,
-  ): Promise<Sanction | null> {
+  async findActiveTemporarySuspension(targetAccountId: string, at: Date): Promise<Sanction | null> {
     const row = await this.db
       .selectFrom('sanctions')
       .select([

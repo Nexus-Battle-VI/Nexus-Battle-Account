@@ -36,9 +36,7 @@ export class ApplySanction {
       )
     }
 
-    const target = await this.accounts.findById(
-      AccountId.create(command.targetAccountId),
-    )
+    const target = await this.accounts.findById(AccountId.create(command.targetAccountId))
 
     if (target === null) {
       throw new AccountNotFoundError(command.targetAccountId)
@@ -56,14 +54,8 @@ export class ApplySanction {
     if (command.type === SanctionType.TemporarySuspension) {
       const duration = command.suspensionDurationMinutes
 
-      if (
-        duration === undefined ||
-        !Number.isInteger(duration) ||
-        duration <= 0
-      ) {
-        throw new DomainError(
-          'La suspension temporal debe indicar una duracion valida en minutos.',
-        )
+      if (duration === undefined || !Number.isInteger(duration) || duration <= 0) {
+        throw new DomainError('La suspension temporal debe indicar una duracion valida en minutos.')
       }
 
       expiresAt = new Date(createdAt.getTime() + duration * 60_000)
@@ -73,9 +65,7 @@ export class ApplySanction {
       command.type !== SanctionType.TemporarySuspension &&
       command.suspensionDurationMinutes !== undefined
     ) {
-      throw new DomainError(
-        'Solo una suspension temporal puede indicar una duracion.',
-      )
+      throw new DomainError('Solo una suspension temporal puede indicar una duracion.')
     }
 
     const sanction = Sanction.create({
@@ -100,11 +90,7 @@ export class ApplySanction {
       accountStatusChanged = true
     }
 
-    await this.persistence.saveAppliedSanction(
-      sanction,
-      target,
-      accountStatusChanged,
-    )
+    await this.persistence.saveAppliedSanction(sanction, target, accountStatusChanged)
 
     return sanction
   }

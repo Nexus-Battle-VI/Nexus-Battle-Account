@@ -324,9 +324,7 @@ export class Account {
     }
 
     if (this.status === AccountStatus.Banned) {
-      throw new DomainError(
-        `La cuenta ${this.id.value} esta baneada y no puede cambiar su correo.`,
-      )
+      throw new DomainError(`La cuenta ${this.id.value} esta baneada y no puede cambiar su correo.`)
     }
 
     if (this.email.equals(email)) {

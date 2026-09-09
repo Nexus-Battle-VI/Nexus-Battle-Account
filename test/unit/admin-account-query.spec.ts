@@ -196,12 +196,7 @@ describe('ListAdminAccounts', () => {
   it.each([
     [
       Role.Player,
-      [
-        'acc-admin-active',
-        'acc-moderator-suspended',
-        'acc-player-banned',
-        'acc-player-pending',
-      ],
+      ['acc-admin-active', 'acc-moderator-suspended', 'acc-player-banned', 'acc-player-pending'],
     ],
     [Role.Moderator, ['acc-moderator-suspended']],
     [Role.Administrator, ['acc-admin-active']],
@@ -342,10 +337,12 @@ describe('ListAdminAccounts', () => {
     account.grantRole(Role.Moderator, new Set([Role.SuperAdministrator]))
 
     expect(
-      (await useCase.execute({
-        id: ADMIN_ACTIVE.id,
-        role: Role.Moderator,
-      })).items,
+      (
+        await useCase.execute({
+          id: ADMIN_ACTIVE.id,
+          role: Role.Moderator,
+        })
+      ).items,
     ).toEqual([])
 
     const firstRead = await useCase.execute({ id: ADMIN_ACTIVE.id })
@@ -354,10 +351,7 @@ describe('ListAdminAccounts', () => {
 
     const secondRead = await useCase.execute({ id: ADMIN_ACTIVE.id })
 
-    expect(secondRead.items[0]?.roles).toEqual([
-      Role.Player,
-      Role.Administrator,
-    ])
+    expect(secondRead.items[0]?.roles).toEqual([Role.Player, Role.Administrator])
   })
 
   it('valida criterios mediante los value objects existentes', async () => {

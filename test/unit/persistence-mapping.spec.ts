@@ -67,15 +67,13 @@ describe('Traduccion entre fila e instantanea', () => {
    * peor que fallar al leerlo.
    */
   it('rechaza un estado que el dominio no reconoce', () => {
-    expect(() =>
-      toSnapshot({ ...ROW, status: 'BORRADO' }, [Role.Player]),
-    ).toThrow(PersistenceMappingError)
+    expect(() => toSnapshot({ ...ROW, status: 'BORRADO' }, [Role.Player])).toThrow(
+      PersistenceMappingError,
+    )
   })
 
   it('rechaza un rol que el dominio no reconoce', () => {
-    expect(() =>
-      toSnapshot(ROW, [Role.Player, 'SUPERUSUARIO']),
-    ).toThrow(PersistenceMappingError)
+    expect(() => toSnapshot(ROW, [Role.Player, 'SUPERUSUARIO'])).toThrow(PersistenceMappingError)
   })
 
   /**
@@ -112,74 +110,46 @@ describe('Traduccion entre fila e instantanea', () => {
 describe('El vocabulario del dominio y el de la migracion no divergen', () => {
   const sqlDeLaMigracionInicial = up.toString()
 
-  const sqlDelVocabularioDeEstados =
-    up.toString() + upAccountBanStatus.toString()
+  const sqlDelVocabularioDeEstados = up.toString() + upAccountBanStatus.toString()
 
-  const sqlDelVocabularioDeRoles =
-    up.toString() + upSuperAdministratorRole.toString()
+  const sqlDelVocabularioDeRoles = up.toString() + upSuperAdministratorRole.toString()
 
-  it.each(Object.values(AccountStatus))(
-    'la union de migraciones admite el estado %s',
-    (status) => {
-      expect(sqlDelVocabularioDeEstados).toContain(`'${status}'`)
-    },
-  )
+  it.each(Object.values(AccountStatus))('la union de migraciones admite el estado %s', (status) => {
+    expect(sqlDelVocabularioDeEstados).toContain(`'${status}'`)
+  })
 
-  it.each(ALL_ROLES)(
-    'la union de migraciones admite el rol %s',
-    (role) => {
-      expect(sqlDelVocabularioDeRoles).toContain(`'${role}'`)
-    },
-  )
+  it.each(ALL_ROLES)('la union de migraciones admite el rol %s', (role) => {
+    expect(sqlDelVocabularioDeRoles).toContain(`'${role}'`)
+  })
 
   it('la migracion inicial no admite valores que el dominio desconoce', () => {
-    const enLaRestriccion = [
-      ...sqlDeLaMigracionInicial.matchAll(/'([A-Z_]{3,})'/g),
-    ].map((match) => match[1]!)
+    const enLaRestriccion = [...sqlDeLaMigracionInicial.matchAll(/'([A-Z_]{3,})'/g)].map(
+      (match) => match[1]!,
+    )
 
-    const conocidos: readonly string[] = [
-      ...Object.values(AccountStatus),
-      ...ALL_ROLES,
-    ]
+    const conocidos: readonly string[] = [...Object.values(AccountStatus), ...ALL_ROLES]
 
-    expect(
-      enLaRestriccion.filter(
-        (value) => !conocidos.includes(value),
-      ),
-    ).toEqual([])
+    expect(enLaRestriccion.filter((value) => !conocidos.includes(value))).toEqual([])
   })
 
   it('la migracion de SUPER_ADMINISTRATOR no admite valores que el dominio desconoce', () => {
     const enLaRestriccion = [
-      ...upSuperAdministratorRole
-        .toString()
-        .matchAll(/'([A-Z_]{3,})'/g),
+      ...upSuperAdministratorRole.toString().matchAll(/'([A-Z_]{3,})'/g),
     ].map((match) => match[1]!)
 
     expect(
-      enLaRestriccion.filter(
-        (value) =>
-          !(ALL_ROLES as readonly string[]).includes(value),
-      ),
+      enLaRestriccion.filter((value) => !(ALL_ROLES as readonly string[]).includes(value)),
     ).toEqual([])
   })
 
   it('la migracion de BANNED no admite estados que el dominio desconoce', () => {
-    const enLaRestriccion = [
-      ...upAccountBanStatus
-        .toString()
-        .matchAll(/'([A-Z_]{3,})'/g),
-    ].map((match) => match[1]!)
+    const enLaRestriccion = [...upAccountBanStatus.toString().matchAll(/'([A-Z_]{3,})'/g)].map(
+      (match) => match[1]!,
+    )
 
-    const estadosConocidos = Object.values(
-      AccountStatus,
-    ) as readonly string[]
+    const estadosConocidos = Object.values(AccountStatus) as readonly string[]
 
-    expect(
-      enLaRestriccion.filter(
-        (value) => !estadosConocidos.includes(value),
-      ),
-    ).toEqual([])
+    expect(enLaRestriccion.filter((value) => !estadosConocidos.includes(value))).toEqual([])
   })
 })
 
@@ -213,8 +183,6 @@ describe('describeError', () => {
     const circular: Record<string, unknown> = {}
     circular.yo = circular
 
-    expect(describeError(circular)).toBe(
-      'error no serializable',
-    )
+    expect(describeError(circular)).toBe('error no serializable')
   })
 })

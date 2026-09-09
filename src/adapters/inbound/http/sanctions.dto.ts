@@ -1,17 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
-import {
-  IsIn,
-  IsInt,
-  IsNotEmpty,
-  IsOptional,
-  IsPositive,
-  IsString,
-} from 'class-validator'
+import { IsIn, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString } from 'class-validator'
 
-import {
-  ALL_SANCTION_TYPES,
-  type SanctionType,
-} from '../../../domain/entities/SanctionType'
+import { ALL_SANCTION_TYPES, type SanctionType } from '../../../domain/entities/SanctionType'
 
 export class ApplySanctionRequest {
   @ApiProperty({
