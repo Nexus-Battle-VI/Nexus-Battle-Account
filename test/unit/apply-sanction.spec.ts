@@ -39,10 +39,12 @@ const buildHarness = () => {
   const requestedNotifications: NotificationRequest[] = []
 
   const notifications: NotificationRequestPort = {
-    request: async (
+    request: (
       notification: NotificationRequest,
     ): Promise<void> => {
       requestedNotifications.push(notification)
+
+      return Promise.resolve()
     },
   }
 
@@ -482,9 +484,11 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
     let sanctionWasPersistedBeforeNotification = false
 
     const notifications: NotificationRequestPort = {
-      request: async (): Promise<void> => {
+      request: (): Promise<void> => {
         sanctionWasPersistedBeforeNotification =
           harness.sanctions.findAll().length === 1
+
+        return Promise.resolve()
       },
     }
 
