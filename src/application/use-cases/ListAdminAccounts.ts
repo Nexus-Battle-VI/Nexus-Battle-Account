@@ -50,4 +50,5 @@ const countStatuses = (items: readonly AdminAccountSummaryDto[]): AdminAccountSt
     .length,
   active: items.filter((item) => item.status === AccountStatus.Active).length,
   suspended: items.filter((item) => item.status === AccountStatus.Suspended).length,
+  banned: items.filter((item) => item.status === AccountStatus.Banned).length,
 })

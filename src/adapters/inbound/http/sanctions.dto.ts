@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger'
-import { IsIn, IsNotEmpty, IsString } from 'class-validator'
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { IsIn, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString } from 'class-validator'
 
 import { ALL_SANCTION_TYPES, type SanctionType } from '../../../domain/entities/SanctionType'
 
@@ -18,6 +18,17 @@ export class ApplySanctionRequest {
   @IsString()
   @IsNotEmpty()
   readonly reason!: string
+
+  @ApiPropertyOptional({
+    description:
+      'Duracion de la suspension temporal en minutos. Solo aplica a TEMPORARY_SUSPENSION.',
+    example: 1440,
+    minimum: 1,
+  })
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  readonly suspensionDurationMinutes?: number
 }
 
 export class SanctionResponse {
@@ -40,4 +51,11 @@ export class SanctionResponse {
 
   @ApiProperty()
   readonly createdAt!: Date
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Fecha de finalizacion de una suspension temporal. Es null para advertencias y baneos.',
+  })
+  readonly expiresAt!: Date | null
 }

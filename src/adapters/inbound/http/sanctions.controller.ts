@@ -64,6 +64,7 @@ export class SanctionsController {
         targetAccountId,
         type: body.type,
         reason: body.reason,
+        suspensionDurationMinutes: body.suspensionDurationMinutes,
       })
 
       return sanction.toSnapshot()

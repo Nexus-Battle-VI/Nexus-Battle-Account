@@ -68,6 +68,17 @@ const SEEDS: readonly AccountSeed[] = [
     roles: [Role.SuperAdministrator],
     registeredAt: new Date('2026-08-04T10:00:00.000Z'),
   },
+  {
+    id: 'acc-player-banned',
+    subject: 'subject-player-banned',
+    email: 'player.banned@nexus.test',
+    displayName: 'Jugador Baneado',
+    firstNames: 'Diego',
+    lastNames: 'Torres',
+    status: AccountStatus.Banned,
+    roles: [Role.Player],
+    registeredAt: new Date('2026-08-05T10:00:00.000Z'),
+  },
 ]
 
 const buildAccount = (seed: AccountSeed): Account =>
@@ -89,6 +100,7 @@ const createHarness = async (): Promise<{
   readonly useCase: ListAdminAccounts
 }> => {
   let nextDate = 0
+
   const repository = new InMemoryAccountRepository(
     () => SEEDS[nextDate++]?.registeredAt ?? new Date('2026-08-31T00:00:00.000Z'),
   )
@@ -97,7 +109,10 @@ const createHarness = async (): Promise<{
     await repository.save(buildAccount(seed))
   }
 
-  return { repository, useCase: new ListAdminAccounts(repository) }
+  return {
+    repository,
+    useCase: new ListAdminAccounts(repository),
+  }
 }
 
 describe('ListAdminAccounts', () => {
@@ -140,9 +155,11 @@ describe('ListAdminAccounts', () => {
     expect(result.items.map((item) => item.id)).toEqual([
       'acc-admin-active',
       'acc-moderator-suspended',
+      'acc-player-banned',
       'acc-player-pending',
       'acc-super-active',
     ])
+
     expect(result.items[0]).toMatchObject({
       id: 'acc-admin-active',
       email: 'admin.active@nexus.test',
@@ -153,12 +170,13 @@ describe('ListAdminAccounts', () => {
       roles: [Role.Player, Role.Administrator],
       registeredAt: '2026-08-01T10:00:00.000Z',
     })
+
     expect(result.statusCounts).toEqual({
       pendingVerification: 1,
       active: 2,
       suspended: 1,
+      banned: 1,
     })
-    expect(result.statusCounts).not.toHaveProperty('banned')
   })
 
   it.each([
@@ -176,7 +194,10 @@ describe('ListAdminAccounts', () => {
   })
 
   it.each([
-    [Role.Player, ['acc-admin-active', 'acc-moderator-suspended', 'acc-player-pending']],
+    [
+      Role.Player,
+      ['acc-admin-active', 'acc-moderator-suspended', 'acc-player-banned', 'acc-player-pending'],
+    ],
     [Role.Moderator, ['acc-moderator-suspended']],
     [Role.Administrator, ['acc-admin-active']],
     [Role.SuperAdministrator, ['acc-super-active']],
@@ -192,17 +213,42 @@ describe('ListAdminAccounts', () => {
     [
       AccountStatus.PendingVerification,
       ['acc-player-pending'],
-      { pendingVerification: 1, active: 0, suspended: 0 },
+      {
+        pendingVerification: 1,
+        active: 0,
+        suspended: 0,
+        banned: 0,
+      },
     ],
     [
       AccountStatus.Active,
       ['acc-admin-active', 'acc-super-active'],
-      { pendingVerification: 0, active: 2, suspended: 0 },
+      {
+        pendingVerification: 0,
+        active: 2,
+        suspended: 0,
+        banned: 0,
+      },
     ],
     [
       AccountStatus.Suspended,
       ['acc-moderator-suspended'],
-      { pendingVerification: 0, active: 0, suspended: 1 },
+      {
+        pendingVerification: 0,
+        active: 0,
+        suspended: 1,
+        banned: 0,
+      },
+    ],
+    [
+      AccountStatus.Banned,
+      ['acc-player-banned'],
+      {
+        pendingVerification: 0,
+        active: 0,
+        suspended: 0,
+        banned: 1,
+      },
     ],
   ])('filtra por estado real %s', async (status, expectedIds, expectedCounts) => {
     const { useCase } = await createHarness()
@@ -211,7 +257,6 @@ describe('ListAdminAccounts', () => {
 
     expect(result.items.map((item) => item.id)).toEqual(expectedIds)
     expect(result.statusCounts).toEqual(expectedCounts)
-    expect(result.statusCounts).not.toHaveProperty('banned')
   })
 
   it('combina criterios presentes con AND', async () => {
@@ -240,6 +285,7 @@ describe('ListAdminAccounts', () => {
         pendingVerification: 0,
         active: 0,
         suspended: 0,
+        banned: 0,
       },
     })
   })
@@ -263,6 +309,7 @@ describe('ListAdminAccounts', () => {
           pendingVerification: 0,
           active: 0,
           suspended: 0,
+          banned: 0,
         },
       })
     },
@@ -283,12 +330,20 @@ describe('ListAdminAccounts', () => {
 
   it('no observa mutaciones del agregado no guardadas ni comparte roles mutables', async () => {
     const { repository, useCase } = await createHarness()
+
     const account = buildAccount(ADMIN_ACTIVE)
     await repository.save(account)
 
     account.grantRole(Role.Moderator, new Set([Role.SuperAdministrator]))
 
-    expect((await useCase.execute({ id: ADMIN_ACTIVE.id, role: Role.Moderator })).items).toEqual([])
+    expect(
+      (
+        await useCase.execute({
+          id: ADMIN_ACTIVE.id,
+          role: Role.Moderator,
+        })
+      ).items,
+    ).toEqual([])
 
     const firstRead = await useCase.execute({ id: ADMIN_ACTIVE.id })
     const roles = firstRead.items[0]?.roles as Role[]
@@ -302,8 +357,22 @@ describe('ListAdminAccounts', () => {
   it('valida criterios mediante los value objects existentes', async () => {
     const { useCase } = await createHarness()
 
-    await expect(useCase.execute({ email: 'no-es-correo' })).rejects.toThrow()
-    await expect(useCase.execute({ displayName: '**' })).rejects.toThrow()
-    await expect(useCase.execute({ firstNames: '   ' })).rejects.toThrow()
+    await expect(
+      useCase.execute({
+        email: 'no-es-correo',
+      }),
+    ).rejects.toThrow()
+
+    await expect(
+      useCase.execute({
+        displayName: '**',
+      }),
+    ).rejects.toThrow()
+
+    await expect(
+      useCase.execute({
+        firstNames: '   ',
+      }),
+    ).rejects.toThrow()
   })
 })

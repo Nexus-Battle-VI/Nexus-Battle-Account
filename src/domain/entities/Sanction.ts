@@ -1,13 +1,14 @@
 import { DomainError } from '../errors/DomainError'
-import type { SanctionType } from './SanctionType'
+import { SanctionType, type SanctionType as SanctionTypeValue } from './SanctionType'
 
 export interface SanctionSnapshot {
   readonly id: string
   readonly targetAccountId: string
   readonly actorAccountId: string
-  readonly type: SanctionType
+  readonly type: SanctionTypeValue
   readonly reason: string
   readonly createdAt: Date
+  readonly expiresAt: Date | null
 }
 
 export class Sanction {
@@ -15,18 +16,20 @@ export class Sanction {
     readonly id: string,
     readonly targetAccountId: string,
     readonly actorAccountId: string,
-    readonly type: SanctionType,
+    readonly type: SanctionTypeValue,
     readonly reason: string,
     readonly createdAt: Date,
+    readonly expiresAt: Date | null,
   ) {}
 
   static create(params: {
     id: string
     targetAccountId: string
     actorAccountId: string
-    type: SanctionType
+    type: SanctionTypeValue
     reason: string
     createdAt: Date
+    expiresAt?: Date | null
   }): Sanction {
     if (params.id.trim().length === 0) {
       throw new DomainError('La sancion debe tener un identificador.')
@@ -44,6 +47,24 @@ export class Sanction {
       throw new DomainError('La sancion debe incluir una causal.')
     }
 
+    const expiresAt = params.expiresAt ?? null
+
+    if (params.type === SanctionType.TemporarySuspension) {
+      if (expiresAt === null) {
+        throw new DomainError('Una suspension temporal debe indicar su fecha de finalizacion.')
+      }
+
+      if (expiresAt.getTime() <= params.createdAt.getTime()) {
+        throw new DomainError(
+          'La fecha de finalizacion de la suspension debe ser posterior a su inicio.',
+        )
+      }
+    }
+
+    if (params.type !== SanctionType.TemporarySuspension && expiresAt !== null) {
+      throw new DomainError('Solo una suspension temporal puede tener fecha de finalizacion.')
+    }
+
     return new Sanction(
       params.id,
       params.targetAccountId,
@@ -51,6 +72,7 @@ export class Sanction {
       params.type,
       params.reason.trim(),
       params.createdAt,
+      expiresAt,
     )
   }
 
@@ -62,7 +84,20 @@ export class Sanction {
       snapshot.type,
       snapshot.reason,
       snapshot.createdAt,
+      snapshot.expiresAt,
     )
+  }
+
+  get isTemporary(): boolean {
+    return this.type === SanctionType.TemporarySuspension
+  }
+
+  isExpired(at: Date): boolean {
+    if (this.expiresAt === null) {
+      return false
+    }
+
+    return this.expiresAt.getTime() <= at.getTime()
   }
 
   toSnapshot(): SanctionSnapshot {
@@ -73,6 +108,7 @@ export class Sanction {
       type: this.type,
       reason: this.reason,
       createdAt: this.createdAt,
+      expiresAt: this.expiresAt,
     }
   }
 }
