@@ -50,10 +50,9 @@ export class ApplySanction {
 
     if (!SanctionPolicy.canApply(new Set(actor.currentRoles), command.type)) {
       throw new DomainError(
-        `La cuenta ${actor.id.value} no puede aplicar una sancion ${command.type}.`,
+        `La cuenta ${actor.id.value} no tiene permisos para aplicar una sancion ${command.type}.`,
       )
     }
-
     const createdAt = this.clock.now()
 
     let expiresAt: Date | null = null
