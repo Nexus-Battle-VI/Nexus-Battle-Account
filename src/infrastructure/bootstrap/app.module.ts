@@ -2,6 +2,7 @@ import { Module, type CanActivate } from '@nestjs/common'
 import { APP_GUARD, Reflector } from '@nestjs/core'
 
 import { AccountsController } from '../../adapters/inbound/http/accounts.controller'
+import { SanctionsController } from '../../adapters/inbound/http/sanctions.controller'
 import { RecoveryController } from '../../adapters/inbound/http/recovery.controller'
 import { MfaController } from '../../adapters/inbound/http/mfa.controller'
 import { PasswordController } from '../../adapters/inbound/http/password.controller'
@@ -34,6 +35,7 @@ import {
   CONFIRM_TOTP_ENROLLMENT,
   FIND_ACCOUNT_BY_EMAIL,
   ASSIGN_ROLE,
+  APPLY_SANCTION,
   REVOKE_ROLE,
   LOGOUT_ACCOUNT,
   RESET_RECOVERY_PASSWORD,
@@ -74,6 +76,7 @@ import { ExportAdminAccounts } from '../../application/use-cases/ExportAdminAcco
 import { RequestAccountDeletion } from '../../application/use-cases/RequestAccountDeletion'
 import { ProcessAccountDeletion } from '../../application/use-cases/ProcessAccountDeletion'
 import { RevokeRole } from '../../application/use-cases/RevokeRole'
+import { ApplySanction } from '../../application/use-cases/ApplySanction'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import {
   ADMIN_ACCOUNT_QUERY,
@@ -127,6 +130,10 @@ import { AVATAR_STORAGE } from '../../application/ports/AvatarStoragePort'
 import { NICKNAME_BLACKLIST } from '../../application/ports/NicknameBlacklistPort'
 import { SECURITY_QUESTION_CATALOG } from '../../application/ports/SecurityQuestionCatalogPort'
 import type { AccountRepositoryPort } from '../../application/ports/AccountRepositoryPort'
+import {
+  SANCTION_REPOSITORY,
+  type SanctionRepositoryPort,
+} from '../../application/ports/SanctionRepositoryPort'
 import type { AuthenticationProviderPort } from '../../application/ports/AuthenticationProviderPort'
 import type { NotificationRequestPort } from '../../application/ports/NotificationRequestPort'
 import type { ClockPort } from '../../application/ports/ClockPort'
@@ -144,6 +151,8 @@ import { CognitoTokenVerifier } from '../../adapters/outbound/identity/CognitoTo
 
 import { InMemoryAccountRepository } from '../../adapters/outbound/persistence/InMemoryAccountRepository'
 import { PostgresAccountRepository } from '../../adapters/outbound/persistence/PostgresAccountRepository'
+import { InMemorySanctionRepository } from '../../adapters/outbound/persistence/InMemorySanctionRepository'
+import { PostgresSanctionRepository } from '../../adapters/outbound/persistence/PostgresSanctionRepository'
 import { InMemoryNicknameBlacklist } from '../../adapters/outbound/persistence/InMemoryNicknameBlacklist'
 import { PostgresNicknameBlacklist } from '../../adapters/outbound/persistence/PostgresNicknameBlacklist'
 import { InMemorySecurityQuestionCatalog } from '../../adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
@@ -211,6 +220,7 @@ export const DATABASE = Symbol('Database')
 @Module({
   controllers: [
     AccountsController,
+    SanctionsController,
     RecoveryController,
     MfaController,
     PasswordController,
@@ -259,6 +269,12 @@ export const DATABASE = Symbol('Database')
       provide: ACCOUNT_REPOSITORY,
       useFactory: (db: Kysely<Database> | null): AccountRepositoryPort =>
         db === null ? new InMemoryAccountRepository() : new PostgresAccountRepository(db),
+      inject: [DATABASE],
+    },
+    {
+      provide: SANCTION_REPOSITORY,
+      useFactory: (db: Kysely<Database> | null): SanctionRepositoryPort =>
+        db === null ? new InMemorySanctionRepository() : new PostgresSanctionRepository(db),
       inject: [DATABASE],
     },
     {
@@ -625,6 +641,15 @@ export const DATABASE = Symbol('Database')
         mfaStatus: MfaStatusPort,
       ): AssignRole => new AssignRole(accounts, roleDirectory, mfaStatus),
       inject: [ACCOUNT_REPOSITORY, ROLE_DIRECTORY, MFA_STATUS],
+    },
+    {
+      provide: APPLY_SANCTION,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        sanctions: SanctionRepositoryPort,
+        ids: IdGeneratorPort,
+      ): ApplySanction => new ApplySanction(accounts, sanctions, ids),
+      inject: [ACCOUNT_REPOSITORY, SANCTION_REPOSITORY, ID_GENERATOR],
     },
     {
       provide: REVOKE_ROLE,
