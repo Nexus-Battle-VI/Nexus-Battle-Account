@@ -67,19 +67,26 @@ export class LoginAccount {
     }
 
     if (account.currentStatus === AccountStatus.Suspended) {
+      const now = this.deps.clock.now()
+
       const activeSuspension = await this.deps.sanctions.findActiveTemporarySuspension(
         account.id.value,
-        this.deps.clock.now(),
+        now,
       )
 
       if (activeSuspension !== null) {
         return { kind: 'invalidCredentials' }
       }
 
-      account.reinstate()
-      await this.deps.accounts.save(account)
-    }
+      const latestTemporarySuspension = await this.deps.sanctions.findLatestTemporarySuspension(
+        account.id.value,
+      )
 
+      if (latestTemporarySuspension !== null) {
+        account.reinstate()
+        await this.deps.accounts.save(account)
+      }
+    }
     if (!account.canAuthenticate) {
       return { kind: 'invalidCredentials' }
     }

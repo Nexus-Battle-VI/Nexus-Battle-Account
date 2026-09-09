@@ -207,8 +207,14 @@ describe('Listado administrativo de cuentas HU-44.2', () => {
       pendingVerification: 0,
       active: 1,
       suspended: 0,
+      banned: 0,
     })
-    expect(response.body.statusCounts).not.toHaveProperty('banned')
+    expect(response.body.statusCounts).toEqual({
+      pendingVerification: 0,
+      active: 1,
+      suspended: 0,
+      banned: 0,
+    })
   })
 
   it('permite a SUPER_ADMINISTRATOR consultar una ruta ADMINISTRATOR', async () => {
@@ -239,6 +245,7 @@ describe('Listado administrativo de cuentas HU-44.2', () => {
         pendingVerification: 0,
         active: 0,
         suspended: 0,
+        banned: 0,
       },
     })
   })

@@ -85,27 +85,33 @@ export class JwtAuthGuard implements CanActivate {
     const account = await this.accounts.findBySubject(request.identity.subject)
 
     if (account === null) {
-      throw new UnauthorizedException('La cuenta asociada al testimonio no existe.')
+      return true
     }
-
     if (account.currentStatus === AccountStatus.Banned) {
       throw new ForbiddenException('La cuenta tiene un baneo permanente.')
     }
 
     if (account.currentStatus === AccountStatus.Suspended) {
+      const now = this.clock.now()
+
       const activeSuspension = await this.sanctions.findActiveTemporarySuspension(
         account.id.value,
-        this.clock.now(),
+        now,
       )
 
       if (activeSuspension !== null) {
         throw new ForbiddenException('La cuenta tiene una suspension temporal activa.')
       }
 
-      account.reinstate()
-      await this.accounts.save(account)
-    }
+      const latestTemporarySuspension = await this.sanctions.findLatestTemporarySuspension(
+        account.id.value,
+      )
 
+      if (latestTemporarySuspension !== null) {
+        account.reinstate()
+        await this.accounts.save(account)
+      }
+    }
     return true
   }
 

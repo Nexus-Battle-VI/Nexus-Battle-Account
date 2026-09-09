@@ -30,6 +30,18 @@ export class InMemorySanctionRepository implements SanctionRepositoryPort {
     return Promise.resolve(suspension ?? null)
   }
 
+  findLatestTemporarySuspension(targetAccountId: string): Promise<Sanction | null> {
+    const suspension = [...this.sanctions.values()]
+      .filter(
+        (sanction) =>
+          sanction.targetAccountId === targetAccountId &&
+          sanction.type === SanctionType.TemporarySuspension,
+      )
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0]
+
+    return Promise.resolve(suspension ?? null)
+  }
+
   findAll(): readonly Sanction[] {
     return [...this.sanctions.values()]
   }
