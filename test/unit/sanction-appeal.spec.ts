@@ -18,43 +18,27 @@ describe('Sanction appeal window - HU-42.3', () => {
   it('habilita la apelacion durante los 30 dias posteriores a la sancion', () => {
     const sanction = buildSanction()
 
-    expect(sanction.appealDeadline).toEqual(
-      APPEAL_DEADLINE,
-    )
+    expect(sanction.appealDeadline).toEqual(APPEAL_DEADLINE)
 
-    expect(
-      sanction.canAppeal(
-        new Date('2026-09-20T12:00:00.000Z'),
-      ),
-    ).toBe(true)
+    expect(sanction.canAppeal(new Date('2026-09-20T12:00:00.000Z'))).toBe(true)
   })
 
   it('permite apelar exactamente en el limite de 30 dias', () => {
     const sanction = buildSanction()
 
-    expect(
-      sanction.canAppeal(APPEAL_DEADLINE),
-    ).toBe(true)
+    expect(sanction.canAppeal(APPEAL_DEADLINE)).toBe(true)
   })
 
   it('deshabilita la apelacion despues del limite de 30 dias', () => {
     const sanction = buildSanction()
 
-    expect(
-      sanction.canAppeal(
-        new Date('2026-10-06T12:00:00.001Z'),
-      ),
-    ).toBe(false)
+    expect(sanction.canAppeal(new Date('2026-10-06T12:00:00.001Z'))).toBe(false)
   })
 
   it('no permite apelar antes de que la sancion haya sido aplicada', () => {
     const sanction = buildSanction()
 
-    expect(
-      sanction.canAppeal(
-        new Date('2026-09-06T11:59:59.999Z'),
-      ),
-    ).toBe(false)
+    expect(sanction.canAppeal(new Date('2026-09-06T11:59:59.999Z'))).toBe(false)
   })
 
   it('expone la fecha limite de apelacion en el snapshot', () => {
