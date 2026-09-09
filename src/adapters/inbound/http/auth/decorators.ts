@@ -11,6 +11,11 @@ import type { VerifiedIdentity } from '../../../../application/ports/TokenVerifi
 export const IS_PUBLIC = 'auth:public'
 export const IS_INTERNAL = 'auth:internal'
 export const REQUIRED_ROLES = 'auth:roles'
+export const READ_ONLY_ACCOUNT_QUERY = 'account:read-only-query'
+
+/** Evita persistir la reactivacion por expiracion durante una consulta administrativa. */
+export const ReadOnlyAccountQuery = (): MethodDecorator =>
+  SetMetadata(READ_ONLY_ACCOUNT_QUERY, true)
 
 /**
  * Marca una ruta como accesible sin testimonio.

@@ -196,6 +196,26 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
       )
     }
 
+    if (criteria.registeredFrom !== undefined) {
+      query = query.where('account.created_at', '>=', criteria.registeredFrom)
+    }
+    if (criteria.registeredTo !== undefined) {
+      query = query.where('account.created_at', '<=', criteria.registeredTo)
+    }
+
+    if (criteria.hasSanctionHistory !== undefined) {
+      const hasHistory = criteria.hasSanctionHistory
+      query = query.where((eb) => {
+        const history = eb.exists(
+          eb
+            .selectFrom('sanctions as sanction')
+            .select('sanction.target_account_id')
+            .whereRef('sanction.target_account_id', '=', 'account.id'),
+        )
+        return hasHistory ? history : eb.not(history)
+      })
+    }
+
     const rows = await query.orderBy('account.id', 'asc').execute()
 
     if (rows.length === 0) {

@@ -15,6 +15,7 @@ import {
 } from '../../../application/dto/AdminAccountSummaryDto'
 import type { AccountSnapshot } from '../../../domain/entities/Account'
 import { hydrateAccount } from './hydrate-account'
+import type { SanctionRepositoryPort } from '../../../application/ports/SanctionRepositoryPort'
 
 interface AccountMetadata {
   readonly createdAt: Date
@@ -26,7 +27,10 @@ export class InMemoryAccountRepository implements AccountRepositoryPort, AdminAc
   private readonly answersByAccount = new Map<string, readonly HashedSecurityAnswer[]>()
   private readonly metadataByAccount = new Map<string, AccountMetadata>()
 
-  constructor(private readonly now: () => Date = () => new Date()) {}
+  constructor(
+    private readonly now: () => Date = () => new Date(),
+    private readonly sanctions?: Pick<SanctionRepositoryPort, 'findAccountIdsWithHistory'>,
+  ) {}
 
   save(account: Account): Promise<void> {
     this.store(account)
@@ -41,13 +45,32 @@ export class InMemoryAccountRepository implements AccountRepositoryPort, AdminAc
     return Promise.resolve()
   }
 
-  query(criteria: AdminAccountQueryCriteria): Promise<readonly AdminAccountSummaryDto[]> {
-    const items = [...this.byId.values()]
-      .filter((snapshot) => matches(snapshot, criteria))
-      .map((snapshot) => this.toAdminSummary(snapshot))
-      .sort((left, right) => left.id.localeCompare(right.id))
+  async query(criteria: AdminAccountQueryCriteria): Promise<readonly AdminAccountSummaryDto[]> {
+    let snapshots = [...this.byId.values()].filter((snapshot) => matches(snapshot, criteria))
 
-    return Promise.resolve(items)
+    if (criteria.hasSanctionHistory !== undefined) {
+      // Los consumidores del agregado no necesitan sanciones; una consulta de historial si.
+      if (this.sanctions === undefined) {
+        throw new Error('La consulta de historial requiere el repositorio de sanciones.')
+      }
+      const withHistory = new Set(
+        await this.sanctions.findAccountIdsWithHistory(snapshots.map((snapshot) => snapshot.id)),
+      )
+      snapshots = snapshots.filter(
+        (snapshot) => withHistory.has(snapshot.id) === criteria.hasSanctionHistory,
+      )
+    }
+
+    return snapshots
+      .map((snapshot) => this.toAdminSummary(snapshot))
+      .filter(
+        (item) =>
+          (criteria.registeredFrom === undefined ||
+            Date.parse(item.registeredAt) >= criteria.registeredFrom.getTime()) &&
+          (criteria.registeredTo === undefined ||
+            Date.parse(item.registeredAt) <= criteria.registeredTo.getTime()),
+      )
+      .sort((left, right) => left.id.localeCompare(right.id))
   }
 
   findById(id: AccountId): Promise<Account | null> {
