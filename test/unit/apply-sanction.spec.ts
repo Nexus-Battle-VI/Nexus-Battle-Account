@@ -8,6 +8,10 @@ import { Role } from '../../src/domain/entities/Role'
 import { DomainError } from '../../src/domain/errors/DomainError'
 import { AccountNotFoundError } from '../../src/application/errors/ApplicationError'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
+import type {
+  NotificationRequest,
+  NotificationRequestPort,
+} from '../../src/application/ports/NotificationRequestPort'
 import { buildActiveAccount } from '../support/account-factory'
 
 const NOW = new Date('2026-09-06T12:00:00.000Z')
@@ -32,12 +36,30 @@ const buildHarness = () => {
     now: (): Date => new Date(NOW),
   }
 
+  const requestedNotifications: NotificationRequest[] = []
+
+  const notifications: NotificationRequestPort = {
+    request: async (
+      notification: NotificationRequest,
+    ): Promise<void> => {
+      requestedNotifications.push(notification)
+    },
+  }
+
   return {
     accounts,
     sanctions,
     persistence,
     clock,
-    applySanction: new ApplySanction(accounts, persistence, ids, clock),
+    notifications,
+    requestedNotifications,
+    applySanction: new ApplySanction(
+      accounts,
+      persistence,
+      ids,
+      clock,
+      notifications,
+    ),
   }
 }
 
@@ -66,7 +88,7 @@ const saveActorAndTarget = async (
   )
 }
 
-describe('ApplySanction - HU-42.1 / HU-42.2', () => {
+describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
   it('permite a un moderador registrar una advertencia sin restringir el acceso', async () => {
     const harness = buildHarness()
 
@@ -93,7 +115,6 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
     const target = await harness.accounts.findById(TARGET_ID)
 
     expect(target?.currentStatus).toBe(AccountStatus.Active)
-
     expect(target?.canAuthenticate).toBe(true)
   })
 
@@ -110,15 +131,21 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       suspensionDurationMinutes: 60,
     })
 
-    expect(sanction.type).toBe(SanctionType.TemporarySuspension)
+    expect(sanction.type).toBe(
+      SanctionType.TemporarySuspension,
+    )
 
-    expect(sanction.toSnapshot().expiresAt).toEqual(new Date('2026-09-06T13:00:00.000Z'))
+    expect(sanction.toSnapshot().expiresAt).toEqual(
+      new Date('2026-09-06T13:00:00.000Z'),
+    )
 
     expect(harness.sanctions.findAll()).toHaveLength(1)
 
     const target = await harness.accounts.findById(TARGET_ID)
 
-    expect(target?.currentStatus).toBe(AccountStatus.Suspended)
+    expect(target?.currentStatus).toBe(
+      AccountStatus.Suspended,
+    )
 
     expect(target?.canAuthenticate).toBe(false)
   })
@@ -136,7 +163,9 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
       suspensionDurationMinutes: 90,
     })
 
-    expect(sanction.toSnapshot().expiresAt).toEqual(new Date('2026-09-06T13:30:00.000Z'))
+    expect(sanction.toSnapshot().expiresAt).toEqual(
+      new Date('2026-09-06T13:30:00.000Z'),
+    )
   })
 
   it('rechaza una suspension temporal sin duracion y no restringe el acceso', async () => {
@@ -158,7 +187,6 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
     const target = await harness.accounts.findById(TARGET_ID)
 
     expect(target?.currentStatus).toBe(AccountStatus.Active)
-
     expect(target?.canAuthenticate).toBe(true)
   })
 
@@ -182,7 +210,6 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
     const target = await harness.accounts.findById(TARGET_ID)
 
     expect(target?.currentStatus).toBe(AccountStatus.Active)
-
     expect(target?.canAuthenticate).toBe(true)
   })
 
@@ -206,7 +233,6 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
     const target = await harness.accounts.findById(TARGET_ID)
 
     expect(target?.currentStatus).toBe(AccountStatus.Active)
-
     expect(target?.canAuthenticate).toBe(true)
   })
 
@@ -229,14 +255,15 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
     const target = await harness.accounts.findById(TARGET_ID)
 
     expect(target?.currentStatus).toBe(AccountStatus.Active)
-
     expect(target?.canAuthenticate).toBe(true)
   })
 
   it('permite a un administrador aplicar un baneo permanente y restringe definitivamente el acceso', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(harness.accounts, [Role.Administrator])
+    await saveActorAndTarget(harness.accounts, [
+      Role.Administrator,
+    ])
 
     const sanction = await harness.applySanction.execute({
       actorSubject: 'actor-subject',
@@ -246,22 +273,21 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
     })
 
     expect(sanction.type).toBe(SanctionType.PermanentBan)
-
     expect(sanction.toSnapshot().expiresAt).toBeNull()
-
     expect(harness.sanctions.findAll()).toHaveLength(1)
 
     const target = await harness.accounts.findById(TARGET_ID)
 
     expect(target?.currentStatus).toBe(AccountStatus.Banned)
-
     expect(target?.canAuthenticate).toBe(false)
   })
 
   it('permite a un super administrador aplicar un baneo permanente', async () => {
     const harness = buildHarness()
 
-    await saveActorAndTarget(harness.accounts, [Role.SuperAdministrator])
+    await saveActorAndTarget(harness.accounts, [
+      Role.SuperAdministrator,
+    ])
 
     const sanction = await harness.applySanction.execute({
       actorSubject: 'actor-subject',
@@ -275,7 +301,6 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
     const target = await harness.accounts.findById(TARGET_ID)
 
     expect(target?.currentStatus).toBe(AccountStatus.Banned)
-
     expect(target?.canAuthenticate).toBe(false)
   })
 
@@ -298,7 +323,6 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
     const target = await harness.accounts.findById(TARGET_ID)
 
     expect(target?.currentStatus).toBe(AccountStatus.Active)
-
     expect(target?.canAuthenticate).toBe(true)
   })
 
@@ -373,7 +397,157 @@ describe('ApplySanction - HU-42.1 / HU-42.2', () => {
     const target = await harness.accounts.findById(TARGET_ID)
 
     expect(target?.currentStatus).toBe(AccountStatus.Active)
-
     expect(target?.canAuthenticate).toBe(true)
+  })
+
+  it('solicita una notificacion cuando la sancion se aplica correctamente', async () => {
+    const harness = buildHarness()
+
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
+
+    await harness.applySanction.execute({
+      actorSubject: 'actor-subject',
+      targetAccountId: 'target-1',
+      type: SanctionType.Warning,
+      reason: 'Conducta ofensiva.',
+    })
+
+    expect(harness.requestedNotifications).toHaveLength(1)
+
+    expect(harness.requestedNotifications[0]).toEqual({
+      notificationId: 'sanction-sanction-1',
+      recipient: 'target@nexus.test',
+      templateId: 'account-sanction-applied',
+      variables: {
+        displayName: 'Usuario Objetivo',
+        sanctionId: 'sanction-1',
+        sanctionType: SanctionType.Warning,
+        reason: 'Conducta ofensiva.',
+        appliedAt: '2026-09-06T12:00:00.000Z',
+        appealDeadline: '2026-10-06T12:00:00.000Z',
+        appealWindowDays: 30,
+        expiresAt: '',
+      },
+    })
+  })
+
+  it('incluye la expiracion de la suspension temporal en la notificacion', async () => {
+    const harness = buildHarness()
+
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
+
+    await harness.applySanction.execute({
+      actorSubject: 'actor-subject',
+      targetAccountId: 'target-1',
+      type: SanctionType.TemporarySuspension,
+      reason: 'Suspension de prueba.',
+      suspensionDurationMinutes: 60,
+    })
+
+    expect(harness.requestedNotifications).toHaveLength(1)
+
+    expect(
+      harness.requestedNotifications[0]?.variables,
+    ).toMatchObject({
+      sanctionType: SanctionType.TemporarySuspension,
+      appealWindowDays: 30,
+      appealDeadline: '2026-10-06T12:00:00.000Z',
+      expiresAt: '2026-09-06T13:00:00.000Z',
+    })
+  })
+
+  it('no solicita una notificacion cuando la sancion es rechazada', async () => {
+    const harness = buildHarness()
+
+    await saveActorAndTarget(harness.accounts, [Role.Player])
+
+    await expect(
+      harness.applySanction.execute({
+        actorSubject: 'actor-subject',
+        targetAccountId: 'target-1',
+        type: SanctionType.Warning,
+        reason: 'Intento no autorizado.',
+      }),
+    ).rejects.toBeInstanceOf(DomainError)
+
+    expect(harness.sanctions.findAll()).toHaveLength(0)
+    expect(harness.requestedNotifications).toHaveLength(0)
+  })
+
+  it('persiste la sancion antes de solicitar la notificacion', async () => {
+    const harness = buildHarness()
+
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
+
+    let sanctionWasPersistedBeforeNotification = false
+
+    const notifications: NotificationRequestPort = {
+      request: async (): Promise<void> => {
+        sanctionWasPersistedBeforeNotification =
+          harness.sanctions.findAll().length === 1
+      },
+    }
+
+    const applySanction = new ApplySanction(
+      harness.accounts,
+      harness.persistence,
+      {
+        generate: (): string => 'sanction-order-test',
+      },
+      harness.clock,
+      notifications,
+    )
+
+    await applySanction.execute({
+      actorSubject: 'actor-subject',
+      targetAccountId: 'target-1',
+      type: SanctionType.Warning,
+      reason: 'Validar orden.',
+    })
+
+    expect(
+      sanctionWasPersistedBeforeNotification,
+    ).toBe(true)
+  })
+
+  it('mantiene la sancion aplicada aunque falle el servicio de notificaciones', async () => {
+    const accounts = new InMemoryAccountRepository()
+    const sanctions = new InMemorySanctionRepository()
+    const persistence = new InMemorySanctionPersistence(
+      accounts,
+      sanctions,
+    )
+
+    await saveActorAndTarget(accounts, [Role.Moderator])
+
+    const notifications: NotificationRequestPort = {
+      request: (): Promise<void> =>
+        Promise.reject(
+          new Error('Notifications no disponible'),
+        ),
+    }
+
+    const applySanction = new ApplySanction(
+      accounts,
+      persistence,
+      {
+        generate: (): string => 'sanction-failure-test',
+      },
+      {
+        now: (): Date => new Date(NOW),
+      },
+      notifications,
+    )
+
+    await expect(
+      applySanction.execute({
+        actorSubject: 'actor-subject',
+        targetAccountId: 'target-1',
+        type: SanctionType.Warning,
+        reason: 'Prueba de fallo de correo.',
+      }),
+    ).rejects.toThrow('Notifications no disponible')
+
+    expect(sanctions.findAll()).toHaveLength(1)
   })
 })

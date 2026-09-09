@@ -1,7 +1,20 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
-import { IsIn, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString } from 'class-validator'
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger'
+import {
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsPositive,
+  IsString,
+} from 'class-validator'
 
-import { ALL_SANCTION_TYPES, type SanctionType } from '../../../domain/entities/SanctionType'
+import {
+  ALL_SANCTION_TYPES,
+  type SanctionType,
+} from '../../../domain/entities/SanctionType'
 
 export class ApplySanctionRequest {
   @ApiProperty({
@@ -13,7 +26,8 @@ export class ApplySanctionRequest {
   readonly type!: SanctionType
 
   @ApiProperty({
-    example: 'Conducta ofensiva reiterada en la comunidad.',
+    example:
+      'Conducta ofensiva reiterada en la comunidad.',
   })
   @IsString()
   @IsNotEmpty()
@@ -58,4 +72,11 @@ export class SanctionResponse {
       'Fecha de finalizacion de una suspension temporal. Es null para advertencias y baneos.',
   })
   readonly expiresAt!: Date | null
+
+  @ApiProperty({
+    description:
+      'Fecha limite hasta la cual el usuario sancionado puede ejercer la opcion de apelacion. Corresponde a 30 dias desde la aplicacion de la sancion.',
+    example: '2026-10-06T12:00:00.000Z',
+  })
+  readonly appealDeadline!: Date
 }
