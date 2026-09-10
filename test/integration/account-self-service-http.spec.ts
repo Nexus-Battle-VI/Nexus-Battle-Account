@@ -1,4 +1,9 @@
 import 'reflect-metadata'
+import { PLAYER_STATISTICS_REPORT } from '../../src/application/ports/PlayerStatisticsReportPort'
+import { HttpPlayerStatisticsReportAdapter } from '../../src/adapters/outbound/reporting/HttpPlayerStatisticsReportAdapter'
+import { createLogger } from '../../src/infrastructure/observability/logger'
+import { PlayerStatisticsHttpFixture } from '../support/player-statistics-http-fixture'
+import { heroSelectionFixture } from '../support/player-statistics-fixture'
 
 import { ValidationPipe, type INestApplication } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
@@ -199,6 +204,7 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
   let previousEnv: Record<string, string | undefined>
   let beatrizAccountId: string
   const passwords = new InMemoryPasswordChange()
+  const statisticsSource = new PlayerStatisticsHttpFixture()
   const inventoryReport = new FakePlayerInventoryReport()
   const communityReport = new FakeCommunityReport()
   const commerceReport = new FakeCommerceReport()
@@ -217,6 +223,7 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
     passwords.seed('token-jugador', CURRENT_PASSWORD)
     passwords.seed('token-jugador-b', CURRENT_PASSWORD_B)
 
+    const statisticsUrl = await statisticsSource.start()
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(TOKEN_VERIFIER)
       .useValue(stubVerifier)
@@ -234,6 +241,18 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
       .useValue(fixedClock)
       .overrideProvider(PLAYER_INVENTORY_REPORT)
       .useValue(inventoryReport)
+      .overrideProvider(PLAYER_STATISTICS_REPORT)
+      .useValue(
+        new HttpPlayerStatisticsReportAdapter({
+          baseUrl: statisticsUrl,
+          logger: createLogger({
+            level: 'error',
+            service: 'test',
+            version: '0',
+            sink: () => undefined,
+          }),
+        }),
+      )
       .overrideProvider(COMMUNITY_REPORT)
       .useValue(communityReport)
       .overrideProvider(COMMERCE_REPORT)
@@ -290,6 +309,7 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
 
   afterAll(async () => {
     await app.close()
+    await statisticsSource.close()
 
     for (const [key, value] of Object.entries(previousEnv)) {
       process.env[key] = value ?? ''
@@ -456,6 +476,8 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
 
     describe('format=pdf (HU-45.3, Management #135)', () => {
       afterEach(() => {
+        statisticsSource.status = 200
+        statisticsSource.body = heroSelectionFixture()
         inventoryReport.result = {
           available: true,
           items: [{ reference: 'espada-de-hierro', name: 'Espada de Hierro', quantity: 1 }],
@@ -479,7 +501,7 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
         }
       })
 
-      it('descarga un PDF real (ya no 503): identidad + inventario + comentarios + transacciones', async () => {
+      it('descarga un PDF real: identidad + inventario + estadísticas + comentarios + transacciones', async () => {
         const response = await exportPrivacy('pdf')
 
         expect(response.status).toBe(200)
@@ -498,14 +520,17 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
         expect(text).toContain('Buen combate')
         expect(text).toContain('Historial de transacciones')
         expect(text).toContain('Pedido ord-1 — CONFIRMED — 30000 COP (2 artículos)')
-        expect(text.split('Estadísticas ')[1]?.split(' Comentarios')[0]).toBe(
-          'Sección no disponible: todavía no existe una fuente de datos de estadísticas del jugador en el sistema.',
-        )
+        expect(text).toContain('Estadísticas del héroe preparado')
+        expect(text).toContain('Guerrera de Ana')
+        expect(text).toContain('Poder: base 12; efectivo 16')
+        expect(text).toContain('Poder: 12 -> 16 (delta: 4)')
+        expect(text).not.toContain('Sección no disponible')
       })
 
-      it('reenvia el testimonio del titular a las tres fuentes externas, sin construir ningun identificador', async () => {
+      it('reenvia el testimonio del titular a las cuatro fuentes externas, sin construir ningun identificador', async () => {
         await exportPrivacy('pdf')
 
+        expect(statisticsSource.lastAccessToken).toBe('token-jugador')
         expect(inventoryReport.lastAccessToken).toBe('token-jugador')
         expect(communityReport.lastAccessToken).toBe('token-jugador')
         expect(commerceReport.lastAccessToken).toBe('token-jugador')
@@ -520,6 +545,60 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
         expect(response.headers['content-type']).toBe('application/pdf')
       })
 
+      it.each([
+        [404, 'No hay una configuración de héroe preparado disponible'],
+        [503, 'Sección no disponible: no se pudieron consultar las estadísticas'],
+      ])(
+        'Statistics HTTP %s conserva las otras tres categorías y descarga el PDF',
+        async (status, notice) => {
+          statisticsSource.status = status
+          const response = await exportPrivacy('pdf')
+          expect(response.status).toBe(200)
+          const text = privacyPdfText(response.body as Buffer)
+          expect(text).toContain(notice)
+          expect(text).toContain('Espada de Hierro')
+          expect(text).toContain('Buen combate')
+          expect(text).toContain('Pedido ord-1')
+          expect(text).not.toContain('Poder:')
+          if (status === 404) expect(text).not.toContain('Sección no disponible')
+          writePrivacyEvidence(`statistics-${String(status)}.pdf`, response.body as Buffer)
+        },
+      )
+
+      it('una respuesta Statistics inválida no filtra datos parciales ni elimina otras secciones', async () => {
+        statisticsSource.body = {
+          configuration: { hero: { name: 'Dato parcial' }, baseStats: null },
+        }
+        const response = await exportPrivacy('pdf')
+        expect(response.status).toBe(200)
+        const text = privacyPdfText(response.body as Buffer)
+        expect(text).toContain('no se pudieron consultar las estadísticas')
+        expect(text).not.toContain('Dato parcial')
+        expect(text).toContain('Espada de Hierro')
+        expect(text).toContain('Buen combate')
+        expect(text).toContain('Pedido ord-1')
+      })
+
+      it('reproduce el contenido del PDF sin escrituras ni selector de héroe o titular', async () => {
+        const requestCount = statisticsSource.requests.length
+        const first = await exportPrivacy('pdf')
+        const second = await exportPrivacy('pdf')
+        expect(privacyPdfText(first.body as Buffer)).toBe(privacyPdfText(second.body as Buffer))
+        expect(statisticsSource.requests.slice(requestCount)).toEqual([
+          { method: 'GET', url: '/api/inventories/me/heroes/selection' },
+          { method: 'GET', url: '/api/inventories/me/heroes/selection' },
+        ])
+      })
+
+      it('no consulta Statistics para JSON/XML, token inválido o titular sin cuenta local', async () => {
+        const requestCount = statisticsSource.requests.length
+        expect((await exportPrivacy('json')).status).toBe(200)
+        expect((await exportPrivacy('xml')).status).toBe(200)
+        expect((await exportPrivacy('pdf', 'token-invalido')).status).toBe(401)
+        expect((await exportPrivacy('pdf', 'token-sin-cuenta')).status).toBe(404)
+        expect(statisticsSource.requests).toHaveLength(requestCount)
+      })
+
       it('resuelve el reporte exclusivamente desde el subject verificado, nunca de un identificador del titular ajeno', async () => {
         const a = await exportPrivacy('pdf', 'token-jugador')
         const b = await exportPrivacy('pdf', 'token-jugador-b')
@@ -528,19 +607,29 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
         expect(b.status).toBe(200)
         const aText = privacyPdfText(a.body as Buffer)
         const bText = privacyPdfText(b.body as Buffer)
-        for (const own of ['ana@nexus.test', 'Espada de Hierro', 'Buen combate', 'Pedido ord-1']) {
+        for (const own of [
+          'ana@nexus.test',
+          'Espada de Hierro',
+          'Buen combate',
+          'Pedido ord-1',
+          'Guerrera de Ana',
+          'Poder: base 12; efectivo 16',
+        ]) {
           expect(aText).toContain(own)
           expect(bText).not.toContain(own)
         }
         for (const own of [
           'beatriz@nexus.test',
           'Escudo de Beatriz',
+          'Maga de Beatriz',
+          'Poder: base 37; efectivo 41',
           'Comentario exclusivo de Beatriz',
           'Pedido ord-beatriz',
         ]) {
           expect(bText).toContain(own)
           expect(aText).not.toContain(own)
         }
+        expect(statisticsSource.lastAccessToken).toBe('token-jugador-b')
         expect(inventoryReport.lastAccessToken).toBe('token-jugador-b')
         expect(communityReport.lastAccessToken).toBe('token-jugador-b')
         expect(commerceReport.lastAccessToken).toBe('token-jugador-b')
@@ -559,6 +648,7 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
       it('no muta la cuenta al generar el PDF', async () => {
         const before = await captureStoredAccounts()
         const sourceBefore = structuredClone([
+          statisticsSource.body,
           inventoryReport.result,
           communityReport.result,
           commerceReport.result,
@@ -567,9 +657,12 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
         expect((await exportPrivacy('pdf')).status).toBe(200)
 
         expect(await captureStoredAccounts()).toEqual(before)
-        expect([inventoryReport.result, communityReport.result, commerceReport.result]).toEqual(
-          sourceBefore,
-        )
+        expect([
+          statisticsSource.body,
+          inventoryReport.result,
+          communityReport.result,
+          commerceReport.result,
+        ]).toEqual(sourceBefore)
       })
     })
 
@@ -656,6 +749,11 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
       const content = path.endsWith('pdf') ? privacyPdfText(response.body as Buffer) : response.text
       expect(content).toContain('ana@nexus.test')
       expect(content).not.toContain('beatriz@nexus.test')
+      if (path.endsWith('pdf')) {
+        expect(content).toContain('Guerrera de Ana')
+        expect(content).not.toContain('Maga de Beatriz')
+        expect(statisticsSource.lastAccessToken).toBe('token-jugador')
+      }
     })
 
     it.each(paths)('rechaza un testimonio inválido en %s sin exponer datos', async (path) => {

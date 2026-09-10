@@ -1,3 +1,4 @@
+import { preparedStatisticsFixture } from '../support/player-statistics-fixture'
 import type { OwnPersonalDataDto } from '../../src/application/dto/OwnPersonalDataDto'
 import type { ClockPort } from '../../src/application/ports/ClockPort'
 import type { PlayerInventoryReportResult } from '../../src/application/ports/PlayerInventoryReportPort'
@@ -23,6 +24,7 @@ const AVAILABLE_INVENTORY: PlayerInventoryReportResult = {
   available: true,
   items: [{ reference: 'espada-de-hierro', name: 'Espada de Hierro', quantity: 1 }],
 }
+const AVAILABLE_STATISTICS = { available: true as const, statistics: preparedStatisticsFixture() }
 const AVAILABLE_COMMENTS: CommunityReportResult = {
   available: true,
   posts: [
@@ -36,6 +38,7 @@ const AVAILABLE_ORDERS: CommerceReportResult = {
 
 interface Harness {
   readonly getOwnPersonalData: { execute: jest.Mock }
+  readonly statistics: { getOwnPreparedHeroStatistics: jest.Mock }
   readonly inventory: { listOwnItems: jest.Mock }
   readonly community: { listOwnPosts: jest.Mock }
   readonly commerce: { listOwnOrders: jest.Mock }
@@ -45,6 +48,9 @@ interface Harness {
 
 const buildHarness = (): Harness => {
   const getOwnPersonalData = { execute: jest.fn().mockResolvedValue(PERSONAL_DATA) }
+  const statistics = {
+    getOwnPreparedHeroStatistics: jest.fn().mockResolvedValue(AVAILABLE_STATISTICS),
+  }
   const inventory = { listOwnItems: jest.fn().mockResolvedValue(AVAILABLE_INVENTORY) }
   const community = { listOwnPosts: jest.fn().mockResolvedValue(AVAILABLE_COMMENTS) }
   const commerce = { listOwnOrders: jest.fn().mockResolvedValue(AVAILABLE_ORDERS) }
@@ -53,13 +59,14 @@ const buildHarness = (): Harness => {
   const useCase = new GeneratePrivacyPdfReport({
     getOwnPersonalData: getOwnPersonalData as unknown as GetOwnPersonalData,
     inventory: inventory,
+    statistics,
     community: community,
     commerce: commerce,
     renderer: renderer,
     clock: FIXED_CLOCK,
   })
 
-  return { getOwnPersonalData, inventory, community, commerce, renderer, useCase }
+  return { getOwnPersonalData, statistics, inventory, community, commerce, renderer, useCase }
 }
 
 describe('GeneratePrivacyPdfReport (HU-45.3)', () => {
@@ -78,15 +85,17 @@ describe('GeneratePrivacyPdfReport (HU-45.3)', () => {
     expect(sections.generatedAt).toBe(FIXED_NOW.toISOString())
     expect(sections.identity).toEqual(PERSONAL_DATA)
     expect(sections.inventory).toEqual(AVAILABLE_INVENTORY)
+    expect(sections.statistics).toEqual(AVAILABLE_STATISTICS)
     expect(sections.comments).toEqual(AVAILABLE_COMMENTS)
     expect(sections.transactions).toEqual(AVAILABLE_ORDERS)
   })
 
-  it('reenvia el MISMO testimonio del titular a las tres fuentes, sin construir ningun identificador de cuenta', async () => {
+  it('reenvia el MISMO testimonio del titular a las cuatro fuentes, sin construir ningun identificador de cuenta', async () => {
     const harness = buildHarness()
 
     await harness.useCase.execute('sub:ana', 'token-de-ana')
 
+    expect(harness.statistics.getOwnPreparedHeroStatistics).toHaveBeenCalledWith('token-de-ana')
     expect(harness.inventory.listOwnItems).toHaveBeenCalledWith('token-de-ana')
     expect(harness.community.listOwnPosts).toHaveBeenCalledWith('token-de-ana')
     expect(harness.commerce.listOwnOrders).toHaveBeenCalledWith('token-de-ana')
@@ -108,6 +117,7 @@ describe('GeneratePrivacyPdfReport (HU-45.3)', () => {
       'cuenta inexistente',
     )
 
+    expect(harness.statistics.getOwnPreparedHeroStatistics).not.toHaveBeenCalled()
     expect(harness.inventory.listOwnItems).not.toHaveBeenCalled()
     expect(harness.community.listOwnPosts).not.toHaveBeenCalled()
     expect(harness.commerce.listOwnOrders).not.toHaveBeenCalled()
@@ -127,11 +137,15 @@ describe('GeneratePrivacyPdfReport (HU-45.3)', () => {
     expect(sections.transactions).toEqual(AVAILABLE_ORDERS)
   })
 
-  it('genera el reporte incluso cuando las TRES fuentes externas no estan disponibles', async () => {
+  it('genera el reporte incluso cuando las CUATRO fuentes externas no estan disponibles', async () => {
     const harness = buildHarness()
     harness.inventory.listOwnItems.mockResolvedValue({ available: false, items: [] })
     harness.community.listOwnPosts.mockResolvedValue({ available: false, posts: [] })
     harness.commerce.listOwnOrders.mockResolvedValue({ available: false, orders: [] })
+    harness.statistics.getOwnPreparedHeroStatistics.mockResolvedValue({
+      available: false,
+      statistics: null,
+    })
 
     const file = await harness.useCase.execute('sub:ana', 'token-de-ana')
 
@@ -144,15 +158,20 @@ describe('GeneratePrivacyPdfReport (HU-45.3)', () => {
     const before = structuredClone([
       PERSONAL_DATA,
       AVAILABLE_INVENTORY,
+      AVAILABLE_STATISTICS,
       AVAILABLE_COMMENTS,
       AVAILABLE_ORDERS,
     ])
 
     await harness.useCase.execute('sub:ana', 'token-de-ana')
 
-    expect([PERSONAL_DATA, AVAILABLE_INVENTORY, AVAILABLE_COMMENTS, AVAILABLE_ORDERS]).toEqual(
-      before,
-    )
+    expect([
+      PERSONAL_DATA,
+      AVAILABLE_INVENTORY,
+      AVAILABLE_STATISTICS,
+      AVAILABLE_COMMENTS,
+      AVAILABLE_ORDERS,
+    ]).toEqual(before)
   })
 
   it('ownership: sus dependencias no incluyen ningun puerto de escritura ni de otro dato de Account', () => {
@@ -166,6 +185,7 @@ describe('GeneratePrivacyPdfReport (HU-45.3)', () => {
       'getOwnPersonalData',
       'inventory',
       'renderer',
+      'statistics',
     ])
   })
 })

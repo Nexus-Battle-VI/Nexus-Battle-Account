@@ -1,9 +1,35 @@
 import PDFDocument from 'pdfkit'
+import type {
+  ReportHeroStats,
+  ReportStatisticMagnitude,
+} from '../../../application/ports/PlayerStatisticsReportPort'
 
 import type {
   PdfPrivacyReportRendererPort,
   PrivacyReportSections,
 } from '../../../application/ports/PdfPrivacyReportRendererPort'
+
+const STATISTIC_LABELS: Readonly<Record<string, string>> = {
+  POWER: 'Poder',
+  HEALTH: 'Vida',
+  DEFENSE: 'Defensa',
+  ATTACK: 'Ataque',
+  DAMAGE: 'Daño',
+  HEALING: 'Sanación',
+}
+
+const statisticText = (value: number | ReportStatisticMagnitude | null): string => {
+  if (value === null) return 'no informado'
+  if (typeof value === 'number') return String(value)
+  switch (value.mode) {
+    case 'FIXED':
+      return String(value.amount)
+    case 'PERCENTAGE':
+      return `${String(value.basisPoints / 100)}%`
+    case 'DICE':
+      return `${String(value.count)}d${String(value.sides)}`
+  }
+}
 
 /**
  * Renderiza el reporte PDF de HU-45.3 con `pdfkit` (generacion en servidor,
@@ -55,7 +81,7 @@ export class PdfKitPrivacyReportRenderer implements PdfPrivacyReportRendererPort
     doc.moveDown(1)
 
     this.writeInventorySection(doc, sections)
-    this.writeStatisticsSection(doc)
+    this.writeStatisticsSection(doc, sections)
     this.writeCommentsSection(doc, sections)
     this.writeTransactionsSection(doc, sections)
   }
@@ -99,18 +125,48 @@ export class PdfKitPrivacyReportRenderer implements PdfPrivacyReportRendererPort
     doc.moveDown(1)
   }
 
-  /**
-   * No existe todavia ningun dominio de heroes/estadisticas/progreso
-   * desplegado en ningun servicio (`data-treatment-matrix-v0.3.md`,
-   * "Pendiente asignacion de owner"). Se declara explicitamente asi, en
-   * lugar de inventar una fuente que no existe.
-   */
-  private writeStatisticsSection(doc: PDFKit.PDFDocument): void {
-    this.writeSectionHeading(doc, 'Estadísticas')
-    this.writeUnavailableNotice(
-      doc,
-      'todavía no existe una fuente de datos de estadísticas del jugador en el sistema.',
-    )
+  private writeStatisticsSection(doc: PDFKit.PDFDocument, sections: PrivacyReportSections): void {
+    this.writeSectionHeading(doc, 'Estadísticas del héroe preparado')
+    if (!sections.statistics.available) {
+      this.writeUnavailableNotice(
+        doc,
+        'no se pudieron consultar las estadísticas en Player-Inventory en este momento.',
+      )
+      return
+    }
+    const data = sections.statistics.statistics
+    if (data === null) {
+      doc
+        .fontSize(10)
+        .text('No hay una configuración de héroe preparado disponible para consultar estadísticas.')
+      doc.moveDown(1)
+      return
+    }
+    doc.fontSize(10).text(`Héroe: ${data.hero.name} (${data.hero.reference})`)
+    doc.text(`Preparación: ${data.ready ? 'listo' : 'no listo'}`)
+    doc.text('Estadísticas base y efectivas')
+    const keys: readonly (keyof ReportHeroStats)[] = [
+      'power',
+      'health',
+      'defense',
+      'attack',
+      'damage',
+      'healing',
+    ]
+    for (const key of keys) {
+      doc.text(
+        `${STATISTIC_LABELS[key.toUpperCase()] ?? key}: base ${statisticText(data.baseStats[key])}; efectivo ${statisticText(data.effectiveStats[key])}`,
+      )
+    }
+    if (data.deltas.length > 0) {
+      doc.text('Modificadores (deltas informados por la fuente)')
+      for (const change of data.deltas) {
+        doc.text(
+          `${STATISTIC_LABELS[change.statistic] ?? change.statistic}: ${String(change.base)} -> ${String(change.effective)} (delta: ${String(change.delta)})`,
+        )
+      }
+    }
+    doc.moveDown(1)
   }
 
   private writeCommentsSection(doc: PDFKit.PDFDocument, sections: PrivacyReportSections): void {

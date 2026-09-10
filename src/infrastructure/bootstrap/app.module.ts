@@ -196,6 +196,11 @@ import { JsonPrivacySerializer } from '../../adapters/outbound/export/JsonPrivac
 import { XmlPrivacySerializer } from '../../adapters/outbound/export/XmlPrivacySerializer'
 import { PdfKitPrivacyReportRenderer } from '../../adapters/outbound/export/PdfKitPrivacyReportRenderer'
 import { HttpPlayerInventoryReportAdapter } from '../../adapters/outbound/reporting/HttpPlayerInventoryReportAdapter'
+import { HttpPlayerStatisticsReportAdapter } from '../../adapters/outbound/reporting/HttpPlayerStatisticsReportAdapter'
+import {
+  PLAYER_STATISTICS_REPORT,
+  type PlayerStatisticsReportPort,
+} from '../../application/ports/PlayerStatisticsReportPort'
 import { HttpCommunityReportAdapter } from '../../adapters/outbound/reporting/HttpCommunityReportAdapter'
 import { HttpCommerceReportAdapter } from '../../adapters/outbound/reporting/HttpCommerceReportAdapter'
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
@@ -725,6 +730,12 @@ export const DATABASE = Symbol('Database')
       inject: [APP_CONFIG, LOGGER],
     },
     {
+      provide: PLAYER_STATISTICS_REPORT,
+      useFactory: (config: AppConfig, logger: Logger): PlayerStatisticsReportPort =>
+        new HttpPlayerStatisticsReportAdapter({ baseUrl: config.playerInventoryBaseUrl, logger }),
+      inject: [APP_CONFIG, LOGGER],
+    },
+    {
       provide: COMMUNITY_REPORT,
       useFactory: (config: AppConfig, logger: Logger): CommunityReportPort =>
         new HttpCommunityReportAdapter({
@@ -751,6 +762,7 @@ export const DATABASE = Symbol('Database')
       useFactory: (
         getOwnPersonalData: GetOwnPersonalData,
         inventory: PlayerInventoryReportPort,
+        statistics: PlayerStatisticsReportPort,
         community: CommunityReportPort,
         commerce: CommerceReportPort,
         renderer: PdfPrivacyReportRendererPort,
@@ -759,6 +771,7 @@ export const DATABASE = Symbol('Database')
         new GeneratePrivacyPdfReport({
           getOwnPersonalData,
           inventory,
+          statistics,
           community,
           commerce,
           renderer,
@@ -767,6 +780,7 @@ export const DATABASE = Symbol('Database')
       inject: [
         GET_OWN_PERSONAL_DATA,
         PLAYER_INVENTORY_REPORT,
+        PLAYER_STATISTICS_REPORT,
         COMMUNITY_REPORT,
         COMMERCE_REPORT,
         PDF_PRIVACY_REPORT_RENDERER,
