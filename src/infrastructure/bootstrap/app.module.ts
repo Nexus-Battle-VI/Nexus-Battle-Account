@@ -38,6 +38,8 @@ import {
   APPLY_SANCTION,
   REVOKE_ROLE,
   LOGOUT_ACCOUNT,
+  REFRESH_SESSION,
+  COOKIE_SECURE,
   RESET_RECOVERY_PASSWORD,
   START_PASSWORD_RECOVERY,
   VERIFY_RECOVERY_ANSWERS,
@@ -63,6 +65,7 @@ import { ChangeOwnPassword } from '../../application/use-cases/ChangeOwnPassword
 import { VerifyAccount } from '../../application/use-cases/VerifyAccount'
 import { LoginAccount } from '../../application/use-cases/LoginAccount'
 import { LogoutAccount } from '../../application/use-cases/LogoutAccount'
+import { RefreshSession } from '../../application/use-cases/RefreshSession'
 import { StartPasswordRecovery } from '../../application/use-cases/StartPasswordRecovery'
 import { VerifyRecoveryAnswers } from '../../application/use-cases/VerifyRecoveryAnswers'
 import { VerifyRecoveryCode } from '../../application/use-cases/VerifyRecoveryCode'
@@ -854,6 +857,29 @@ export const DATABASE = Symbol('Database')
         CLOCK,
         LOGGER,
       ],
+    },
+    {
+      // `nodeEnv==='production'` y no un booleano de `.env` aparte: el
+      // entorno local (Docker/Vite dev) corre en HTTP simple, y una cookie
+      // `Secure` alli el navegador la descarta en silencio -la sesion nunca
+      // persistiria y nadie vería por que-.
+      provide: COOKIE_SECURE,
+      useFactory: (config: AppConfig): boolean => config.nodeEnv === 'production',
+      inject: [APP_CONFIG],
+    },
+    {
+      provide: REFRESH_SESSION,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        authenticationProvider: AuthenticationProviderPort,
+        tokenVerifier: TokenVerifierPort,
+      ): RefreshSession =>
+        new RefreshSession({
+          accounts,
+          authenticationProvider,
+          tokenVerifier,
+        }),
+      inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER, TOKEN_VERIFIER],
     },
     {
       provide: MFA_EVIDENCE_REPOSITORY,

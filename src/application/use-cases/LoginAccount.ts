@@ -164,6 +164,7 @@ export class LoginAccount {
       subject: account.subject,
       accessToken: outcome.accessToken,
       expiresIn: outcome.expiresIn,
+      refreshToken: outcome.refreshToken,
     }
   }
 }

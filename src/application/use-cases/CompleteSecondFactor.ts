@@ -100,6 +100,7 @@ export class CompleteSecondFactor {
       subject: account.subject,
       accessToken: outcome.accessToken,
       expiresIn: outcome.expiresIn,
+      refreshToken: outcome.refreshToken,
     }
   }
 
