@@ -432,7 +432,10 @@ describe('API de sesiones (HU-02, HU-03)', () => {
         .post('/api/sessions')
         .send({ identifier: 'refresh-ok@nexus.test', password: VALID_PASSWORD })
 
-      const refreshToken = cookieValue(login.headers['set-cookie'] as string[] | undefined, 'refresh_token')
+      const refreshToken = cookieValue(
+        login.headers['set-cookie'] as string[] | undefined,
+        'refresh_token',
+      )
 
       if (refreshToken === null) {
         throw new Error('El login no dejo cookie de refresco: precondicion de la prueba.')
