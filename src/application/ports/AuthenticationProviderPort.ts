@@ -56,7 +56,18 @@ export interface AuthenticationCredentials {
  * precisamente para que nadie tenga que destriparlo para saberlo.
  */
 export type AuthenticationOutcome =
-  | { readonly kind: 'authenticated'; readonly accessToken: string; readonly expiresIn: number }
+  | {
+      readonly kind: 'authenticated'
+      readonly accessToken: string
+      readonly expiresIn: number
+      /**
+       * Testimonio de larga vida para renovar `accessToken` sin credenciales
+       * (HU-02, sesion persistente tras recargar). Nunca se registra en logs
+       * ni se devuelve al cliente en el cuerpo de la respuesta: el controlador
+       * lo guarda en una cookie `HttpOnly`, invisible a JavaScript.
+       */
+      readonly refreshToken: string
+    }
   | {
       readonly kind: 'challengeRequired'
       readonly challengeToken: string
@@ -100,11 +111,24 @@ export type SecondFactorOutcome =
       readonly kind: 'verified'
       readonly accessToken: string
       readonly expiresIn: number
+      /** Misma razon que en `AuthenticationOutcome.authenticated`. */
+      readonly refreshToken: string
       /** Derivado por el adaptador del reto que el proveedor acaba de aceptar. */
       readonly method: SecondFactorMethod
     }
   | { readonly kind: 'invalidCode' }
   | { readonly kind: 'challengeExpired' }
+
+/**
+ * Resultado de renovar `accessToken` a partir de un `refreshToken` (HU-02,
+ * sesion persistente). El proveedor NO reemite `refreshToken`: este pool no
+ * tiene activada la rotacion, asi que el mismo testimonio de refresco sirve
+ * para toda su vigencia.
+ */
+export type RefreshOutcome =
+  | { readonly kind: 'refreshed'; readonly accessToken: string; readonly expiresIn: number }
+  /** Testimonio de refresco vencido, revocado o desconocido para el proveedor. */
+  | { readonly kind: 'invalid' }
 
 export interface AuthenticationProviderPort {
   /** Primera etapa: usuario y contrasena. */
@@ -112,6 +136,9 @@ export interface AuthenticationProviderPort {
 
   /** Segunda etapa: completa un reto de segundo factor pendiente. */
   verifySecondFactor(input: SecondFactorVerification): Promise<SecondFactorOutcome>
+
+  /** Renueva un `accessToken` vencido sin volver a pedir credenciales. */
+  refresh(refreshToken: string): Promise<RefreshOutcome>
 
   /**
    * Etapa intermedia: elige factor cuando el proveedor ofrecio varios.

@@ -56,7 +56,11 @@ describe('CognitoAuthenticationProvider', () => {
         })
 
         return Promise.resolve({
-          AuthenticationResult: { AccessToken: 'token-real', ExpiresIn: 3600 },
+          AuthenticationResult: {
+            AccessToken: 'token-real',
+            ExpiresIn: 3600,
+            RefreshToken: 'refresh-real',
+          },
         })
       })
 
@@ -65,14 +69,23 @@ describe('CognitoAuthenticationProvider', () => {
         password: 'Abcdefg1!',
       })
 
-      expect(outcome).toEqual({ kind: 'authenticated', accessToken: 'token-real', expiresIn: 3600 })
+      expect(outcome).toEqual({
+        kind: 'authenticated',
+        accessToken: 'token-real',
+        expiresIn: 3600,
+        refreshToken: 'refresh-real',
+      })
       expect(send).toHaveBeenCalledTimes(1)
     })
 
     it('el accessToken y el expiresIn de la respuesta authenticated provienen literalmente de Cognito', async () => {
       withMockedSend(() =>
         Promise.resolve({
-          AuthenticationResult: { AccessToken: 'exactamente-este-token', ExpiresIn: 1800 },
+          AuthenticationResult: {
+            AccessToken: 'exactamente-este-token',
+            ExpiresIn: 1800,
+            RefreshToken: 'refresh-cualquiera',
+          },
         }),
       )
 
@@ -213,7 +226,11 @@ describe('CognitoAuthenticationProvider', () => {
         })
 
         return Promise.resolve({
-          AuthenticationResult: { AccessToken: 'token-admin', ExpiresIn: 3600 },
+          AuthenticationResult: {
+            AccessToken: 'token-admin',
+            ExpiresIn: 3600,
+            RefreshToken: 'refresh-admin',
+          },
         })
       })
 
@@ -227,6 +244,7 @@ describe('CognitoAuthenticationProvider', () => {
         kind: 'verified',
         accessToken: 'token-admin',
         expiresIn: 3600,
+        refreshToken: 'refresh-admin',
         method: SecondFactorMethod.AuthenticatorApp,
       })
       expect(send).toHaveBeenCalledTimes(1)
@@ -238,7 +256,9 @@ describe('CognitoAuthenticationProvider', () => {
       [ChallengeNameType.EMAIL_OTP, SecondFactorMethod.Email],
     ])('deriva %s como metodo %s del reto verificado', async (challengeName, method) => {
       withMockedSend(() =>
-        Promise.resolve({ AuthenticationResult: { AccessToken: 'token', ExpiresIn: 900 } }),
+        Promise.resolve({
+          AuthenticationResult: { AccessToken: 'token', ExpiresIn: 900, RefreshToken: 'refresh' },
+        }),
       )
 
       const outcome = await buildProvider().verifySecondFactor({
@@ -253,7 +273,11 @@ describe('CognitoAuthenticationProvider', () => {
     it('el accessToken y el expiresIn de verified provienen literalmente de Cognito', async () => {
       withMockedSend(() =>
         Promise.resolve({
-          AuthenticationResult: { AccessToken: 'exactamente-este-token-admin', ExpiresIn: 900 },
+          AuthenticationResult: {
+            AccessToken: 'exactamente-este-token-admin',
+            ExpiresIn: 900,
+            RefreshToken: 'refresh-cualquiera-admin',
+          },
         }),
       )
 
@@ -338,6 +362,79 @@ describe('CognitoAuthenticationProvider', () => {
       ).rejects.toMatchObject({
         message: expect.not.stringContaining('999999'),
       })
+    })
+  })
+
+  describe('refresh', () => {
+    it('usa REFRESH_TOKEN_AUTH con AdminInitiateAuth, sin volver a pedir credenciales', async () => {
+      const send = withMockedSend((command) => {
+        const input = (command as { input: Record<string, unknown> }).input
+
+        expect(command).toBeInstanceOf(AdminInitiateAuthCommand)
+        expect(input.AuthFlow).toBe('REFRESH_TOKEN_AUTH')
+        expect(input.UserPoolId).toBe('us-east-1_pruebas')
+        expect(input.ClientId).toBe('cliente-app')
+        expect(input.AuthParameters).toEqual({ REFRESH_TOKEN: 'refresh-vigente' })
+
+        return Promise.resolve({
+          AuthenticationResult: { AccessToken: 'access-renovado', ExpiresIn: 900 },
+        })
+      })
+
+      const outcome = await buildProvider().refresh('refresh-vigente')
+
+      expect(outcome).toEqual({
+        kind: 'refreshed',
+        accessToken: 'access-renovado',
+        expiresIn: 900,
+      })
+      expect(send).toHaveBeenCalledTimes(1)
+    })
+
+    it('un testimonio de refresco vencido o revocado se traduce a invalid, no a un error', async () => {
+      withMockedSend(() =>
+        Promise.reject(
+          new NotAuthorizedException({ message: 'Refresh Token has expired', $metadata: {} }),
+        ),
+      )
+
+      const outcome = await buildProvider().refresh('refresh-vencido')
+
+      expect(outcome).toEqual({ kind: 'invalid' })
+    })
+
+    it('no reemite un nuevo testimonio de refresco: este pool no rota', async () => {
+      withMockedSend(() =>
+        Promise.resolve({
+          AuthenticationResult: {
+            AccessToken: 'access-renovado',
+            ExpiresIn: 900,
+            RefreshToken: 'esto-no-deberia-importar',
+          },
+        }),
+      )
+
+      const outcome = await buildProvider().refresh('refresh-vigente')
+
+      expect(outcome).not.toHaveProperty('refreshToken')
+    })
+
+    it('una respuesta sin AccessToken o ExpiresIn falla cerrado, no con un resultado a medias', async () => {
+      withMockedSend(() => Promise.resolve({ AuthenticationResult: {} }))
+
+      await expect(buildProvider().refresh('refresh-vigente')).rejects.toBeInstanceOf(
+        AuthenticationProviderError,
+      )
+    })
+
+    it('un fallo inesperado del proveedor se traduce a AuthenticationProviderError', async () => {
+      withMockedSend(() =>
+        Promise.reject(new InternalErrorException({ message: 'boom', $metadata: {} })),
+      )
+
+      await expect(buildProvider().refresh('refresh-vigente')).rejects.toBeInstanceOf(
+        AuthenticationProviderError,
+      )
     })
   })
 })

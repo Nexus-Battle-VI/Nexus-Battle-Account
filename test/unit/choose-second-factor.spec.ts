@@ -17,12 +17,14 @@ const providerReturning = (outcome: AuthenticationOutcome): AuthenticationProvid
   authenticate: () => Promise.reject(new Error('no deberia llamarse')),
   verifySecondFactor: () => Promise.reject(new Error('no deberia llamarse')),
   chooseSecondFactor: () => Promise.resolve(outcome),
+  refresh: () => Promise.reject(new Error('no deberia llamarse')),
 })
 
 const providerThatFails = (): AuthenticationProviderPort => ({
   authenticate: () => Promise.reject(new Error('no deberia llamarse')),
   verifySecondFactor: () => Promise.reject(new Error('no deberia llamarse')),
   chooseSecondFactor: () => Promise.reject(new AuthenticationProviderError('caido')),
+  refresh: () => Promise.reject(new Error('no deberia llamarse')),
 })
 
 const withAccount = async (): Promise<InMemoryAccountRepository> => {
@@ -60,6 +62,7 @@ describe('ChooseSecondFactor', () => {
         authenticate: () => Promise.reject(new Error('no deberia llamarse')),
         verifySecondFactor: () => Promise.reject(new Error('no deberia llamarse')),
         chooseSecondFactor: () => Promise.reject(new Error('NO debe llegar al proveedor')),
+        refresh: () => Promise.reject(new Error('no deberia llamarse')),
       },
     })
 
@@ -137,6 +140,7 @@ describe('ChooseSecondFactor', () => {
         kind: 'authenticated',
         accessToken: 'token-que-no-deberia-existir',
         expiresIn: 3600,
+        refreshToken: 'refresh-que-no-deberia-existir',
       }),
     })
 

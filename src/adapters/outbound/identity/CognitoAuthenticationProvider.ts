@@ -21,6 +21,7 @@ import {
   type AuthenticationCredentials,
   type AuthenticationOutcome,
   type AuthenticationProviderPort,
+  type RefreshOutcome,
   type SecondFactorOutcome,
   type SecondFactorSelection,
   type SecondFactorVerification,
@@ -148,11 +149,10 @@ export class CognitoAuthenticationProvider implements AuthenticationProviderPort
       )
     }
 
-    const { accessToken, expiresIn } = CognitoAuthenticationProvider.unpackAuthenticationResult(
-      response.AuthenticationResult,
-    )
+    const { accessToken, expiresIn, refreshToken } =
+      CognitoAuthenticationProvider.unpackAuthenticationResult(response.AuthenticationResult)
 
-    return { kind: 'authenticated', accessToken, expiresIn }
+    return { kind: 'authenticated', accessToken, expiresIn, refreshToken }
   }
 
   /**
@@ -245,11 +245,60 @@ export class CognitoAuthenticationProvider implements AuthenticationProviderPort
     // esta contemplado por HU-02: `unpackAuthenticationResult` lo trata como
     // fallo del proveedor en lugar de inventar una cadena de retos que nadie
     // ha aprobado.
-    const { accessToken, expiresIn } = CognitoAuthenticationProvider.unpackAuthenticationResult(
-      response.AuthenticationResult,
-    )
+    const { accessToken, expiresIn, refreshToken } =
+      CognitoAuthenticationProvider.unpackAuthenticationResult(response.AuthenticationResult)
 
-    return { kind: 'verified', accessToken, expiresIn, method }
+    return { kind: 'verified', accessToken, expiresIn, refreshToken, method }
+  }
+
+  /**
+   * Renueva `accessToken` con `REFRESH_TOKEN_AUTH` (HU-02, sesion persistente).
+   *
+   * Sigue usando `AdminInitiateAuthCommand` -no la variante publica- por la
+   * misma razon que `authenticate`: el flujo `Admin*` exige credenciales de
+   * AWS que solo el runtime de Account tiene, y este pool no habilita
+   * `ALLOW_REFRESH_TOKEN_AUTH` para el flujo publico.
+   *
+   * `NotAuthorizedException` aqui significa testimonio de refresco vencido,
+   * revocado (cierre de sesion) o desconocido: las tres se tratan igual,
+   * `invalid`, para no distinguir un caso de otro ante quien reintenta.
+   */
+  async refresh(refreshToken: string): Promise<RefreshOutcome> {
+    let response: AdminInitiateAuthCommandOutput
+
+    try {
+      response = await this.client.send(
+        new AdminInitiateAuthCommand({
+          UserPoolId: this.userPoolId,
+          ClientId: this.clientId,
+          AuthFlow: AuthFlowType.REFRESH_TOKEN_AUTH,
+          AuthParameters: { REFRESH_TOKEN: refreshToken },
+        }),
+      )
+    } catch (error: unknown) {
+      if (error instanceof NotAuthorizedException) {
+        return { kind: 'invalid' }
+      }
+
+      throw new AuthenticationProviderError(CognitoAuthenticationProvider.describeUnexpected(error))
+    }
+
+    // A diferencia de `authenticate`/`verifySecondFactor`, este pool no rota
+    // el testimonio de refresco: `RefreshToken` no viaja en esta respuesta.
+    if (
+      response.AuthenticationResult?.AccessToken === undefined ||
+      response.AuthenticationResult.ExpiresIn === undefined
+    ) {
+      throw new AuthenticationProviderError(
+        'Cognito no devolvio un testimonio de acceso completo al renovar: respuesta inesperada.',
+      )
+    }
+
+    return {
+      kind: 'refreshed',
+      accessToken: response.AuthenticationResult.AccessToken,
+      expiresIn: response.AuthenticationResult.ExpiresIn,
+    }
   }
 
   /**
@@ -431,14 +480,23 @@ export class CognitoAuthenticationProvider implements AuthenticationProviderPort
   private static unpackAuthenticationResult(result: AuthenticationResultType | undefined): {
     accessToken: string
     expiresIn: number
+    refreshToken: string
   } {
-    if (result?.AccessToken === undefined || result.ExpiresIn === undefined) {
+    if (
+      result?.AccessToken === undefined ||
+      result.ExpiresIn === undefined ||
+      result.RefreshToken === undefined
+    ) {
       throw new AuthenticationProviderError(
         'Cognito no devolvio un testimonio de acceso completo: respuesta inesperada.',
       )
     }
 
-    return { accessToken: result.AccessToken, expiresIn: result.ExpiresIn }
+    return {
+      accessToken: result.AccessToken,
+      expiresIn: result.ExpiresIn,
+      refreshToken: result.RefreshToken,
+    }
   }
 
   private static regionOf(userPoolId: string): string {

@@ -23,6 +23,14 @@ export const FIND_ACCOUNT_BY_EMAIL = Symbol('FindAccountByEmail')
 export const ASSIGN_ROLE = Symbol('AssignRole')
 export const REVOKE_ROLE = Symbol('RevokeRole')
 export const LOGOUT_ACCOUNT = Symbol('LogoutAccount')
+export const REFRESH_SESSION = Symbol('RefreshSession')
+/**
+ * Si la cookie del testimonio de refresco lleva el atributo `Secure` (HU-02).
+ * Derivado de `AppConfig.nodeEnv` en el modulo raiz -el controlador no
+ * importa `AppConfig` directamente, para no invertir la direccion de
+ * dependencia entre `adapters/inbound` e `infrastructure/bootstrap`-.
+ */
+export const COOKIE_SECURE = Symbol('CookieSecure')
 export const START_PASSWORD_RECOVERY = Symbol('StartPasswordRecovery')
 export const VERIFY_RECOVERY_ANSWERS = Symbol('VerifyRecoveryAnswers')
 export const VERIFY_RECOVERY_CODE = Symbol('VerifyRecoveryCode')
