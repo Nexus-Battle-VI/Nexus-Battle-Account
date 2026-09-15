@@ -13,6 +13,13 @@ import { migrationNames } from '../../src/infrastructure/persistence/database'
  * una base vacia -la de CI, la de un portatil recien clonado- se aplicaban sin
  * queja. Contra la base real, que ya tenia `hu01` a `hu04`, el contenedor se
  * quedaba en `Created` y Account desaparecia del despliegue.
+ *
+ * Volvio a pasar, y esta prueba no lo atrapo: `yaAplicadasEnProduccion` se
+ * habia quedado en las primeras cinco migraciones mientras produccion seguia
+ * adelante, y `hu42-sanctions` se colo antes de `hu43-account-deletion-requests`
+ * -ya aplicada- sin que nada lo senalara hasta el despliegue real. La lista de
+ * abajo debe reflejar lo que REALMENTE esta aplicado en produccion, no lo que
+ * estaba el dia que se escribio la prueba.
  */
 describe('Orden de las migraciones', () => {
   it('el orden declarado coincide con el alfabetico, que es el unico que Kysely respeta', async () => {
@@ -30,6 +37,9 @@ describe('Orden de las migraciones', () => {
       'hu02-nickname-blacklist-seed',
       'hu03-super-administrator-role',
       'hu04-recovery-challenges',
+      'hu33-mfa-evidence',
+      'hu33-mfa-evidence-method',
+      'hu43-account-deletion-requests',
     ]
 
     // Las que ya corrieron deben seguir siendo el PREFIJO de la lista
