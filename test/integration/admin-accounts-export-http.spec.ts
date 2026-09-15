@@ -205,6 +205,61 @@ describe('Exportacion administrativa de cuentas HU-44.4', () => {
   const list = (query = ''): string => `/api/accounts${query}`
   const exportUsers = (query = ''): string => `/api/accounts/export${query}`
 
+  it('GET y exportacion conservan el registeredAt original como ISO con milisegundos', async () => {
+    const accounts = app.get<AccountRepositoryPort>(ACCOUNT_REPOSITORY)
+    const account = buildAccount({
+      ...SEEDS[0]!,
+      id: 'acc-registration-date',
+      subject: 'subject-registration-date',
+      email: 'registration.date@nexus.test',
+      displayName: 'Fecha Original',
+    })
+    const registeredAt = '2026-08-01T10:23:45.678Z'
+
+    // Solo el guardado InMemory usa el reloj fijo; HTTP conserva los timers reales.
+    jest.useFakeTimers({ now: new Date(registeredAt) })
+    try {
+      await accounts.saveRegistration(account, [])
+      jest.setSystemTime(new Date('2026-09-05T16:00:00.000Z'))
+      account.rename(DisplayName.create('Fecha Actualizada'))
+      await accounts.save(account)
+    } finally {
+      jest.useRealTimers()
+    }
+
+    try {
+      const before = (await accounts.findById(account.id))?.toSnapshot()
+      const query = `?id=${account.id.value}`
+      const listed = await request(app.getHttpServer())
+        .get(list(query))
+        .set('Authorization', bearer('token-admin'))
+      const exported = await request(app.getHttpServer())
+        .get(exportUsers(query))
+        .set('Authorization', bearer('token-admin'))
+
+      expect(listed.status).toBe(200)
+      expect(exported.status).toBe(200)
+      const listedItems = (listed.body as { readonly items: readonly Record<string, unknown>[] })
+        .items
+      expect(listedItems).toEqual([
+        expect.objectContaining({
+          id: account.id.value,
+          displayName: 'Fecha Actualizada',
+          registeredAt,
+        }),
+      ])
+      expect(parseJsonFile(exported)).toEqual(listedItems)
+      const reread = await request(app.getHttpServer())
+        .get(list(query))
+        .set('Authorization', bearer('token-admin'))
+      expect(reread.status).toBe(200)
+      expect(reread.body).toEqual(listed.body)
+      expect((await accounts.findById(account.id))?.toSnapshot()).toEqual(before)
+    } finally {
+      await accounts.deleteById(account.id)
+    }
+  })
+
   it('permite a ADMINISTRATOR descargar un archivo con los mismos IDs del panel filtrado', async () => {
     const query = '?role=ADMINISTRATOR&status=ACTIVE'
     const listed = await request(app.getHttpServer())

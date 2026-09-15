@@ -23,6 +23,14 @@ export const FIND_ACCOUNT_BY_EMAIL = Symbol('FindAccountByEmail')
 export const ASSIGN_ROLE = Symbol('AssignRole')
 export const REVOKE_ROLE = Symbol('RevokeRole')
 export const LOGOUT_ACCOUNT = Symbol('LogoutAccount')
+export const REFRESH_SESSION = Symbol('RefreshSession')
+/**
+ * Si la cookie del testimonio de refresco lleva el atributo `Secure` (HU-02).
+ * Derivado de `AppConfig.nodeEnv` en el modulo raiz -el controlador no
+ * importa `AppConfig` directamente, para no invertir la direccion de
+ * dependencia entre `adapters/inbound` e `infrastructure/bootstrap`-.
+ */
+export const COOKIE_SECURE = Symbol('CookieSecure')
 export const START_PASSWORD_RECOVERY = Symbol('StartPasswordRecovery')
 export const VERIFY_RECOVERY_ANSWERS = Symbol('VerifyRecoveryAnswers')
 export const VERIFY_RECOVERY_CODE = Symbol('VerifyRecoveryCode')
@@ -33,3 +41,5 @@ export const EXPORT_ADMIN_ACCOUNTS = Symbol('ExportAdminAccounts')
 export const REQUEST_ACCOUNT_DELETION = Symbol('RequestAccountDeletion')
 /** Sin ruta HTTP propia: lo invoca `AccountDeletionProcessingScheduler` (HU-43.3). */
 export const PROCESS_ACCOUNT_DELETION = Symbol('ProcessAccountDeletion')
+export const GENERATE_PRIVACY_PDF_REPORT = Symbol('GeneratePrivacyPdfReport')
+export const APPLY_SANCTION = Symbol('ApplySanction')

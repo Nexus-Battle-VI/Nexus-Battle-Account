@@ -41,6 +41,8 @@ export type LoginOutcome =
       readonly accessToken: string
       /** Vigencia del `accessToken` en segundos, informada por el proveedor. */
       readonly expiresIn: number
+      /** Vease `AuthenticationOutcome.authenticated.refreshToken`. */
+      readonly refreshToken: string
     }
   | {
       readonly kind: 'secondFactorRequired'
@@ -63,4 +65,27 @@ export type LoginOutcome =
   | { readonly kind: 'secondFactorNotPermitted' }
   | { readonly kind: 'secondFactorInvalid' }
   | { readonly kind: 'invalidCredentials' }
+  | { readonly kind: 'providerUnavailable' }
+
+/**
+ * Resultado de renovar la sesion a partir del testimonio de refresco (HU-02,
+ * sesion persistente tras recargar). Comparte la forma de `authenticated` a
+ * proposito -mismos campos, mismo significado- para que el controlador
+ * traduzca ambos con la misma logica.
+ */
+export type RefreshSessionOutcome =
+  | {
+      readonly kind: 'refreshed'
+      readonly account: AccountDto
+      readonly subject: string
+      readonly accessToken: string
+      readonly expiresIn: number
+    }
+  /**
+   * Cubre testimonio de refresco ausente, vencido o revocado, Y una cuenta que
+   * ya no puede autenticar (suspendida/eliminada) aunque el proveedor siga
+   * aceptando su testimonio: en ambos casos la consecuencia es la misma -no
+   * hay sesion que renovar-, y distinguirlas solo ayudaria a quien ataca.
+   */
+  | { readonly kind: 'invalid' }
   | { readonly kind: 'providerUnavailable' }

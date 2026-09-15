@@ -80,6 +80,15 @@ export class AccessDeniedError extends Error {
   }
 }
 
+export class InvalidAdminAccountQueryError extends Error {
+  constructor() {
+    super(
+      'El rango de registro debe contener fechas validas y registeredFrom no puede superar registeredTo.',
+    )
+    this.name = 'InvalidAdminAccountQueryError'
+  }
+}
+
 /**
  * Ya existe una solicitud de eliminacion activa para esta cuenta (HU-43.1).
  *

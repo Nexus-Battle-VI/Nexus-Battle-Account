@@ -258,6 +258,32 @@ describe('Account', () => {
     expect(account.pullEvents()).toHaveLength(0)
   })
 
+  it('rechaza cambiar el correo de una cuenta suspendida', () => {
+    const account = buildAccount()
+    account.verify(AT)
+    account.suspend()
+
+    expect(() => {
+      account.changeEmail(EmailAddress.create('nuevo@nexus.test'), AT)
+    }).toThrow(/suspendida/)
+
+    expect(account.currentStatus).toBe(AccountStatus.Suspended)
+    expect(account.currentEmail.value).toBe('jugador@nexus.test')
+  })
+
+  it('rechaza cambiar el correo de una cuenta baneada', () => {
+    const account = buildAccount()
+    account.verify(AT)
+    account.ban()
+
+    expect(() => {
+      account.changeEmail(EmailAddress.create('nuevo@nexus.test'), AT)
+    }).toThrow(/baneada/)
+
+    expect(account.currentStatus).toBe(AccountStatus.Banned)
+    expect(account.currentEmail.value).toBe('jugador@nexus.test')
+  })
+
   it('permite al Super Administrador conceder y retirar roles', () => {
     const account = buildAccount()
 

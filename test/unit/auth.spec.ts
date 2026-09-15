@@ -12,12 +12,18 @@ import {
   currentIdentityOf,
 } from '../../src/adapters/inbound/http/auth/decorators'
 import { Role } from '../../src/domain/entities/Role'
+import { AccountStatus } from '../../src/domain/entities/AccountStatus'
+import { Sanction } from '../../src/domain/entities/Sanction'
+import { SanctionType } from '../../src/domain/entities/SanctionType'
 import {
   TokenVerificationError,
   type TokenVerifierPort,
   type VerifiedIdentity,
 } from '../../src/application/ports/TokenVerifierPort'
 import { AuthMode, ConfigurationError, loadConfig } from '../../src/infrastructure/config/env'
+import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
+import { InMemorySanctionRepository } from '../../src/adapters/outbound/persistence/InMemorySanctionRepository'
+import { buildActiveAccount } from '../support/account-factory'
 
 interface FakeRequest {
   headers: Record<string, string | undefined>
@@ -95,11 +101,18 @@ describe('Traduccion del token a identidad verificada', () => {
 
   it('no otorga ningun rol cuando el token no trae grupos', () => {
     expect(toVerifiedIdentity({ sub: 's' }).roles.size).toBe(0)
-    expect(toVerifiedIdentity({ sub: 's', 'cognito:groups': 'ADMINISTRATOR' }).roles.size).toBe(0)
+    expect(
+      toVerifiedIdentity({
+        sub: 's',
+        'cognito:groups': 'ADMINISTRATOR',
+      }).roles.size,
+    ).toBe(0)
   })
 })
 
 describe('JwtAuthGuard', () => {
+  const NOW = new Date('2026-09-06T12:00:00.000Z')
+
   const identity: VerifiedIdentity = {
     subject: 'sujeto-1',
     roles: new Set([Role.Player]),
@@ -107,11 +120,36 @@ describe('JwtAuthGuard', () => {
     expiresAt: null,
   }
 
-  const verifier = (impl: TokenVerifierPort['verify']): TokenVerifierPort => ({ verify: impl })
+  const verifier = (impl: TokenVerifierPort['verify']): TokenVerifierPort => ({
+    verify: impl,
+  })
+
+  const buildGuard = async (reflector: Reflector, tokenVerifier: TokenVerifierPort) => {
+    const accounts = new InMemoryAccountRepository()
+    const sanctions = new InMemorySanctionRepository()
+
+    await accounts.save(
+      buildActiveAccount({
+        id: 'account-1',
+        subject: 'sujeto-1',
+        email: 'jugador@nexus.test',
+        displayName: 'Jugador Uno',
+        roles: [Role.Player],
+      }),
+    )
+
+    return {
+      accounts,
+      sanctions,
+      guard: new JwtAuthGuard(reflector, tokenVerifier, accounts, sanctions, {
+        now: (): Date => NOW,
+      }),
+    }
+  }
 
   it('deja pasar una ruta publica sin mirar la cabecera', async () => {
     const { context, reflector } = contextFor({ headers: {} }, { [IS_PUBLIC]: true })
-    const guard = new JwtAuthGuard(
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.reject(new Error('no deberia llamarse'))),
     )
@@ -121,7 +159,7 @@ describe('JwtAuthGuard', () => {
 
   it('rechaza cuando falta la cabecera', async () => {
     const { context, reflector } = contextFor({ headers: {} })
-    const guard = new JwtAuthGuard(
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.resolve(identity)),
     )
@@ -139,8 +177,10 @@ describe('JwtAuthGuard', () => {
     ['con espacio doble tras el esquema', 'Bearer  token'],
     ['con solo el esquema', 'Bearer'],
   ])('rechaza una cabecera %s', async (_caso, authorization) => {
-    const { context, reflector } = contextFor({ headers: { authorization } })
-    const guard = new JwtAuthGuard(
+    const { context, reflector } = contextFor({
+      headers: { authorization },
+    })
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.resolve(identity)),
     )
@@ -149,9 +189,11 @@ describe('JwtAuthGuard', () => {
   })
 
   it('acepta el esquema en cualquier combinacion de mayusculas', async () => {
-    const request: FakeRequest = { headers: { authorization: 'bEaReR token-valido' } }
+    const request: FakeRequest = {
+      headers: { authorization: 'bEaReR token-valido' },
+    }
     const { context, reflector } = contextFor(request)
-    const guard = new JwtAuthGuard(
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.resolve(identity)),
     )
@@ -161,8 +203,10 @@ describe('JwtAuthGuard', () => {
   })
 
   it('traduce un fallo de verificacion a 401', async () => {
-    const { context, reflector } = contextFor({ headers: { authorization: 'Bearer falso' } })
-    const guard = new JwtAuthGuard(
+    const { context, reflector } = contextFor({
+      headers: { authorization: 'Bearer falso' },
+    })
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.reject(new TokenVerificationError())),
     )
@@ -177,13 +221,144 @@ describe('JwtAuthGuard', () => {
    * de un error de credenciales.
    */
   it('no convierte un fallo de red en 401', async () => {
-    const { context, reflector } = contextFor({ headers: { authorization: 'Bearer t' } })
-    const guard = new JwtAuthGuard(
+    const { context, reflector } = contextFor({
+      headers: { authorization: 'Bearer t' },
+    })
+    const { guard } = await buildGuard(
       reflector,
       verifier(() => Promise.reject(new Error('JWKS inalcanzable'))),
     )
 
     await expect(guard.canActivate(context)).rejects.not.toBeInstanceOf(UnauthorizedException)
+  })
+
+  it('permite acceso a una cuenta activa', async () => {
+    const request: FakeRequest = {
+      headers: { authorization: 'Bearer valido' },
+    }
+    const { context, reflector } = contextFor(request)
+    const { guard } = await buildGuard(
+      reflector,
+      verifier(() => Promise.resolve(identity)),
+    )
+
+    await expect(guard.canActivate(context)).resolves.toBe(true)
+  })
+
+  it('bloquea una suspension temporal vigente', async () => {
+    const request: FakeRequest = {
+      headers: { authorization: 'Bearer valido' },
+    }
+    const { context, reflector } = contextFor(request)
+
+    const { guard, accounts, sanctions } = await buildGuard(
+      reflector,
+      verifier(() => Promise.resolve(identity)),
+    )
+
+    const account = await accounts.findBySubject('sujeto-1')
+    expect(account).not.toBeNull()
+
+    account!.suspend()
+    await accounts.save(account!)
+
+    await sanctions.save(
+      Sanction.create({
+        id: 'sanction-active',
+        targetAccountId: account!.id.value,
+        actorAccountId: 'admin-1',
+        type: SanctionType.TemporarySuspension,
+        reason: 'Suspension temporal de prueba.',
+        createdAt: NOW,
+        expiresAt: new Date('2026-09-06T13:00:00.000Z'),
+      }),
+    )
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException)
+
+    const persisted = await accounts.findBySubject('sujeto-1')
+    expect(persisted?.currentStatus).toBe(AccountStatus.Suspended)
+  })
+
+  it('reactiva una cuenta cuando la suspension temporal ya vencio', async () => {
+    const request: FakeRequest = {
+      headers: { authorization: 'Bearer valido' },
+    }
+    const { context, reflector } = contextFor(request)
+
+    const { guard, accounts, sanctions } = await buildGuard(
+      reflector,
+      verifier(() => Promise.resolve(identity)),
+    )
+
+    const account = await accounts.findBySubject('sujeto-1')
+    expect(account).not.toBeNull()
+
+    account!.suspend()
+    await accounts.save(account!)
+
+    await sanctions.save(
+      Sanction.create({
+        id: 'sanction-expired',
+        targetAccountId: account!.id.value,
+        actorAccountId: 'admin-1',
+        type: SanctionType.TemporarySuspension,
+        reason: 'Suspension temporal vencida.',
+        createdAt: new Date('2026-09-06T10:00:00.000Z'),
+        expiresAt: new Date('2026-09-06T11:00:00.000Z'),
+      }),
+    )
+
+    await expect(guard.canActivate(context)).resolves.toBe(true)
+
+    const persisted = await accounts.findBySubject('sujeto-1')
+    expect(persisted?.currentStatus).toBe(AccountStatus.Active)
+    expect(persisted?.canAuthenticate).toBe(true)
+  })
+
+  it('bloquea definitivamente una cuenta baneada', async () => {
+    const request: FakeRequest = {
+      headers: { authorization: 'Bearer valido' },
+    }
+    const { context, reflector } = contextFor(request)
+
+    const { guard, accounts } = await buildGuard(
+      reflector,
+      verifier(() => Promise.resolve(identity)),
+    )
+
+    const account = await accounts.findBySubject('sujeto-1')
+    expect(account).not.toBeNull()
+
+    account!.ban()
+    await accounts.save(account!)
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException)
+
+    const persisted = await accounts.findBySubject('sujeto-1')
+    expect(persisted?.currentStatus).toBe(AccountStatus.Banned)
+    expect(persisted?.canAuthenticate).toBe(false)
+  })
+
+  it('permite una identidad valida aunque no tenga cuenta asociada', async () => {
+    const request: FakeRequest = {
+      headers: { authorization: 'Bearer valido' },
+    }
+    const { context, reflector } = contextFor(request)
+
+    const accounts = new InMemoryAccountRepository()
+    const sanctions = new InMemorySanctionRepository()
+
+    const guard = new JwtAuthGuard(
+      reflector,
+      verifier(() => Promise.resolve(identity)),
+      accounts,
+      sanctions,
+      { now: (): Date => NOW },
+    )
+
+    await expect(guard.canActivate(context)).resolves.toBe(true)
+    expect(request.identity).toEqual(identity)
   })
 })
 
@@ -228,7 +403,10 @@ describe('RolesGuard', () => {
 
   it('deja pasar cuando la identidad tiene el rol exigido', () => {
     const { context, reflector } = contextFor(
-      { headers: {}, identity: identityWith(Role.Administrator) },
+      {
+        headers: {},
+        identity: identityWith(Role.Administrator),
+      },
       { [REQUIRED_ROLES]: [Role.Administrator] },
     )
 
@@ -237,7 +415,10 @@ describe('RolesGuard', () => {
 
   it('deniega cuando la identidad no tiene el rol exigido', () => {
     const { context, reflector } = contextFor(
-      { headers: {}, identity: identityWith(Role.Player, Role.Moderator) },
+      {
+        headers: {},
+        identity: identityWith(Role.Player, Role.Moderator),
+      },
       { [REQUIRED_ROLES]: [Role.Administrator] },
     )
 
@@ -272,17 +453,33 @@ describe('Configuracion de autenticacion', () => {
    * alto; un arranque que falla, no.
    */
   it('impide arrancar en produccion sin verificacion de identidad', () => {
-    expect(() => loadConfig({ NODE_ENV: 'production', AUTH_MODE: 'disabled' })).toThrow(
-      ConfigurationError,
-    )
-    expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(ConfigurationError)
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        AUTH_MODE: 'disabled',
+      }),
+    ).toThrow(ConfigurationError)
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+      }),
+    ).toThrow(ConfigurationError)
   })
 
   it('exige el pool y el cliente cuando la autenticacion esta activa', () => {
-    expect(() => loadConfig({ AUTH_MODE: 'jwt' })).toThrow(ConfigurationError)
-    expect(() => loadConfig({ AUTH_MODE: 'jwt', COGNITO_USER_POOL_ID: 'p' })).toThrow(
-      ConfigurationError,
-    )
+    expect(() =>
+      loadConfig({
+        AUTH_MODE: 'jwt',
+      }),
+    ).toThrow(ConfigurationError)
+
+    expect(() =>
+      loadConfig({
+        AUTH_MODE: 'jwt',
+        COGNITO_USER_POOL_ID: 'p',
+      }),
+    ).toThrow(ConfigurationError)
   })
 
   it('acepta produccion cuando la autenticacion esta completa', () => {
@@ -294,7 +491,10 @@ describe('Configuracion de autenticacion', () => {
       COGNITO_CLIENT_ID: 'cliente',
     })
 
-    expect(config.cognito).toEqual({ userPoolId: 'us-east-1_abc', clientId: 'cliente' })
+    expect(config.cognito).toEqual({
+      userPoolId: 'us-east-1_abc',
+      clientId: 'cliente',
+    })
     expect(config.authenticationDriver).toBe('cognito')
   })
 
@@ -325,7 +525,11 @@ describe('Configuracion de autenticacion', () => {
   })
 
   it('exige el pool y el cliente cuando AUTHENTICATION_DRIVER es cognito, incluso sin AUTH_MODE=jwt', () => {
-    expect(() => loadConfig({ AUTHENTICATION_DRIVER: 'cognito' })).toThrow(ConfigurationError)
+    expect(() =>
+      loadConfig({
+        AUTHENTICATION_DRIVER: 'cognito',
+      }),
+    ).toThrow(ConfigurationError)
 
     const config = loadConfig({
       AUTHENTICATION_DRIVER: 'cognito',
@@ -333,7 +537,10 @@ describe('Configuracion de autenticacion', () => {
       COGNITO_CLIENT_ID: 'cliente',
     })
 
-    expect(config.cognito).toEqual({ userPoolId: 'us-east-1_abc', clientId: 'cliente' })
+    expect(config.cognito).toEqual({
+      userPoolId: 'us-east-1_abc',
+      clientId: 'cliente',
+    })
   })
 
   it('AUTHENTICATION_DRIVER es fake por defecto', () => {

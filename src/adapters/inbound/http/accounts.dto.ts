@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsEmail,
   IsIn,
+  IsISO8601,
   IsOptional,
   IsString,
   Matches,
@@ -25,6 +26,9 @@ import type { AdminAccountStatusCountsDto } from '../../../application/dto/Admin
 import type { OwnPersonalDataDto } from '../../../application/dto/OwnPersonalDataDto'
 
 const ACCOUNT_STATUS_VALUES = Object.values(AccountStatus)
+// Instante explicito; Date y registeredAt se representan con precision de milisegundos.
+const REGISTRATION_INSTANT =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/
 
 /**
  * Contrato de entrada del registro (multipart/form-data).
@@ -114,7 +118,7 @@ export class AccountResponse {
 
   @ApiProperty({
     example: 'PENDING_VERIFICATION',
-    enum: ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED'],
+    enum: ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'BANNED'],
   })
   readonly status!: string
 
@@ -244,6 +248,48 @@ export class ListAdminAccountsQuery {
   @IsString()
   @IsIn(ACCOUNT_STATUS_VALUES, { message: 'El estado indicado no existe.' })
   status?: AccountStatusValue
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description:
+      'true: recibio al menos una sancion de HU-42; false: ninguna. Incluye sanciones vencidas. Omitir para no filtrar.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @IsBoolean({ message: 'El historial de sanciones debe ser true o false.' })
+  hasSanctionHistory?: boolean
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    example: '2026-08-01T00:00:00.000Z',
+    description:
+      'Limite inferior inclusivo UTC (registeredAt >= registeredFrom), opcional. ISO 8601 con hora y zona explicita; precision hasta milisegundos. Se combina mediante AND.',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true, strictSeparator: true })
+  @Matches(REGISTRATION_INSTANT, {
+    message:
+      'registeredFrom debe incluir fecha, hora y zona ISO 8601 explicita, con precision hasta milisegundos.',
+  })
+  registeredFrom?: string
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    example: '2026-08-31T23:59:59.999Z',
+    description:
+      'Limite superior inclusivo UTC (registeredAt <= registeredTo), opcional e independiente. ISO 8601 con hora y zona explicita; precision hasta milisegundos. Si ambos existen, registeredFrom <= registeredTo.',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true, strictSeparator: true })
+  @Matches(REGISTRATION_INSTANT, {
+    message:
+      'registeredTo debe incluir fecha, hora y zona ISO 8601 explicita, con precision hasta milisegundos.',
+  })
+  registeredTo?: string
 }
 
 export class AdminAccountSummaryResponse {
@@ -287,13 +333,19 @@ export class AdminAccountStatusCountsResponse implements AdminAccountStatusCount
 
   @ApiProperty({ example: 2 })
   readonly suspended!: number
+
+  @ApiProperty({ example: 1 })
+  readonly banned!: number
 }
 
 export class AdminAccountsResponse {
   @ApiProperty({ type: [AdminAccountSummaryResponse] })
   readonly items!: readonly AdminAccountSummaryResponse[]
 
-  @ApiProperty({ type: AdminAccountStatusCountsResponse })
+  @ApiProperty({
+    type: AdminAccountStatusCountsResponse,
+    description: 'Conteos del listado resultante; sin criterios corresponden a todas las cuentas.',
+  })
   readonly statusCounts!: AdminAccountStatusCountsResponse
 }
 

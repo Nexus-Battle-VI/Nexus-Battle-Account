@@ -398,6 +398,110 @@ describe('API de sesiones (HU-02, HU-03)', () => {
     expect(response.status).toBe(401)
   })
 
+  describe('Renovacion de sesion sin credenciales (HU-02, sesion persistente)', () => {
+    /** Extrae el valor de una cookie de un array `Set-Cookie` crudo. */
+    const cookieValue = (setCookie: readonly string[] | undefined, name: string): string | null => {
+      const raw = setCookie?.find((entry) => entry.startsWith(`${name}=`))
+
+      if (raw === undefined) {
+        return null
+      }
+
+      return raw.slice(name.length + 1).split(';')[0] ?? null
+    }
+
+    it('el login deja el testimonio de refresco en una cookie HttpOnly, nunca en el cuerpo', async () => {
+      await givenActivePlayer('refresh-login@nexus.test', 'JugadorRefreshLogin')
+
+      const login = await request(app.getHttpServer())
+        .post('/api/sessions')
+        .send({ identifier: 'refresh-login@nexus.test', password: VALID_PASSWORD })
+
+      const setCookie = login.headers['set-cookie'] as string[] | undefined
+
+      expect(login.body).not.toHaveProperty('refreshToken')
+      expect(setCookie?.some((entry) => entry.startsWith('refresh_token='))).toBe(true)
+      expect(setCookie?.some((entry) => /HttpOnly/i.test(entry))).toBe(true)
+      expect(setCookie?.some((entry) => entry.includes('Path=/api/sessions'))).toBe(true)
+    })
+
+    it('POST /api/sessions/refresh con la cookie del login emite un access token nuevo', async () => {
+      const { subject } = await givenActivePlayer('refresh-ok@nexus.test', 'JugadorRefreshOk')
+
+      const login = await request(app.getHttpServer())
+        .post('/api/sessions')
+        .send({ identifier: 'refresh-ok@nexus.test', password: VALID_PASSWORD })
+
+      const refreshToken = cookieValue(
+        login.headers['set-cookie'] as string[] | undefined,
+        'refresh_token',
+      )
+
+      if (refreshToken === null) {
+        throw new Error('El login no dejo cookie de refresco: precondicion de la prueba.')
+      }
+
+      // El testimonio renovado lo verifica `RefreshSession`: el doble solo lo
+      // reconoce si sabe a que sujeto pertenece (igual que `givenAdministrativeAccount`).
+      sujetoEmisor = subject
+
+      const refreshed = await request(app.getHttpServer())
+        .post('/api/sessions/refresh')
+        .set('Cookie', `refresh_token=${refreshToken}`)
+
+      expect(refreshed.status).toBe(200)
+      expect(refreshed.body).toMatchObject({
+        status: 'AUTHENTICATED',
+        account: { email: 'refresh-ok@nexus.test' },
+      })
+      expect(refreshed.body.accessToken).not.toBe(login.body.accessToken)
+    })
+
+    it('POST /api/sessions/refresh sin cookie responde 401', async () => {
+      const response = await request(app.getHttpServer()).post('/api/sessions/refresh')
+
+      expect(response.status).toBe(401)
+    })
+
+    it('POST /api/sessions/refresh con una cookie desconocida responde 401', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/api/sessions/refresh')
+        .set('Cookie', 'refresh_token=un-testimonio-que-nunca-se-emitio')
+
+      expect(response.status).toBe(401)
+    })
+
+    it('el cierre de sesion limpia la cookie del testimonio de refresco', async () => {
+      const email = 'refresh-logout@nexus.test'
+      const { subject } = await givenActivePlayer(email, 'JugadorRefreshLogout')
+
+      const login = await request(app.getHttpServer())
+        .post('/api/sessions')
+        .send({ identifier: email, password: VALID_PASSWORD })
+
+      const accessToken = login.body.accessToken as string
+      dynamicIdentities.set(accessToken, {
+        subject,
+        roles: new Set([Role.Player]),
+        jti: null,
+        expiresAt: null,
+      })
+
+      const logout = await request(app.getHttpServer())
+        .delete('/api/sessions')
+        .set('Authorization', `Bearer ${accessToken}`)
+
+      const setCookie = logout.headers['set-cookie'] as string[] | undefined
+
+      expect(logout.status).toBe(204)
+      expect(
+        setCookie?.some(
+          (entry) => entry.startsWith('refresh_token=') && /Expires=Thu, 01 Jan 1970/i.test(entry),
+        ),
+      ).toBe(true)
+    })
+  })
+
   describe('Cierre de sesion (HU-03)', () => {
     it('CA-01, CA-02: DELETE /api/sessions con token valido invalida la sesion y responde 204 No Content', async () => {
       const email = 'logout-jugador@nexus.test'
