@@ -15,10 +15,10 @@ import * as migrationHu03SuperAdmin from '../../adapters/outbound/persistence/mi
 import * as migrationHu04RecoveryChallenges from '../../adapters/outbound/persistence/migrations/hu04-recovery-challenges'
 import * as migrationHu33MfaEvidence from '../../adapters/outbound/persistence/migrations/hu33-mfa-evidence'
 import * as migrationHu33MfaEvidenceMethod from '../../adapters/outbound/persistence/migrations/hu33-mfa-evidence-method'
-import * as migrationHu42Sanctions from '../../adapters/outbound/persistence/migrations/hu42-sanctions'
 import * as migrationHu43AccountDeletionRequests from '../../adapters/outbound/persistence/migrations/hu43-account-deletion-requests'
 import * as migrationHu43DesvincularSolicitudEliminacion from '../../adapters/outbound/persistence/migrations/hu43-desvincular-solicitud-eliminacion-de-cuenta'
 import * as migrationHu57ProfileCountry from '../../adapters/outbound/persistence/migrations/hu57-profile-country'
+import * as migrationHu42Sanctions from '../../adapters/outbound/persistence/migrations/z20260901-hu42-sanctions'
 import * as migrationHu42AccountBanStatus from '../../adapters/outbound/persistence/migrations/z20260906-hu42-account-ban-status'
 import * as migrationHu42SanctionExpiration from '../../adapters/outbound/persistence/migrations/z20260906-hu42-sanction-expiration'
 
@@ -69,6 +69,18 @@ export const createDatabase = (options: DatabaseOptions): Kysely<Database> =>
  * tenia `hu01` a `hu04`, el arranque fallaba. Por eso llevan el prefijo de su
  * historia de usuario, como las demas: asi el orden del nombre coincide con el
  * orden en que se escribieron. `migrationNames` y su prueba lo vigilan.
+ *
+ * Volvio a ocurrir. `hu42-sanctions` se escribio DESPUES de que produccion ya
+ * tuviera aplicada `hu43-account-deletion-requests`, pero «hu42» ordena antes
+ * que «hu43»: el arranque contra la base real fallaba con `corrupted
+ * migrations` y Account desaparecia del despliegue, otra vez en `Created` y
+ * nunca `Up`. Las dos migraciones que la extienden (`z20260906-hu42-*`) ya
+ * llevaban el prefijo correcto; a esta se le habia quedado sin cambiar. Ahora
+ * es `z20260901-hu42-sanctions`, antes que sus dos extensiones y despues de
+ * todo lo que ya corria en produccion cuando se escribio. La prueba de
+ * `yaAplicadasEnProduccion` en `migration-order.spec.ts` no lo atrapo porque
+ * su lista de referencia se habia quedado en las primeras cinco migraciones:
+ * se actualiza junto con este cambio.
  */
 const migrations: MigrationProvider = {
   getMigrations: () =>
@@ -80,11 +92,11 @@ const migrations: MigrationProvider = {
       'hu04-recovery-challenges': migrationHu04RecoveryChallenges,
       'hu33-mfa-evidence': migrationHu33MfaEvidence,
       'hu33-mfa-evidence-method': migrationHu33MfaEvidenceMethod,
-      'hu42-sanctions': migrationHu42Sanctions,
       'hu43-account-deletion-requests': migrationHu43AccountDeletionRequests,
       'hu43-desvincular-solicitud-eliminacion-de-cuenta':
         migrationHu43DesvincularSolicitudEliminacion,
       'hu57-profile-country': migrationHu57ProfileCountry,
+      'z20260901-hu42-sanctions': migrationHu42Sanctions,
       'z20260906-hu42-account-ban-status': migrationHu42AccountBanStatus,
       'z20260906-hu42-sanction-expiration': migrationHu42SanctionExpiration,
     }),
