@@ -1,3 +1,4 @@
+import { AccountStatus } from '../../domain/entities/AccountStatus'
 import { isAdministrativeRole } from '../../domain/entities/Role'
 import { SecondFactorPolicy } from '../../domain/policies/SecondFactorPolicy'
 import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
@@ -5,6 +6,8 @@ import {
   AuthenticationProviderError,
   type AuthenticationProviderPort,
 } from '../ports/AuthenticationProviderPort'
+import type { ClockPort } from '../ports/ClockPort'
+import type { SanctionRepositoryPort } from '../ports/SanctionRepositoryPort'
 import { toAccountDto } from '../dto/AccountDto'
 import type { LoginOutcome } from '../dto/LoginResult'
 import { resolveAccountByIdentifier } from './AccountIdentifierResolver'
@@ -18,6 +21,8 @@ export interface LoginAccountCommand {
 export interface LoginAccountDependencies {
   readonly accounts: AccountRepositoryPort
   readonly authenticationProvider: AuthenticationProviderPort
+  readonly sanctions: SanctionRepositoryPort
+  readonly clock: ClockPort
 }
 
 /**
@@ -49,11 +54,40 @@ export class LoginAccount {
   async execute(command: LoginAccountCommand): Promise<LoginOutcome> {
     const account = await resolveAccountByIdentifier(this.deps.accounts, command.identifier)
 
-    // Cuenta inexistente y cuenta que no puede autenticarse (pendiente de
-    // verificacion o suspendida) responden IGUAL que una contrasena
-    // incorrecta. Distinguirlas permitiria enumerar cuentas por su estado,
-    // no solo por su existencia.
-    if (!account?.canAuthenticate) {
+    if (account === null) {
+      return { kind: 'invalidCredentials' }
+    }
+
+    if (account.currentStatus === AccountStatus.Banned) {
+      return { kind: 'invalidCredentials' }
+    }
+
+    if (account.currentStatus === AccountStatus.PendingVerification) {
+      return { kind: 'invalidCredentials' }
+    }
+
+    if (account.currentStatus === AccountStatus.Suspended) {
+      const now = this.deps.clock.now()
+
+      const activeSuspension = await this.deps.sanctions.findActiveTemporarySuspension(
+        account.id.value,
+        now,
+      )
+
+      if (activeSuspension !== null) {
+        return { kind: 'invalidCredentials' }
+      }
+
+      const latestTemporarySuspension = await this.deps.sanctions.findLatestTemporarySuspension(
+        account.id.value,
+      )
+
+      if (latestTemporarySuspension !== null) {
+        account.reinstate()
+        await this.deps.accounts.save(account)
+      }
+    }
+    if (!account.canAuthenticate) {
       return { kind: 'invalidCredentials' }
     }
 
@@ -130,6 +164,7 @@ export class LoginAccount {
       subject: account.subject,
       accessToken: outcome.accessToken,
       expiresIn: outcome.expiresIn,
+      refreshToken: outcome.refreshToken,
     }
   }
 }

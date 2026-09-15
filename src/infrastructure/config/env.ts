@@ -104,6 +104,15 @@ export interface AppConfig {
   readonly accountDeletionProcessingEnabled: boolean
   /** Intervalo entre pasadas del procesamiento, en milisegundos. */
   readonly accountDeletionProcessingIntervalMs: number
+  /**
+   * Bases de los servicios que el reporte PDF de HU-45.3 (Management #135)
+   * consulta por su API publica -nunca por acceso directo a su base
+   * (ADR-014 Decision 4). `null` cuando no estan configuradas: la seccion
+   * correspondiente del reporte se genera igual, marcada como no disponible.
+   */
+  readonly playerInventoryBaseUrl: string | null
+  readonly communityBaseUrl: string | null
+  readonly commerceBaseUrl: string | null
 }
 
 type RawEnv = Readonly<Record<string, string | undefined>>
@@ -332,5 +341,8 @@ export const loadConfig = (env: RawEnv): AppConfig => {
       1_000,
       86_400_000,
     ),
+    playerInventoryBaseUrl: readString(env, 'PLAYER_INVENTORY_BASE_URL', '') || null,
+    communityBaseUrl: readString(env, 'COMMUNITY_BASE_URL', '') || null,
+    commerceBaseUrl: readString(env, 'COMMERCE_BASE_URL', '') || null,
   }
 }

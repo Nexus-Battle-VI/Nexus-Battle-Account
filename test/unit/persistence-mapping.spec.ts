@@ -10,6 +10,7 @@ import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { ALL_ROLES, Role } from '../../src/domain/entities/Role'
 import { up } from '../../src/adapters/outbound/persistence/migrations/001-accounts'
 import { up as upSuperAdministratorRole } from '../../src/adapters/outbound/persistence/migrations/hu03-super-administrator-role'
+import { up as upAccountBanStatus } from '../../src/adapters/outbound/persistence/migrations/z20260906-hu42-account-ban-status'
 import { describeError } from '../../src/infrastructure/observability/describe-error'
 
 const ROW: AccountRow = {
@@ -97,15 +98,24 @@ describe('Traduccion entre fila e instantanea', () => {
  * El vocabulario de roles ya no vive en un unico archivo: `001-accounts`
  * declaro la restriccion original (PLAYER/MODERATOR/ADMINISTRATOR) y
  * `hu03-super-administrator-role` la ALTERA para anadir SUPER_ADMINISTRATOR
- * (HU-02). Una migracion aplicada no se edita, asi que el vocabulario EFECTIVO
- * de hoy es la union de ambos textos, no solo el de `001-accounts`.
+ * (HU-02).
+ *
+ * El vocabulario de estados tampoco vive ya unicamente en `001-accounts`:
+ * `z20260906-hu42-account-ban-status` amplia la restriccion para admitir
+ * `BANNED` como parte de HU-42.2.
+ *
+ * Una migracion aplicada no se edita, asi que el vocabulario EFECTIVO de hoy
+ * es la union de las migraciones correspondientes.
  */
 describe('El vocabulario del dominio y el de la migracion no divergen', () => {
-  const sqlDeLaMigracion = up.toString()
+  const sqlDeLaMigracionInicial = up.toString()
+
+  const sqlDelVocabularioDeEstados = up.toString() + upAccountBanStatus.toString()
+
   const sqlDelVocabularioDeRoles = up.toString() + upSuperAdministratorRole.toString()
 
-  it.each(Object.values(AccountStatus))('la migracion admite el estado %s', (status) => {
-    expect(sqlDeLaMigracion).toContain(`'${status}'`)
+  it.each(Object.values(AccountStatus))('la union de migraciones admite el estado %s', (status) => {
+    expect(sqlDelVocabularioDeEstados).toContain(`'${status}'`)
   })
 
   it.each(ALL_ROLES)('la union de migraciones admite el rol %s', (role) => {
@@ -113,9 +123,10 @@ describe('El vocabulario del dominio y el de la migracion no divergen', () => {
   })
 
   it('la migracion inicial no admite valores que el dominio desconoce', () => {
-    const enLaRestriccion = [...sqlDeLaMigracion.matchAll(/'([A-Z_]{3,})'/g)].map(
+    const enLaRestriccion = [...sqlDeLaMigracionInicial.matchAll(/'([A-Z_]{3,})'/g)].map(
       (match) => match[1]!,
     )
+
     const conocidos: readonly string[] = [...Object.values(AccountStatus), ...ALL_ROLES]
 
     expect(enLaRestriccion.filter((value) => !conocidos.includes(value))).toEqual([])
@@ -130,6 +141,16 @@ describe('El vocabulario del dominio y el de la migracion no divergen', () => {
       enLaRestriccion.filter((value) => !(ALL_ROLES as readonly string[]).includes(value)),
     ).toEqual([])
   })
+
+  it('la migracion de BANNED no admite estados que el dominio desconoce', () => {
+    const enLaRestriccion = [...upAccountBanStatus.toString().matchAll(/'([A-Z_]{3,})'/g)].map(
+      (match) => match[1]!,
+    )
+
+    const estadosConocidos = Object.values(AccountStatus) as readonly string[]
+
+    expect(enLaRestriccion.filter((value) => !estadosConocidos.includes(value))).toEqual([])
+  })
 })
 
 /**
@@ -143,9 +164,12 @@ describe('describeError', () => {
   })
 
   it('serializa un objeto en lugar de producir [object Object]', () => {
-    expect(describeError({ code: '23505', detail: 'duplicado' })).toBe(
-      '{"code":"23505","detail":"duplicado"}',
-    )
+    expect(
+      describeError({
+        code: '23505',
+        detail: 'duplicado',
+      }),
+    ).toBe('{"code":"23505","detail":"duplicado"}')
   })
 
   it.each([
