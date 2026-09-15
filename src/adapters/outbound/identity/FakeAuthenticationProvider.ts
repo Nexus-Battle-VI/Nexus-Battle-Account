@@ -7,6 +7,7 @@ import type {
   AuthenticationCredentials,
   AuthenticationOutcome,
   AuthenticationProviderPort,
+  RefreshOutcome,
   SecondFactorOutcome,
   SecondFactorVerification,
 } from '../../../application/ports/AuthenticationProviderPort'
@@ -56,6 +57,8 @@ export class FakeAuthenticationProvider
 {
   private readonly credentials = new Map<string, StoredCredential>()
   private readonly pendingChallenges = new Map<string, PendingChallenge>()
+  /** Testimonio de refresco -> correo al que pertenece, para `refresh`. */
+  private readonly refreshTokens = new Map<string, string>()
   private readonly nextToken: () => string
 
   /**
@@ -119,6 +122,7 @@ export class FakeAuthenticationProvider
     return Promise.resolve({
       kind: 'authenticated',
       accessToken: this.issueAccessToken(),
+      refreshToken: this.issueRefreshToken(normalized),
       expiresIn: FAKE_EXPIRES_IN_SECONDS,
     })
   }
@@ -168,12 +172,38 @@ export class FakeAuthenticationProvider
     return Promise.resolve({
       kind: 'verified',
       accessToken: this.issueAccessToken(),
+      refreshToken: this.issueRefreshToken(normalized),
       expiresIn: FAKE_EXPIRES_IN_SECONDS,
       method: pending.method,
     })
   }
 
+  /**
+   * Igual que el pool real (sin rotacion): reemite `accessToken`, conserva el
+   * mismo `refreshToken`. Un testimonio nunca emitido por este doble se trata
+   * como `invalid`.
+   */
+  refresh(refreshToken: string): Promise<RefreshOutcome> {
+    if (!this.refreshTokens.has(refreshToken)) {
+      return Promise.resolve({ kind: 'invalid' })
+    }
+
+    return Promise.resolve({
+      kind: 'refreshed',
+      accessToken: this.issueAccessToken(),
+      expiresIn: FAKE_EXPIRES_IN_SECONDS,
+    })
+  }
+
   private issueAccessToken(): string {
     return `fake-access-token-${this.nextToken()}`
+  }
+
+  private issueRefreshToken(email: string): string {
+    const token = `fake-refresh-token-${this.nextToken()}`
+
+    this.refreshTokens.set(token, email)
+
+    return token
   }
 }

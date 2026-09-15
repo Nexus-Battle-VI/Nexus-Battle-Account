@@ -17,6 +17,7 @@ export interface AdminAccountStatusCountsDto {
   readonly pendingVerification: number
   readonly active: number
   readonly suspended: number
+  readonly banned: number
 }
 
 export interface AdminAccountListDto {
