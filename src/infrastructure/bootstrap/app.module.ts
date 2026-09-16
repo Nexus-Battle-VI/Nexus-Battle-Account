@@ -209,6 +209,7 @@ import { HttpCommerceReportAdapter } from '../../adapters/outbound/reporting/Htt
 import { UuidGenerator } from '../../adapters/outbound/system/UuidGenerator'
 
 import { AccountDeletionProcessingScheduler } from '../scheduling/AccountDeletionProcessingScheduler'
+import { describeError } from '../observability/describe-error'
 import { createLogger, type Logger } from '../observability/logger'
 import {
   AuthenticationDriver,
@@ -269,7 +270,12 @@ export const DATABASE = Symbol('Database')
           detail: 'Adaptador PostgreSQL activo.',
         })
 
-        return createDatabase({ connectionString: config.databaseUrl })
+        return createDatabase({
+          connectionString: config.databaseUrl,
+          onIdleError: (error) => {
+            logger.warn('postgres_idle_connection_error', { detail: describeError(error) })
+          },
+        })
       },
       inject: [APP_CONFIG, LOGGER],
     },
