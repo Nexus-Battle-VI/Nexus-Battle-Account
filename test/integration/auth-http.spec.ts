@@ -285,6 +285,64 @@ describe('API de cuentas con autenticacion activa', () => {
     })
   })
 
+  describe('GET /accounts/:id/display-name (HU-41, moderacion de comentarios)', () => {
+    it('responde 401 sin cabecera de autorizacion', async () => {
+      const response = await request(app.getHttpServer()).get(
+        `/api/accounts/${accountId}/display-name`,
+      )
+
+      expect(response.status).toBe(401)
+    })
+
+    it('responde 403 a un jugador', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/accounts/${accountId}/display-name`)
+        .set('Authorization', bearer('token-jugador'))
+
+      expect(response.status).toBe(403)
+    })
+
+    /**
+     * A diferencia de `GET /accounts/:id`, el `:id` de esta ruta es el SUJETO
+     * del proveedor de identidad -el mismo valor que `authorId`/`ownerId` en
+     * Community/Player-Inventory-, no el identificador interno de Account: por
+     * eso aqui se usa `sub:ana@nexus.test`, no `accountId`. Ver el comentario
+     * junto a `findDisplayName` en el controlador.
+     */
+    const anaSubject = 'sub:ana@nexus.test'
+
+    /**
+     * A diferencia de `GET /accounts/:id`, este endpoint SI es MODERATOR: quien
+     * modera necesita identificar al autor de un comentario reportado, sin
+     * exponerle el correo, el nombre legal, el estado ni los roles de la cuenta.
+     */
+    it('permite a un moderador leer solo el nombre visible, sin datos personales', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/accounts/${anaSubject}/display-name`)
+        .set('Authorization', bearer('token-moderador'))
+
+      expect(response.status).toBe(200)
+      expect(response.body).toEqual({ displayName: 'Ana Ramirez' })
+    })
+
+    it('permite tambien a un administrador', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/accounts/${anaSubject}/display-name`)
+        .set('Authorization', bearer('token-administrador'))
+
+      expect(response.status).toBe(200)
+      expect(response.body).toEqual({ displayName: 'Ana Ramirez' })
+    })
+
+    it('responde 404 si el sujeto no tiene cuenta asociada', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/accounts/sub:fantasma@nexus.test/display-name')
+        .set('Authorization', bearer('token-moderador'))
+
+      expect(response.status).toBe(404)
+    })
+  })
+
   describe('Gestion de roles HU-39', () => {
     const search = () => `/api/accounts/search?email=${encodeURIComponent('ana@nexus.test')}`
 
