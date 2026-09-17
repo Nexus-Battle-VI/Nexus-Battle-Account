@@ -88,6 +88,7 @@ import {
   EXPORT_ADMIN_ACCOUNTS,
 } from './tokens'
 import {
+  AccountDisplayNameResponse,
   AccountResponse,
   AdminAccountSummaryResponse,
   AdminAccountsResponse,
@@ -431,6 +432,36 @@ export class AccountsController {
   async findOne(@Param('id') id: string): Promise<AccountResponse> {
     try {
       return await this.getAccount.execute(id)
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  /**
+   * Solo el nombre visible (HU-41): quien modera necesita identificar al
+   * autor de un comentario reportado, no ver su correo, nombre legal, estado
+   * ni roles -por eso este endpoint es MODERATOR, y `findOne` de arriba sigue
+   * siendo ADMINISTRATOR-.
+   *
+   * El `:id` de esta ruta es el SUJETO del proveedor de identidad (el mismo
+   * valor que Community/Player-Inventory guardan como `authorId`/`ownerId`
+   * desde `identity.subject`), NO el identificador interno de Account que usa
+   * `findOne` de arriba -son dos espacios de identificadores distintos, y
+   * `GetAccount`/`AccountId.create` rechazaria este valor con 404-. Por eso
+   * reutiliza `getOwnAccount` (ya resuelve por sujeto, ver GetOwnAccount) en
+   * vez de `getAccount`.
+   */
+  @Roles(Role.Moderator, Role.Administrator)
+  @Get(':id/display-name')
+  @ApiOperation({ summary: 'Recupera solo el nombre visible de una cuenta. Requiere MODERATOR' })
+  @ApiResponse({ status: 200, description: 'Cuenta encontrada', type: AccountDisplayNameResponse })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
+  @ApiResponse({ status: 403, description: 'La identidad no tiene rol de moderacion' })
+  @ApiResponse({ status: 404, description: 'La cuenta no existe' })
+  async findDisplayName(@Param('id') id: string): Promise<AccountDisplayNameResponse> {
+    try {
+      const account = await this.getOwnAccount.execute(id)
+      return { displayName: account.displayName }
     } catch (error: unknown) {
       throw AccountsController.translate(error)
     }
