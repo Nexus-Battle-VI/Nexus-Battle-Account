@@ -126,6 +126,17 @@ export class AccountResponse {
   readonly roles!: readonly string[]
 }
 
+/**
+ * Proyeccion minima de `AccountResponse`: solo el nombre visible, sin correo,
+ * nombre legal, estado ni roles. Pensada para quien necesita identificar a un
+ * autor -moderacion de comentarios (HU-41)- sin ver datos personales que ese
+ * rol no tiene por que ver.
+ */
+export class AccountDisplayNameResponse {
+  @ApiProperty({ example: 'Ana Ramirez' })
+  readonly displayName!: string
+}
+
 export class OwnPersonalDataResponse implements OwnPersonalDataDto {
   @ApiProperty({ example: 'jugador@nexus.test' })
   readonly email!: string
