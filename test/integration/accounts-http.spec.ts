@@ -240,4 +240,31 @@ describe('Sondas de salud', () => {
   it('responde 404 en una ruta desconocida', async () => {
     expect((await request(app.getHttpServer()).get('/api/no-existe')).status).toBe(404)
   })
+
+  describe('GET /api/accounts/:id/avatar', () => {
+    it('sirve el avatar real registrado, con el tipo MIME correcto', async () => {
+      const registered = await registerAccountRequest(app, {
+        email: 'con-avatar@nexus.test',
+        nickname: 'Con Avatar',
+      })
+      expect(registered.status).toBe(201)
+      const id = String(registered.body.id)
+      const avatarUrl = String(registered.body.avatarUrl)
+      expect(avatarUrl).toBe(`/accounts/${id}/avatar`)
+
+      const response = await request(app.getHttpServer()).get(`/api${avatarUrl}`)
+
+      expect(response.status).toBe(200)
+      expect(response.headers['content-type']).toContain('image/png')
+      expect(response.body).toEqual(Buffer.from('png-bytes'))
+    })
+
+    it('responde 404 cuando la cuenta no existe', async () => {
+      const response = await request(app.getHttpServer()).get(
+        '/api/accounts/cuenta-inexistente/avatar',
+      )
+
+      expect(response.status).toBe(404)
+    })
+  })
 })
