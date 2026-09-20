@@ -124,6 +124,15 @@ export class AccountResponse {
 
   @ApiProperty({ example: ['PLAYER'], isArray: true, type: String })
   readonly roles!: readonly string[]
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '/accounts/0b1d5b0e-3f6a-4a1e-9a1a-4a5c6f2b8e10/avatar',
+    description:
+      'Ruta que sirve el avatar real; null si la cuenta no tiene uno recuperable. Nunca la clave de almacenamiento.',
+  })
+  readonly avatarUrl!: string | null
 }
 
 /**

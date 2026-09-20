@@ -9,6 +9,7 @@ import { PasswordController } from '../../adapters/inbound/http/password.control
 import { AccountDeletionController } from '../../adapters/inbound/http/account-deletion.controller'
 import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
 import { InternalMfaEvidenceController } from '../../adapters/inbound/http/internal-mfa-evidence.controller'
+import { InternalBattleProfileController } from '../../adapters/inbound/http/internal-battle-profile.controller'
 import { InternalServiceGuard } from '../../adapters/inbound/http/auth/internal-service.guard'
 import { VerifyMfaEvidence } from '../../application/use-cases/VerifyMfaEvidence'
 import { MFA_EVIDENCE_REPOSITORY } from '../../application/ports/MfaEvidenceRepositoryPort'
@@ -25,6 +26,7 @@ import {
   GET_OWN_PERSONAL_DATA,
   EXPORT_PORTABLE_PERSONAL_DATA,
   GENERATE_PRIVACY_PDF_REPORT,
+  GET_ACCOUNT_AVATAR,
   UPDATE_OWN_ACCOUNT,
   CHANGE_OWN_PASSWORD,
   LOGIN_ACCOUNT,
@@ -56,6 +58,7 @@ import { ConfirmRegistration } from '../../application/use-cases/ConfirmRegistra
 import { EnrollTotp } from '../../application/use-cases/EnrollTotp'
 import { ConfirmTotpEnrollment } from '../../application/use-cases/ConfirmTotpEnrollment'
 import { GetAccount } from '../../application/use-cases/GetAccount'
+import { GetAccountAvatar } from '../../application/use-cases/GetAccountAvatar'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
 import { GetOwnPersonalData } from '../../application/use-cases/GetOwnPersonalData'
 import { ExportPortablePersonalData } from '../../application/use-cases/ExportPortablePersonalData'
@@ -234,6 +237,7 @@ export const DATABASE = Symbol('Database')
     AccountDeletionController,
     SessionsController,
     InternalMfaEvidenceController,
+    InternalBattleProfileController,
     HealthController,
   ],
   providers: [
@@ -648,6 +652,12 @@ export const DATABASE = Symbol('Database')
       provide: GET_ACCOUNT,
       useFactory: (accounts: AccountRepositoryPort): GetAccount => new GetAccount(accounts),
       inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: GET_ACCOUNT_AVATAR,
+      useFactory: (accounts: AccountRepositoryPort, avatars: AvatarStoragePort): GetAccountAvatar =>
+        new GetAccountAvatar({ accounts, avatars }),
+      inject: [ACCOUNT_REPOSITORY, AVATAR_STORAGE],
     },
     {
       provide: FIND_ACCOUNT_BY_EMAIL,
