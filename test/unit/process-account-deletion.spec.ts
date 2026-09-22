@@ -196,6 +196,7 @@ describe('ProcessAccountDeletion (HU-43.3)', () => {
 
         return Promise.resolve()
       },
+      read: () => Promise.reject(new Error('no debe llamarse')),
     }
 
     const useCase = new ProcessAccountDeletion({

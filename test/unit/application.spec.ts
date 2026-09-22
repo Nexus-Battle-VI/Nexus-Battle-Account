@@ -1,5 +1,6 @@
 import { RegisterAccount } from '../../src/application/use-cases/RegisterAccount'
 import { GetAccount } from '../../src/application/use-cases/GetAccount'
+import { GetAccountAvatar } from '../../src/application/use-cases/GetAccountAvatar'
 import { GetOwnAccount } from '../../src/application/use-cases/GetOwnAccount'
 import { VerifyAccount } from '../../src/application/use-cases/VerifyAccount'
 import { LoginAccount } from '../../src/application/use-cases/LoginAccount'
@@ -7,6 +8,7 @@ import { CompleteSecondFactor } from '../../src/application/use-cases/CompleteSe
 import {
   AccountAlreadyExistsError,
   AccountNotFoundError,
+  AvatarNotFoundError,
   DisplayNameAlreadyTakenError,
   NicknameBlacklistedError,
 } from '../../src/application/errors/ApplicationError'
@@ -50,6 +52,7 @@ import { AVATAR_MAX_BYTES } from '../../src/domain/value-objects/AvatarMetadata'
 import { hashSecurityAnswer } from '../../src/application/security/hashSecurityAnswer'
 import {
   AT,
+  AVATAR_BYTES,
   FOUR_ANSWERS,
   VALID_PASSWORD,
   buildAccount,
@@ -146,6 +149,7 @@ describe('RegisterAccount', () => {
       lastNames: 'Ramirez',
       status: AccountStatus.PendingVerification,
       roles: [Role.Player],
+      avatarUrl: '/accounts/acc-1/avatar',
     })
     expect(harness.accounts.size).toBe(1)
     expect(harness.avatars.size).toBe(1)
@@ -533,6 +537,45 @@ describe('GetOwnAccount', () => {
     const useCase = new GetOwnAccount(harness.accounts)
 
     expect(await useCase.execute(stored!.subject)).toEqual(created)
+  })
+})
+
+describe('GetAccountAvatar', () => {
+  it('devuelve los bytes, el tipo MIME y el nombre original del avatar', async () => {
+    const harness = buildHarness()
+    const created = await harness.registerAccount.execute(command)
+    const useCase = new GetAccountAvatar({ accounts: harness.accounts, avatars: harness.avatars })
+
+    const avatar = await useCase.execute(created.id)
+
+    expect(avatar.bytes.equals(AVATAR_BYTES)).toBe(true)
+    expect(avatar.mimeType).toBe('image/png')
+    expect(avatar.originalName).toBe('a.png')
+  })
+
+  it('falla con AccountNotFoundError cuando la cuenta no existe', async () => {
+    const useCase = new GetAccountAvatar({
+      accounts: new InMemoryAccountRepository(),
+      avatars: new InMemoryAvatarStorage(),
+    })
+
+    await expect(useCase.execute('acc-desconocida')).rejects.toBeInstanceOf(AccountNotFoundError)
+  })
+
+  /**
+   * Cuenta cuya metadata de avatar existe pero cuyos bytes ya no estan en el
+   * almacenamiento -el equivalente en este dominio a una cuenta historica sin
+   * avatar recuperable, dado que el registro exige avatar siempre (ver
+   * `AvatarMetadata`/`RegisterAccount`)-. Debe fallar con `AvatarNotFoundError`,
+   * no con un 500 ni con una cuenta a medias.
+   */
+  it('falla con AvatarNotFoundError cuando el almacenamiento no tiene los bytes', async () => {
+    const accounts = new InMemoryAccountRepository()
+    const account = buildAccount({ id: 'acc-historica' })
+    await accounts.save(account)
+    const useCase = new GetAccountAvatar({ accounts, avatars: new InMemoryAvatarStorage() })
+
+    await expect(useCase.execute('acc-historica')).rejects.toBeInstanceOf(AvatarNotFoundError)
   })
 })
 

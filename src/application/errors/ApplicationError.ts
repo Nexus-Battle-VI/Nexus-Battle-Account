@@ -102,3 +102,19 @@ export class AccountHasActiveDeletionRequestError extends Error {
     this.name = 'AccountHasActiveDeletionRequestError'
   }
 }
+
+/**
+ * La cuenta existe pero no tiene un avatar recuperable.
+ *
+ * Distinta de `AccountNotFoundError`: aqui la cuenta si existe, solo que sus
+ * bytes de avatar no se pudieron leer (cuenta sin avatar, o la clave
+ * persistida ya no resuelve a ningun archivo). Se traduce igual a 404 en el
+ * adaptador HTTP, pero como error propio para no confundir "no existe la
+ * cuenta" con "no existe el avatar" en el registro ni en las pruebas.
+ */
+export class AvatarNotFoundError extends Error {
+  constructor(accountId: string) {
+    super(`La cuenta "${accountId}" no tiene un avatar disponible.`)
+    this.name = 'AvatarNotFoundError'
+  }
+}

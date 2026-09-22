@@ -17,7 +17,8 @@ import { applyEnvFile, ConfigurationError, loadConfig } from '../../src/infrastr
 import { createLogger } from '../../src/infrastructure/observability/logger'
 import { buildLiveness, buildReadiness, buildVersion } from '../../src/infrastructure/health/health'
 import { LocalAvatarStorage } from '../../src/adapters/outbound/storage/LocalAvatarStorage'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { InMemoryAvatarStorage } from '../../src/adapters/outbound/storage/InMemoryAvatarStorage'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { AT, VALID_PASSWORD, buildAccount } from '../support/account-factory'
@@ -374,6 +375,85 @@ describe('LocalAvatarStorage', () => {
     expect(await readFile(path.join(dir, stored.storageKey), 'utf8')).toBe('abc')
 
     await storage.remove(stored.storageKey)
+  })
+
+  it('lee los bytes de un avatar ya almacenado', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'avatars-'))
+    const storage = new LocalAvatarStorage(dir)
+
+    const stored = await storage.store({
+      accountId: 'acc-1',
+      mimeType: 'image/png',
+      originalName: 'foto.png',
+      bytes: Buffer.from('contenido-real'),
+    })
+
+    const bytes = await storage.read(stored.storageKey)
+
+    expect(bytes?.toString('utf8')).toBe('contenido-real')
+  })
+
+  it('devuelve null cuando la clave no resuelve a ningun archivo', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'avatars-'))
+    const storage = new LocalAvatarStorage(dir)
+
+    expect(await storage.read('acc-inexistente/foto.png')).toBeNull()
+  })
+
+  /**
+   * Defensa en profundidad: `storageKey` no pasa por ninguna validacion de
+   * dominio entre la cuenta persistida y este adaptador. Una clave que
+   * intente escapar del area de almacenamiento con `../` debe devolver null,
+   * NUNCA leer un archivo fuera de `basePath` -aunque ese archivo exista y
+   * sea legible-.
+   */
+  it('no permite recorrido de rutas fuera del area de almacenamiento', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'avatars-root-'))
+    const dir = path.join(root, 'avatares')
+    await mkdir(dir, { recursive: true })
+    const secreto = path.join(root, 'secreto.txt')
+    await writeFile(secreto, 'no deberia poder leerse')
+
+    const storage = new LocalAvatarStorage(dir)
+
+    expect(await storage.read('../secreto.txt')).toBeNull()
+    expect(await storage.read('../../secreto.txt')).toBeNull()
+    expect(await storage.read('acc-1/../../secreto.txt')).toBeNull()
+  })
+})
+
+describe('InMemoryAvatarStorage', () => {
+  it('lee los bytes guardados por su propia clave', async () => {
+    const storage = new InMemoryAvatarStorage()
+
+    const stored = await storage.store({
+      accountId: 'acc-1',
+      mimeType: 'image/png',
+      originalName: 'foto.png',
+      bytes: Buffer.from('memoria'),
+    })
+
+    expect((await storage.read(stored.storageKey))?.toString('utf8')).toBe('memoria')
+  })
+
+  it('devuelve null para una clave que nunca se guardo', async () => {
+    const storage = new InMemoryAvatarStorage()
+
+    expect(await storage.read('acc-inexistente/foto.png')).toBeNull()
+  })
+
+  it('devuelve null tras eliminar la clave', async () => {
+    const storage = new InMemoryAvatarStorage()
+    const stored = await storage.store({
+      accountId: 'acc-1',
+      mimeType: 'image/png',
+      originalName: 'foto.png',
+      bytes: Buffer.from('memoria'),
+    })
+
+    await storage.remove(stored.storageKey)
+
+    expect(await storage.read(stored.storageKey)).toBeNull()
   })
 })
 

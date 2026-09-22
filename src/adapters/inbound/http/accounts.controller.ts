@@ -35,6 +35,7 @@ import { AVATAR_MAX_BYTES } from '../../../domain/value-objects/AvatarMetadata'
 import {
   AccountAlreadyExistsError,
   AccountNotFoundError,
+  AvatarNotFoundError,
   DisplayNameAlreadyTakenError,
   IdentityAlreadyRegisteredError,
   IdentityRequiredError,
@@ -50,6 +51,7 @@ import type { OwnPersonalDataDto } from '../../../application/dto/OwnPersonalDat
 import { RegisterAccount } from '../../../application/use-cases/RegisterAccount'
 import { ConfirmRegistration } from '../../../application/use-cases/ConfirmRegistration'
 import { GetAccount } from '../../../application/use-cases/GetAccount'
+import { GetAccountAvatar } from '../../../application/use-cases/GetAccountAvatar'
 import { GetOwnAccount } from '../../../application/use-cases/GetOwnAccount'
 import { GetOwnPersonalData } from '../../../application/use-cases/GetOwnPersonalData'
 import { ExportPortablePersonalData } from '../../../application/use-cases/ExportPortablePersonalData'
@@ -74,6 +76,7 @@ import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierP
 import {
   REGISTER_ACCOUNT,
   GET_ACCOUNT,
+  GET_ACCOUNT_AVATAR,
   GET_OWN_ACCOUNT,
   GET_OWN_PERSONAL_DATA,
   EXPORT_PORTABLE_PERSONAL_DATA,
@@ -117,6 +120,7 @@ export class AccountsController {
   constructor(
     @Inject(REGISTER_ACCOUNT) private readonly registerAccount: RegisterAccount,
     @Inject(GET_ACCOUNT) private readonly getAccount: GetAccount,
+    @Inject(GET_ACCOUNT_AVATAR) private readonly getAccountAvatar: GetAccountAvatar,
     @Inject(GET_OWN_ACCOUNT) private readonly getOwnAccount: GetOwnAccount,
     @Inject(GET_OWN_PERSONAL_DATA) private readonly getOwnPersonalData: GetOwnPersonalData,
     @Inject(EXPORT_PORTABLE_PERSONAL_DATA)
@@ -438,6 +442,41 @@ export class AccountsController {
   }
 
   /**
+   * Sirve el avatar real de una cuenta (HU-15/RF-15, DP-6).
+   *
+   * `:id` es el identificador INTERNO de la cuenta (el mismo espacio que
+   * `findOne` de arriba y que `AccountDto.id`/`avatarUrl`), no el sujeto del
+   * proveedor de identidad. Abierta a cualquier identidad autenticada -sin
+   * `@Roles`-, a proposito: un avatar es lo que otros jugadores ven de un
+   * companero de equipo en una sala de batalla, no un dato personal como el
+   * correo o el nombre legal; restringirlo a ADMINISTRATOR/MODERATOR
+   * impediria justo el caso de uso que motiva este endpoint.
+   *
+   * Nunca resuelve la clave de almacenamiento a partir de lo que envia quien
+   * llama: `GetAccountAvatar` la obtiene del agregado persistido y la pasa a
+   * `AvatarStoragePort.read`, que a su vez impide que esa clave escape del
+   * area de almacenamiento.
+   */
+  @Get(':id/avatar')
+  @ApiOperation({ summary: 'Sirve el avatar real de una cuenta' })
+  @ApiProduces('image/*')
+  @ApiResponse({ status: 200, description: 'Contenido binario del avatar' })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
+  @ApiResponse({ status: 404, description: 'La cuenta no existe o no tiene avatar disponible' })
+  async findAvatar(@Param('id') id: string): Promise<StreamableFile> {
+    try {
+      const avatar = await this.getAccountAvatar.execute(id)
+
+      return new StreamableFile(avatar.bytes, {
+        type: avatar.mimeType,
+        disposition: `inline; filename="${avatar.originalName}"`,
+      })
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  /**
    * Solo el nombre visible (HU-41): quien modera necesita identificar al
    * autor de un comentario reportado, no ver su correo, nombre legal, estado
    * ni roles -por eso este endpoint es MODERATOR, y `findOne` de arriba sigue
@@ -500,7 +539,7 @@ export class AccountsController {
       return new BadRequestException(error.message)
     }
 
-    if (error instanceof AccountNotFoundError) {
+    if (error instanceof AccountNotFoundError || error instanceof AvatarNotFoundError) {
       return new NotFoundException(error.message)
     }
 

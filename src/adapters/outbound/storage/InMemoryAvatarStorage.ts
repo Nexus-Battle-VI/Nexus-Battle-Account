@@ -20,6 +20,10 @@ export class InMemoryAvatarStorage implements AvatarStoragePort {
     return Promise.resolve()
   }
 
+  read(storageKey: string): Promise<Buffer | null> {
+    return Promise.resolve(this.stored.get(storageKey) ?? null)
+  }
+
   get size(): number {
     return this.stored.size
   }
