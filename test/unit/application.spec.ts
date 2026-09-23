@@ -48,7 +48,10 @@ import { Sanction } from '../../src/domain/entities/Sanction'
 import { SanctionType } from '../../src/domain/entities/SanctionType'
 import { DomainError } from '../../src/domain/errors/DomainError'
 import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
-import { AVATAR_MAX_BYTES } from '../../src/domain/value-objects/AvatarMetadata'
+import {
+  AVATAR_MAX_BYTES,
+  AVATAR_UPLOAD_MAX_BYTES,
+} from '../../src/domain/value-objects/AvatarMetadata'
 import { hashSecurityAnswer } from '../../src/application/security/hashSecurityAnswer'
 import {
   AT,
@@ -378,6 +381,18 @@ describe('RegisterAccount', () => {
         }),
       ),
     ).rejects.toThrow(/no puede superar/)
+    await expect(
+      harness.registerAccount.execute(
+        validCommand({
+          avatar: {
+            mimeType: 'image/png',
+            originalName: 'a.png',
+            sizeBytes: AVATAR_UPLOAD_MAX_BYTES + 1,
+            bytes: Buffer.from('x'),
+          },
+        }),
+      ),
+    ).rejects.toThrow(/no puede superar 5 MiB/)
   })
 
   it('rechaza cuando falta una respuesta de seguridad', async () => {
@@ -576,6 +591,43 @@ describe('GetAccountAvatar', () => {
     const useCase = new GetAccountAvatar({ accounts, avatars: new InMemoryAvatarStorage() })
 
     await expect(useCase.execute('acc-historica')).rejects.toBeInstanceOf(AvatarNotFoundError)
+  })
+
+  describe('executeBySubject', () => {
+    it('devuelve el mismo avatar resolviendo la cuenta por el sujeto', async () => {
+      const harness = buildHarness()
+      await harness.registerAccount.execute(command)
+      const stored = await harness.accounts.findByEmail(EmailAddress.create(command.email))
+      const useCase = new GetAccountAvatar({ accounts: harness.accounts, avatars: harness.avatars })
+
+      const avatar = await useCase.executeBySubject(stored!.subject)
+
+      expect(avatar.bytes.equals(AVATAR_BYTES)).toBe(true)
+      expect(avatar.mimeType).toBe('image/png')
+      expect(avatar.originalName).toBe('a.png')
+      expect(Object.keys(avatar).sort()).toEqual(['bytes', 'mimeType', 'originalName'])
+    })
+
+    it('falla con AccountNotFoundError cuando el sujeto no tiene cuenta', async () => {
+      const useCase = new GetAccountAvatar({
+        accounts: new InMemoryAccountRepository(),
+        avatars: new InMemoryAvatarStorage(),
+      })
+
+      await expect(useCase.executeBySubject('sujeto-desconocido')).rejects.toBeInstanceOf(
+        AccountNotFoundError,
+      )
+    })
+
+    it('falla con AvatarNotFoundError cuando el almacenamiento no tiene los bytes', async () => {
+      const accounts = new InMemoryAccountRepository()
+      await accounts.save(buildAccount({ id: 'acc-historica', subject: 'sujeto-historico' }))
+      const useCase = new GetAccountAvatar({ accounts, avatars: new InMemoryAvatarStorage() })
+
+      await expect(useCase.executeBySubject('sujeto-historico')).rejects.toBeInstanceOf(
+        AvatarNotFoundError,
+      )
+    })
   })
 })
 

@@ -8,6 +8,11 @@ import { EmailAddress } from '../../src/domain/value-objects/EmailAddress'
 import { PersonName } from '../../src/domain/value-objects/PersonName'
 import { DomainError } from '../../src/domain/errors/DomainError'
 import { PasswordPolicy } from '../../src/domain/policies/PasswordPolicy'
+import {
+  AVATAR_UPLOAD_MAX_BYTES,
+  AvatarMetadata,
+  assertAvatarUpload,
+} from '../../src/domain/value-objects/AvatarMetadata'
 import { AT, buildAccount, defaultAvatarMetadata } from '../support/account-factory'
 
 const adminRoles = new Set<Role>([Role.Administrator])
@@ -425,6 +430,39 @@ describe('Vinculo con el sujeto de identidad', () => {
 
     expect(account.subject).toBe('sujeto-1')
     expect(account.currentEmail.value).toBe('nuevo@nexus.test')
+  })
+})
+
+describe('Tope de avatar', () => {
+  it('rehidrata un avatar historico mayor que el tope de subida sin fallar', () => {
+    const historico = AvatarMetadata.create({
+      storageKey: 'avatars/historico.png',
+      mimeType: 'image/png',
+      sizeBytes: AVATAR_UPLOAD_MAX_BYTES * 2,
+      originalName: 'historico.png',
+    })
+
+    expect(historico.sizeBytes).toBe(AVATAR_UPLOAD_MAX_BYTES * 2)
+  })
+
+  it('rechaza SUBIR un avatar mayor que 5 MiB', () => {
+    expect(() => {
+      assertAvatarUpload({
+        mimeType: 'image/png',
+        sizeBytes: AVATAR_UPLOAD_MAX_BYTES + 1,
+        originalName: 'grande.png',
+      })
+    }).toThrow(/5 MiB/)
+  })
+
+  it('acepta SUBIR un avatar de exactamente 5 MiB', () => {
+    expect(() => {
+      assertAvatarUpload({
+        mimeType: 'image/png',
+        sizeBytes: AVATAR_UPLOAD_MAX_BYTES,
+        originalName: 'limite.png',
+      })
+    }).not.toThrow()
   })
 })
 

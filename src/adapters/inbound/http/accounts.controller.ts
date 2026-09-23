@@ -31,7 +31,7 @@ import {
 import { memoryStorage } from 'multer'
 
 import { DomainError } from '../../../domain/errors/DomainError'
-import { AVATAR_MAX_BYTES } from '../../../domain/value-objects/AvatarMetadata'
+import { AVATAR_UPLOAD_MAX_BYTES } from '../../../domain/value-objects/AvatarMetadata'
 import {
   AccountAlreadyExistsError,
   AccountNotFoundError,
@@ -149,7 +149,7 @@ export class AccountsController {
   @UseInterceptors(
     FileInterceptor('avatar', {
       storage: memoryStorage(),
-      limits: { fileSize: AVATAR_MAX_BYTES },
+      limits: { fileSize: AVATAR_UPLOAD_MAX_BYTES },
     }),
   )
   @ApiConsumes('multipart/form-data')
@@ -466,6 +466,40 @@ export class AccountsController {
   async findAvatar(@Param('id') id: string): Promise<StreamableFile> {
     try {
       const avatar = await this.getAccountAvatar.execute(id)
+
+      return new StreamableFile(avatar.bytes, {
+        type: avatar.mimeType,
+        disposition: `inline; filename="${avatar.originalName}"`,
+      })
+    } catch (error: unknown) {
+      throw AccountsController.translate(error)
+    }
+  }
+
+  /**
+   * Sirve el avatar real de una cuenta resuelta por el SUJETO del proveedor
+   * de identidad (HU-15).
+   *
+   * Existe porque Combat identifica a cada participante por su sujeto
+   * (`playerId`), no por el identificador interno de Account: sin esta ruta la
+   * Web no puede mostrar el avatar de los demas jugadores en el lobby ni en la
+   * batalla. Mismas reglas que `:id/avatar`: cualquier identidad autenticada,
+   * sin `@Roles`, nunca expone la clave de almacenamiento y responde 404 tanto
+   * si el sujeto no tiene cuenta como si la cuenta no tiene avatar
+   * recuperable.
+   *
+   * Tres segmentos (`by-subject/:subject/avatar`) frente a los dos de
+   * `:id/avatar`: las rutas no colisionan.
+   */
+  @Get('by-subject/:subject/avatar')
+  @ApiOperation({ summary: 'Sirve el avatar real de una cuenta a partir del sujeto de identidad' })
+  @ApiProduces('image/*')
+  @ApiResponse({ status: 200, description: 'Contenido binario del avatar' })
+  @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
+  @ApiResponse({ status: 404, description: 'El sujeto no tiene cuenta o avatar disponible' })
+  async findAvatarBySubject(@Param('subject') subject: string): Promise<StreamableFile> {
+    try {
+      const avatar = await this.getAccountAvatar.executeBySubject(subject)
 
       return new StreamableFile(avatar.bytes, {
         type: avatar.mimeType,
