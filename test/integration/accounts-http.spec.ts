@@ -267,4 +267,34 @@ describe('Sondas de salud', () => {
       expect(response.status).toBe(404)
     })
   })
+
+  describe('GET /api/accounts/by-subject/:subject/avatar', () => {
+    it('sirve el avatar real resolviendo la cuenta por el sujeto de identidad', async () => {
+      const registered = await registerAccountRequest(app, {
+        email: 'avatar-sujeto@nexus.test',
+        nickname: 'Avatar Por Sujeto',
+      })
+      expect(registered.status).toBe(201)
+
+      // `InMemoryIdentitySignUp` deriva el sujeto del correo: `sub:<correo>`.
+      const subject = encodeURIComponent('sub:avatar-sujeto@nexus.test')
+      const response = await request(app.getHttpServer()).get(
+        `/api/accounts/by-subject/${subject}/avatar`,
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers['content-type']).toContain('image/png')
+      expect(response.body).toEqual(Buffer.from('png-bytes'))
+      expect(JSON.stringify(response.headers)).not.toContain('storage')
+    })
+
+    it('responde 404 cuando el sujeto no tiene cuenta', async () => {
+      const response = await request(app.getHttpServer()).get(
+        '/api/accounts/by-subject/sujeto-sin-cuenta/avatar',
+      )
+
+      expect(response.status).toBe(404)
+      expect(JSON.stringify(response.body)).not.toMatch(/storageKey|stack/)
+    })
+  })
 })

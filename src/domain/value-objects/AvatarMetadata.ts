@@ -1,7 +1,20 @@
 import { DomainError } from '../errors/DomainError'
 
-/** 500 MiB. El limite vive en dominio para que no dependa del adaptador HTTP. */
+/**
+ * 500 MiB: invariante de lo YA almacenado (coincide con el CHECK de
+ * `accounts.avatar_size_bytes`). Se conserva para rehidratar sin romper
+ * cuentas historicas cuyo avatar supera el tope de subida vigente.
+ * El limite vive en dominio para que no dependa del adaptador HTTP.
+ */
 export const AVATAR_MAX_BYTES = 500 * 1024 * 1024
+
+/**
+ * 5 MiB: tope de SUBIDA vigente. El archivo se recibe en memoria (multer) en
+ * un contenedor con memoria acotada; 500 MiB por peticion permitia agotarla.
+ * Solo aplica a avatares nuevos -ver `assertAvatarUpload`-, nunca a la
+ * rehidratacion de cuentas existentes.
+ */
+export const AVATAR_UPLOAD_MAX_BYTES = 5 * 1024 * 1024
 
 export interface AvatarMetadataParams {
   readonly storageKey: string
@@ -69,4 +82,8 @@ export const assertAvatarUpload = (params: {
     sizeBytes: params.sizeBytes,
     originalName: params.originalName,
   })
+
+  if (params.sizeBytes > AVATAR_UPLOAD_MAX_BYTES) {
+    throw new DomainError('El avatar no puede superar 5 MiB.')
+  }
 }
