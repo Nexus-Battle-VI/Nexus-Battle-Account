@@ -811,6 +811,22 @@ describe('PostgresAccountRepository', () => {
       )
     })
 
+    it('acepta GAME_MASTER tras la migracion de HU-66.1', async () => {
+      const account = buildAccount()
+      await repository.save(account)
+
+      await expect(
+        db
+          .insertInto('account_roles')
+          .values({ account_id: account.id.value, role: Role.GameMaster })
+          .execute(),
+      ).resolves.not.toThrow()
+
+      const found = await repository.findById(account.id)
+
+      expect(found?.currentRoles).toEqual(expect.arrayContaining([Role.Player, Role.GameMaster]))
+    })
+
     it('rechaza un estado que no pertenece al vocabulario', async () => {
       const account = buildAccount()
       await repository.save(account)

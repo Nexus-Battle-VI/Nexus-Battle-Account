@@ -8,7 +8,7 @@ describe('SecondFactorPolicy', () => {
    * entero y ofrece los mismos factores a todo el mundo. Account si puede,
    * porque conoce el rol desde `account_roles`.
    */
-  it.each([Role.Administrator, Role.SuperAdministrator])(
+  it.each([Role.Administrator, Role.SuperAdministrator, Role.GameMaster])(
     '%s solo admite la aplicacion autenticadora',
     (role) => {
       const roles = [Role.Player, role]

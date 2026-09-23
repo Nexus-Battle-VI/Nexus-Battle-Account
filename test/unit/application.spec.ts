@@ -970,7 +970,7 @@ describe('LoginAccount', () => {
     },
   )
 
-  it.each([Role.Administrator, Role.SuperAdministrator])(
+  it.each([Role.Administrator, Role.SuperAdministrator, Role.GameMaster])(
     'exige segundo factor para el rol %s y no entra al flujo administrativo con solo la contrasena',
     async (role) => {
       const harness = buildLoginHarness()
@@ -1009,7 +1009,7 @@ describe('LoginAccount', () => {
    * (ADR-004 -MFA de Cognito no confirmado por rol-), y el caso de uso debe
    * fallar cerrado en lugar de conceder la sesion.
    */
-  it.each([Role.Administrator, Role.SuperAdministrator])(
+  it.each([Role.Administrator, Role.SuperAdministrator, Role.GameMaster])(
     'no concede sesion a %s si el proveedor autentica sin retar el segundo factor',
     async (role) => {
       const harness = buildLoginHarness()
@@ -1030,7 +1030,10 @@ describe('LoginAccount', () => {
 describe('CompleteSecondFactor', () => {
   const seedAdmin = async (
     harness: LoginHarness,
-    role: typeof Role.Administrator | typeof Role.SuperAdministrator = Role.Administrator,
+    role:
+      | typeof Role.Administrator
+      | typeof Role.SuperAdministrator
+      | typeof Role.GameMaster = Role.Administrator,
   ): Promise<void> => {
     await harness.accounts.save(buildActiveAccount({ roles: [Role.Player, role] }))
     harness.authProvider.seed({

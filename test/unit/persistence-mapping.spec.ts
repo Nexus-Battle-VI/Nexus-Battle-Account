@@ -11,6 +11,7 @@ import { ALL_ROLES, Role } from '../../src/domain/entities/Role'
 import { up } from '../../src/adapters/outbound/persistence/migrations/001-accounts'
 import { up as upSuperAdministratorRole } from '../../src/adapters/outbound/persistence/migrations/hu03-super-administrator-role'
 import { up as upAccountBanStatus } from '../../src/adapters/outbound/persistence/migrations/z20260906-hu42-account-ban-status'
+import { up as upGameMasterRole } from '../../src/adapters/outbound/persistence/migrations/z20260921-hu66-game-master-role'
 import { describeError } from '../../src/infrastructure/observability/describe-error'
 
 const ROW: AccountRow = {
@@ -121,7 +122,8 @@ describe('El vocabulario del dominio y el de la migracion no divergen', () => {
 
   const sqlDelVocabularioDeEstados = up.toString() + upAccountBanStatus.toString()
 
-  const sqlDelVocabularioDeRoles = up.toString() + upSuperAdministratorRole.toString()
+  const sqlDelVocabularioDeRoles =
+    up.toString() + upSuperAdministratorRole.toString() + upGameMasterRole.toString()
 
   it.each(Object.values(AccountStatus))('la union de migraciones admite el estado %s', (status) => {
     expect(sqlDelVocabularioDeEstados).toContain(`'${status}'`)
@@ -145,6 +147,16 @@ describe('El vocabulario del dominio y el de la migracion no divergen', () => {
     const enLaRestriccion = [
       ...upSuperAdministratorRole.toString().matchAll(/'([A-Z_]{3,})'/g),
     ].map((match) => match[1]!)
+
+    expect(
+      enLaRestriccion.filter((value) => !(ALL_ROLES as readonly string[]).includes(value)),
+    ).toEqual([])
+  })
+
+  it('la migracion de GAME_MASTER no admite valores que el dominio desconoce', () => {
+    const enLaRestriccion = [...upGameMasterRole.toString().matchAll(/'([A-Z_]{3,})'/g)].map(
+      (match) => match[1]!,
+    )
 
     expect(
       enLaRestriccion.filter((value) => !(ALL_ROLES as readonly string[]).includes(value)),
