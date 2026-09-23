@@ -359,6 +359,14 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
       expect(response.status).toBe(401)
     })
 
+    it('el avatar por sujeto tambien exige testimonio (401 sin JWT)', async () => {
+      const response = await request(app.getHttpServer()).get(
+        '/api/accounts/by-subject/sujeto-cualquiera/avatar',
+      )
+
+      expect(response.status).toBe(401)
+    })
+
     it('resuelve siempre la cuenta del subject del JWT y mantiene aislamiento A/B', async () => {
       const a = await getOwnPrivacy('token-jugador')
       const b = await getOwnPrivacy('token-jugador-b')

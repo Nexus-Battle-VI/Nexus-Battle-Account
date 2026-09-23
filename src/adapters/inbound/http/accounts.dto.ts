@@ -86,7 +86,7 @@ export class RegisterAccountRequest {
   @ApiProperty({
     type: 'string',
     format: 'binary',
-    description: 'Avatar obligatorio (image/*, maximo 500 MB)',
+    description: 'Avatar obligatorio (image/*, maximo 5 MiB)',
   })
   @Allow()
   avatar?: unknown

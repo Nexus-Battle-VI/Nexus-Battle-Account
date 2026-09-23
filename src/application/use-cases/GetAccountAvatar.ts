@@ -1,3 +1,4 @@
+import type { Account } from '../../domain/entities/Account'
 import { AccountId } from '../../domain/value-objects/AccountId'
 import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
 import type { AvatarStoragePort } from '../ports/AvatarStoragePort'
@@ -41,19 +42,39 @@ export class GetAccountAvatar {
       throw new AccountNotFoundError(id)
     }
 
+    return this.readAvatar(account, id)
+  }
+
+  /**
+   * Misma regla que `execute`, pero resolviendo la cuenta por el SUJETO del
+   * proveedor de identidad. Es el identificador que Combat expone como
+   * `playerId` en salas y batallas, asi que la Web puede pedir el avatar de
+   * un companero sin conocer el identificador interno de su cuenta.
+   */
+  async executeBySubject(subject: string): Promise<AccountAvatar> {
+    const account = await this.accounts.findBySubject(subject)
+
+    if (account === null) {
+      throw new AccountNotFoundError(subject)
+    }
+
+    return this.readAvatar(account, subject)
+  }
+
+  private async readAvatar(account: Account, reference: string): Promise<AccountAvatar> {
     const metadata = account.currentAvatar
 
     // Cuenta historica sin avatar recuperable: la regla vigente de registro lo
     // exige siempre, pero este caso de uso no asume que seguira siendolo -ver
     // el comentario de `AccountDto.avatarUrl`-.
     if (metadata.storageKey.trim().length === 0) {
-      throw new AvatarNotFoundError(id)
+      throw new AvatarNotFoundError(reference)
     }
 
     const bytes = await this.avatars.read(metadata.storageKey)
 
     if (bytes === null) {
-      throw new AvatarNotFoundError(id)
+      throw new AvatarNotFoundError(reference)
     }
 
     return {
