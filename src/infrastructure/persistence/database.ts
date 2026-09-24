@@ -21,6 +21,7 @@ import * as migrationHu57ProfileCountry from '../../adapters/outbound/persistenc
 import * as migrationHu42Sanctions from '../../adapters/outbound/persistence/migrations/z20260901-hu42-sanctions'
 import * as migrationHu42AccountBanStatus from '../../adapters/outbound/persistence/migrations/z20260906-hu42-account-ban-status'
 import * as migrationHu42SanctionExpiration from '../../adapters/outbound/persistence/migrations/z20260906-hu42-sanction-expiration'
+import * as migrationHu05PreferredLanguage from '../../adapters/outbound/persistence/migrations/z20260924-hu05-preferred-language'
 
 export interface DatabaseOptions {
   readonly connectionString: string
@@ -118,6 +119,7 @@ const migrations: MigrationProvider = {
       'z20260901-hu42-sanctions': migrationHu42Sanctions,
       'z20260906-hu42-account-ban-status': migrationHu42AccountBanStatus,
       'z20260906-hu42-sanction-expiration': migrationHu42SanctionExpiration,
+      'z20260924-hu05-preferred-language': migrationHu05PreferredLanguage,
     }),
 }
 

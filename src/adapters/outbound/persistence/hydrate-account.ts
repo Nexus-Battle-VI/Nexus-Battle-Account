@@ -3,6 +3,7 @@ import { AccountId } from '../../../domain/value-objects/AccountId'
 import { AvatarMetadata } from '../../../domain/value-objects/AvatarMetadata'
 import { DisplayName } from '../../../domain/value-objects/DisplayName'
 import { CountryCode } from '../../../domain/value-objects/CountryCode'
+import { PreferredLanguage } from '../../../domain/value-objects/PreferredLanguage'
 import { EmailAddress } from '../../../domain/value-objects/EmailAddress'
 import { PersonName } from '../../../domain/value-objects/PersonName'
 
@@ -13,6 +14,10 @@ export const hydrateAccount = (snapshot: AccountSnapshot): Account =>
     email: EmailAddress.create(snapshot.email),
     displayName: DisplayName.create(snapshot.displayName),
     countryCode: snapshot.countryCode === null ? null : CountryCode.create(snapshot.countryCode),
+    preferredLanguage:
+      snapshot.preferredLanguage === null
+        ? null
+        : PreferredLanguage.create(snapshot.preferredLanguage),
     firstNames: PersonName.create(snapshot.firstNames, 'Los nombres'),
     lastNames: PersonName.create(snapshot.lastNames, 'Los apellidos'),
     termsAccepted: snapshot.termsAccepted,

@@ -40,6 +40,11 @@ describe('Orden de las migraciones', () => {
       'hu33-mfa-evidence',
       'hu33-mfa-evidence-method',
       'hu43-account-deletion-requests',
+      'hu43-desvincular-solicitud-eliminacion-de-cuenta',
+      'hu57-profile-country',
+      'z20260901-hu42-sanctions',
+      'z20260906-hu42-account-ban-status',
+      'z20260906-hu42-sanction-expiration',
     ]
 
     // Las que ya corrieron deben seguir siendo el PREFIJO de la lista

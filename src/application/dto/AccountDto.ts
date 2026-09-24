@@ -12,6 +12,8 @@ export interface AccountDto {
   readonly email: string
   readonly displayName: string
   readonly countryCode: string | null
+  /** `es` | `en` | `fr` | `pt`, o `null` si la persona no eligio idioma. */
+  readonly preferredLanguage: string | null
   readonly firstNames: string
   readonly lastNames: string
   readonly status: string
@@ -34,6 +36,7 @@ export const toAccountDto = (snapshot: AccountSnapshot): AccountDto => ({
   email: snapshot.email,
   displayName: snapshot.displayName,
   countryCode: snapshot.countryCode,
+  preferredLanguage: snapshot.preferredLanguage,
   firstNames: snapshot.firstNames,
   lastNames: snapshot.lastNames,
   status: snapshot.status,

@@ -354,6 +354,7 @@ export class AccountsController {
         subject: identity.subject,
         displayName: body.displayName,
         countryCode: body.countryCode,
+        preferredLanguage: body.preferredLanguage,
       })
     } catch (error: unknown) {
       throw AccountsController.translate(error)
