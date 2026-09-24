@@ -35,8 +35,8 @@ export class AssignRole {
       throw new AccountNotFoundError(command.targetAccountId)
     }
 
-    if (command.role === Role.SuperAdministrator) {
-      throw new DomainError('El rol SUPER_ADMINISTRATOR no se concede mediante la API.')
+    if (command.role === Role.SuperAdministrator || command.role === Role.GameMaster) {
+      throw new DomainError(`El rol ${command.role} no se concede mediante la API.`)
     }
 
     const alreadyAssigned = target.hasRole(command.role)

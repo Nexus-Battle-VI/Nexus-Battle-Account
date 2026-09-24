@@ -183,7 +183,7 @@ describe('API de sesiones (HU-02, HU-03)', () => {
   const givenAdministrativeAccount = async (
     email: string,
     nickname: string,
-    role: typeof Role.Administrator | typeof Role.SuperAdministrator,
+    role: typeof Role.Administrator | typeof Role.SuperAdministrator | typeof Role.GameMaster,
     password = VALID_PASSWORD,
   ): Promise<void> => {
     const accounts = app.get(ACCOUNT_REPOSITORY)
@@ -323,6 +323,7 @@ describe('API de sesiones (HU-02, HU-03)', () => {
   it.each([
     ['Administrador', Role.Administrator],
     ['Super Administrador', Role.SuperAdministrator],
+    ['Maestro de Juego', Role.GameMaster],
   ])(
     'CA-06: %s con credenciales validas recibe segundo factor requerido, no una sesion',
     async (_nombre, role) => {
