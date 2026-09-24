@@ -1,5 +1,6 @@
 import { DisplayName } from '../../domain/value-objects/DisplayName'
 import { CountryCode } from '../../domain/value-objects/CountryCode'
+import { PreferredLanguage } from '../../domain/value-objects/PreferredLanguage'
 import { DomainError } from '../../domain/errors/DomainError'
 import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
 import type { NicknameBlacklistPort } from '../ports/NicknameBlacklistPort'
@@ -17,7 +18,9 @@ import { type AccountDto, toAccountDto } from '../dto/AccountDto'
  * identificador del cuerpo: es el mismo patron self-service de `GetOwnAccount`,
  * y es lo que impide que quien llama toque una cuenta ajena.
  *
- * Campos soportados: `displayName` y país opcional `countryCode` (HU-57).
+ * Campos soportados: `displayName`, país opcional `countryCode` (HU-57) e
+ * idioma de interfaz `preferredLanguage` (HU-05, CA-04 «Gestión de
+ * preferencias»).
  * La ampliación de país fue solicitada explícitamente para el e-commerce.
  * El apodo reutiliza las mismas reglas ya
  * aprobadas en el registro -`DisplayName` para el formato, unicidad
@@ -43,6 +46,7 @@ export class UpdateOwnAccount {
     readonly subject: string
     readonly displayName?: string
     readonly countryCode?: string | null
+    readonly preferredLanguage?: string | null
   }): Promise<AccountDto> {
     const account = await this.accounts.findBySubject(command.subject)
 
@@ -53,8 +57,14 @@ export class UpdateOwnAccount {
       )
     }
 
-    if (command.displayName === undefined && command.countryCode === undefined) {
-      throw new DomainError('Indique displayName o countryCode para actualizar el perfil.')
+    if (
+      command.displayName === undefined &&
+      command.countryCode === undefined &&
+      command.preferredLanguage === undefined
+    ) {
+      throw new DomainError(
+        'Indique displayName, countryCode o preferredLanguage para actualizar el perfil.',
+      )
     }
     const displayName =
       command.displayName === undefined ? undefined : DisplayName.create(command.displayName)
@@ -64,6 +74,12 @@ export class UpdateOwnAccount {
         : command.countryCode === null
           ? null
           : CountryCode.create(command.countryCode)
+    const preferredLanguage =
+      command.preferredLanguage === undefined
+        ? undefined
+        : command.preferredLanguage === null
+          ? null
+          : PreferredLanguage.create(command.preferredLanguage)
 
     const rename = displayName !== undefined && !account.currentDisplayName.equals(displayName)
     if (rename) {
@@ -76,11 +92,13 @@ export class UpdateOwnAccount {
     }
     // Presencia expresa intencion de escribir, incluso null o el valor leido.
     const changeCountry = countryCode !== undefined
-    if (!rename && !changeCountry) return toAccountDto(account.toSnapshot())
+    const changeLanguage = preferredLanguage !== undefined
+    if (!rename && !changeCountry && !changeLanguage) return toAccountDto(account.toSnapshot())
 
     // Validate both fields before changing the aggregate; omitted fields survive.
     if (rename) account.rename(displayName)
     if (changeCountry) account.changeCountryCode(countryCode)
+    if (changeLanguage) account.changePreferredLanguage(preferredLanguage)
     await this.accounts.save(account)
 
     return toAccountDto(account.toSnapshot())

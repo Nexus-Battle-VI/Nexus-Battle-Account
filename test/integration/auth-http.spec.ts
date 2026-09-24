@@ -446,6 +446,7 @@ describe('API de cuentas con autenticacion activa', () => {
         'firstNames',
         'id',
         'lastNames',
+        'preferredLanguage',
         'roles',
         'status',
       ])

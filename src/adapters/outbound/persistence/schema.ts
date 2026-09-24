@@ -35,6 +35,7 @@ export interface AccountsTable {
 
   readonly display_name: string
   readonly country_code: Generated<string | null>
+  readonly preferred_language: Generated<string | null>
   readonly first_names: string
   readonly last_names: string
   readonly terms_accepted: boolean

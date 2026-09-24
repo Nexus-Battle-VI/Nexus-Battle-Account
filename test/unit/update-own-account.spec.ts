@@ -49,6 +49,68 @@ describe('UpdateOwnAccount', () => {
     ).toBeNull()
   })
 
+  it('guarda solo el idioma, sin tocar apodo ni país, y lo devuelve en el DTO', async () => {
+    const { caso, accounts } = await setup()
+    expect((await accounts.findBySubject('sub-propia'))?.currentPreferredLanguage).toBeNull()
+
+    for (const language of ['es', 'en', 'fr', 'pt']) {
+      const dto = await caso.execute({ subject: 'sub-propia', preferredLanguage: language })
+      expect(dto).toMatchObject({
+        preferredLanguage: language,
+        displayName: 'Ana Ramirez',
+        countryCode: null,
+      })
+      expect((await accounts.findBySubject('sub-propia'))?.currentPreferredLanguage?.value).toBe(
+        language,
+      )
+    }
+
+    const cleared = await caso.execute({ subject: 'sub-propia', preferredLanguage: null })
+    expect(cleared.preferredLanguage).toBeNull()
+  })
+
+  it('combina idioma con apodo y país en una sola actualización', async () => {
+    const { caso } = await setup()
+
+    const dto = await caso.execute({
+      subject: 'sub-propia',
+      displayName: 'Ana Trilingue',
+      countryCode: 'fr',
+      preferredLanguage: 'fr',
+    })
+
+    expect(dto).toMatchObject({
+      displayName: 'Ana Trilingue',
+      countryCode: 'FR',
+      preferredLanguage: 'fr',
+    })
+  })
+
+  it.each(['de', 'es-ES', 'EN', ''])(
+    'rechaza el idioma %j sin guardar ningún campo del mismo cambio',
+    async (language) => {
+      const { caso, accounts } = await setup()
+      await expect(
+        caso.execute({
+          subject: 'sub-propia',
+          displayName: 'Ana Nueva',
+          preferredLanguage: language,
+        }),
+      ).rejects.toBeInstanceOf(DomainError)
+      expect((await accounts.findBySubject('sub-propia'))?.toSnapshot()).toMatchObject({
+        displayName: 'Ana Ramirez',
+        preferredLanguage: null,
+      })
+    },
+  )
+
+  it('el idioma de una cuenta inexistente responde AccountNotFoundError', async () => {
+    const { caso } = await setup()
+    await expect(
+      caso.execute({ subject: 'sub-inexistente', preferredLanguage: 'en' }),
+    ).rejects.toBeInstanceOf(AccountNotFoundError)
+  })
+
   it('rechaza un cambio mixto inválido sin guardar ninguno de sus campos', async () => {
     const { caso, accounts } = await setup()
     await expect(

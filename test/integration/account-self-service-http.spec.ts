@@ -813,6 +813,85 @@ describe('API self-service de la cuenta propia (HU-05)', () => {
       expect(cleared.body).toEqual(before.body)
     })
 
+    it('guarda solo el idioma, lo devuelve en GET y permite volver a null sin tocar otros campos', async () => {
+      const before = await getOwn()
+      expect(before.body.preferredLanguage).toBeNull()
+      const otherBefore = await request(app.getHttpServer())
+        .get('/api/accounts/me')
+        .set('authorization', bearer('token-jugador-b'))
+
+      for (const language of ['en', 'fr', 'pt', 'es']) {
+        const saved = await request(app.getHttpServer())
+          .patch('/api/accounts/me')
+          .set('authorization', bearer('token-jugador'))
+          .send({ preferredLanguage: language })
+          .expect(200)
+        expect(saved.body).toEqual({ ...before.body, preferredLanguage: language })
+        expect((await getOwn()).body.preferredLanguage).toBe(language)
+      }
+
+      const otherAfter = await request(app.getHttpServer())
+        .get('/api/accounts/me')
+        .set('authorization', bearer('token-jugador-b'))
+      expect(otherAfter.body).toEqual(otherBefore.body)
+
+      const cleared = await request(app.getHttpServer())
+        .patch('/api/accounts/me')
+        .set('authorization', bearer('token-jugador'))
+        .send({ preferredLanguage: null })
+        .expect(200)
+      expect(cleared.body).toEqual(before.body)
+    })
+
+    it('acepta idioma y país en el mismo PATCH', async () => {
+      const before = await getOwn()
+      const saved = await request(app.getHttpServer())
+        .patch('/api/accounts/me')
+        .set('authorization', bearer('token-jugador'))
+        .send({ preferredLanguage: 'pt', countryCode: 'BR' })
+        .expect(200)
+      expect(saved.body).toEqual({ ...before.body, preferredLanguage: 'pt', countryCode: 'BR' })
+      const restored = await request(app.getHttpServer())
+        .patch('/api/accounts/me')
+        .set('authorization', bearer('token-jugador'))
+        .send({ preferredLanguage: null, countryCode: null })
+        .expect(200)
+      expect(restored.body).toEqual(before.body)
+    })
+
+    it.each([
+      { preferredLanguage: 'de' },
+      { preferredLanguage: 'es-ES' },
+      { preferredLanguage: 'EN' },
+      { preferredLanguage: ' en ' },
+      { preferredLanguage: '' },
+      { preferredLanguage: 'javascript:alert(1)' },
+      { preferredLanguage: '<b>es</b>' },
+      { preferredLanguage: '../en' },
+      { preferredLanguage: 7 },
+      { preferredLanguage: ['es'] },
+    ])('rechaza el idioma no permitido %j sin cambiar la cuenta', async (body) => {
+      const before = await getOwn()
+      await request(app.getHttpServer())
+        .patch('/api/accounts/me')
+        .set('authorization', bearer('token-jugador'))
+        .send(body)
+        .expect(400)
+      expect((await getOwn()).body).toEqual(before.body)
+    })
+
+    it('el idioma exige testimonio (401) y una cuenta local (404)', async () => {
+      await request(app.getHttpServer())
+        .patch('/api/accounts/me')
+        .send({ preferredLanguage: 'en' })
+        .expect(401)
+      await request(app.getHttpServer())
+        .patch('/api/accounts/me')
+        .set('authorization', bearer('token-sin-cuenta'))
+        .send({ preferredLanguage: 'en' })
+        .expect(404)
+    })
+
     it.each([
       { countryCode: 'ZZ' },
       { countryCode: 57 },

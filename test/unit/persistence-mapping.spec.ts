@@ -19,6 +19,7 @@ const ROW: AccountRow = {
   email: 'ana@nexus.test',
   display_name: 'Ana Ramirez',
   country_code: null,
+  preferred_language: null,
   first_names: 'Ana',
   last_names: 'Ramirez',
   terms_accepted: true,
@@ -37,6 +38,7 @@ describe('Traduccion entre fila e instantanea', () => {
       email: 'ana@nexus.test',
       displayName: 'Ana Ramirez',
       countryCode: null,
+      preferredLanguage: null,
       firstNames: 'Ana',
       lastNames: 'Ramirez',
       termsAccepted: true,
@@ -57,6 +59,13 @@ describe('Traduccion entre fila e instantanea', () => {
 
   it('la traduccion es reversible', () => {
     expect(toRow(toSnapshot(ROW, [Role.Player]))).toEqual(ROW)
+  })
+
+  it('conserva el idioma preferido en ambos sentidos', () => {
+    const row = { ...ROW, preferred_language: 'fr' }
+
+    expect(toSnapshot(row, [Role.Player]).preferredLanguage).toBe('fr')
+    expect(toRow(toSnapshot(row, [Role.Player]))).toEqual(row)
   })
 
   /**
