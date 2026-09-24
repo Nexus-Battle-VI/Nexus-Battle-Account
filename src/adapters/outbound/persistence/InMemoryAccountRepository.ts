@@ -3,6 +3,7 @@ import type { AccountId } from '../../../domain/value-objects/AccountId'
 import type { DisplayName } from '../../../domain/value-objects/DisplayName'
 import type { EmailAddress } from '../../../domain/value-objects/EmailAddress'
 import { CountryCode } from '../../../domain/value-objects/CountryCode'
+import { PreferredLanguage } from '../../../domain/value-objects/PreferredLanguage'
 import type {
   AccountRepositoryPort,
   HashedSecurityAnswer,
@@ -166,10 +167,14 @@ export class InMemoryAccountRepository implements AccountRepositoryPort, AdminAc
       previous !== undefined && !account.hasCountryCodeChange
         ? previous.countryCode
         : snapshot.countryCode
+    const preferredLanguage =
+      previous !== undefined && !account.hasPreferredLanguageChange
+        ? previous.preferredLanguage
+        : snapshot.preferredLanguage
     const current = new Date(this.now().getTime())
     const metadata = this.metadataByAccount.get(snapshot.id)
 
-    this.byId.set(snapshot.id, { ...snapshot, countryCode })
+    this.byId.set(snapshot.id, { ...snapshot, countryCode, preferredLanguage })
     this.metadataByAccount.set(snapshot.id, {
       createdAt: metadata?.createdAt ?? current,
       updatedAt: current,
@@ -177,6 +182,10 @@ export class InMemoryAccountRepository implements AccountRepositoryPort, AdminAc
     account.acceptPersistedCountryCode(
       countryCode === null ? null : CountryCode.create(countryCode),
       account.countryCodePersistenceVersion,
+    )
+    account.acceptPersistedPreferredLanguage(
+      preferredLanguage === null ? null : PreferredLanguage.create(preferredLanguage),
+      account.preferredLanguagePersistenceVersion,
     )
   }
 
