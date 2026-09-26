@@ -3,6 +3,7 @@ import type { AccountId } from '../value-objects/AccountId'
 import type { EmailAddress } from '../value-objects/EmailAddress'
 import type { DisplayName } from '../value-objects/DisplayName'
 import type { CountryCode } from '../value-objects/CountryCode'
+import type { PreferredLanguage } from '../value-objects/PreferredLanguage'
 import type { PersonName } from '../value-objects/PersonName'
 import type { AvatarMetadata } from '../value-objects/AvatarMetadata'
 import { AccountStatus } from './AccountStatus'
@@ -20,6 +21,8 @@ export interface AccountSnapshot {
   readonly email: string
   readonly displayName: string
   readonly countryCode: string | null
+  /** Idioma de interfaz elegido; `null` si la persona nunca eligio uno. */
+  readonly preferredLanguage: string | null
   readonly firstNames: string
   readonly lastNames: string
   readonly termsAccepted: boolean
@@ -60,6 +63,9 @@ export class Account {
   private countryCode: CountryCode | null
   private countryCodeVersion = 0
   private persistedCountryCodeVersion = 0
+  private preferredLanguage: PreferredLanguage | null
+  private preferredLanguageVersion = 0
+  private persistedPreferredLanguageVersion = 0
   private readonly firstNames: PersonName
   private readonly lastNames: PersonName
   private readonly termsAccepted: boolean
@@ -74,6 +80,7 @@ export class Account {
     email: EmailAddress
     displayName: DisplayName
     countryCode?: CountryCode | null
+    preferredLanguage?: PreferredLanguage | null
     firstNames: PersonName
     lastNames: PersonName
     termsAccepted: boolean
@@ -86,6 +93,7 @@ export class Account {
     this.email = params.email
     this.displayName = params.displayName
     this.countryCode = params.countryCode ?? null
+    this.preferredLanguage = params.preferredLanguage ?? null
     this.firstNames = params.firstNames
     this.lastNames = params.lastNames
     this.termsAccepted = params.termsAccepted
@@ -158,6 +166,7 @@ export class Account {
     email: EmailAddress
     displayName: DisplayName
     countryCode?: CountryCode | null
+    preferredLanguage?: PreferredLanguage | null
     firstNames: PersonName
     lastNames: PersonName
     termsAccepted: boolean
@@ -182,6 +191,7 @@ export class Account {
       lastNames: params.lastNames,
       termsAccepted: params.termsAccepted,
       countryCode: params.countryCode ?? null,
+      preferredLanguage: params.preferredLanguage ?? null,
       avatar: params.avatar,
       status: params.status,
       roles: new Set<Role>(params.roles),
@@ -219,6 +229,39 @@ export class Account {
     if (version !== this.countryCodeVersion) return
     this.countryCode = countryCode
     this.persistedCountryCodeVersion = version
+  }
+
+  get currentPreferredLanguage(): PreferredLanguage | null {
+    return this.preferredLanguage
+  }
+
+  /**
+   * Mismo control de intencion que el pais: solo se escribe la columna cuando
+   * esta instancia cambio el idioma. Asi un guardado por otro motivo (renombrar,
+   * asignar un rol) con una lectura antigua no pisa un idioma elegido mientras
+   * tanto.
+   */
+  changePreferredLanguage(preferredLanguage: PreferredLanguage | null): void {
+    this.preferredLanguage = preferredLanguage
+    this.preferredLanguageVersion += 1
+  }
+
+  get hasPreferredLanguageChange(): boolean {
+    return this.preferredLanguageVersion !== this.persistedPreferredLanguageVersion
+  }
+
+  get preferredLanguagePersistenceVersion(): number {
+    return this.preferredLanguageVersion
+  }
+
+  /** Acepta el valor realmente guardado, sin borrar un cambio local posterior. */
+  acceptPersistedPreferredLanguage(
+    preferredLanguage: PreferredLanguage | null,
+    version: number,
+  ): void {
+    if (version !== this.preferredLanguageVersion) return
+    this.preferredLanguage = preferredLanguage
+    this.persistedPreferredLanguageVersion = version
   }
 
   get currentFirstNames(): PersonName {
@@ -381,6 +424,7 @@ export class Account {
       email: this.email.value,
       displayName: this.displayName.value,
       countryCode: this.countryCode?.value ?? null,
+      preferredLanguage: this.preferredLanguage?.value ?? null,
       firstNames: this.firstNames.value,
       lastNames: this.lastNames.value,
       termsAccepted: this.termsAccepted,

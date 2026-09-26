@@ -5,6 +5,7 @@ import type { AccountId } from '../../../domain/value-objects/AccountId'
 import type { DisplayName } from '../../../domain/value-objects/DisplayName'
 import type { EmailAddress } from '../../../domain/value-objects/EmailAddress'
 import { CountryCode } from '../../../domain/value-objects/CountryCode'
+import { PreferredLanguage } from '../../../domain/value-objects/PreferredLanguage'
 import type {
   AccountRepositoryPort,
   HashedSecurityAnswer,
@@ -22,6 +23,22 @@ import type { Database } from './schema'
 import { PersistenceMappingError, toRow, toSnapshot } from './mapping'
 import { hydrateAccount } from './hydrate-account'
 
+/**
+ * Lo que la fila guardada dice realmente de los campos de perfil con control de
+ * intencion, junto con la version local que se escribio (ver `Account`).
+ */
+interface PersistedProfile {
+  readonly countryCode: CountryCode | null
+  readonly version: number
+  readonly preferredLanguage: PreferredLanguage | null
+  readonly languageVersion: number
+}
+
+const acceptPersisted = (account: Account, persisted: PersistedProfile): void => {
+  account.acceptPersistedCountryCode(persisted.countryCode, persisted.version)
+  account.acceptPersistedPreferredLanguage(persisted.preferredLanguage, persisted.languageVersion)
+}
+
 export class PostgresAccountRepository implements AccountRepositoryPort, AdminAccountQueryPort {
   private readonly db: Kysely<Database>
 
@@ -33,7 +50,7 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
     const persisted = await this.db
       .transaction()
       .execute((trx) => this.persistAccount(trx, account))
-    account.acceptPersistedCountryCode(persisted.countryCode, persisted.version)
+    acceptPersisted(account, persisted)
   }
 
   async saveRegistration(
@@ -62,7 +79,7 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
       }
       return persistedAccount
     })
-    account.acceptPersistedCountryCode(persisted.countryCode, persisted.version)
+    acceptPersisted(account, persisted)
   }
 
   async findById(id: AccountId): Promise<Account | null> {
@@ -272,10 +289,11 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
   private async persistAccount(
     trx: Transaction<Database>,
     account: Account,
-  ): Promise<{ countryCode: CountryCode | null; version: number }> {
+  ): Promise<PersistedProfile> {
     const snapshot = account.toSnapshot()
     const row = toRow(snapshot)
     const version = account.countryCodePersistenceVersion
+    const languageVersion = account.preferredLanguagePersistenceVersion
 
     const persisted = await trx
       .insertInto('accounts')
@@ -286,6 +304,9 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
           email: row.email,
           display_name: row.display_name,
           ...(account.hasCountryCodeChange ? { country_code: row.country_code } : {}),
+          ...(account.hasPreferredLanguageChange
+            ? { preferred_language: row.preferred_language }
+            : {}),
           first_names: row.first_names,
           last_names: row.last_names,
           terms_accepted: row.terms_accepted,
@@ -297,7 +318,7 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
           updated_at: new Date(),
         }),
       )
-      .returning('country_code')
+      .returning(['country_code', 'preferred_language'])
       .executeTakeFirstOrThrow()
 
     await trx.deleteFrom('account_roles').where('account_id', '=', snapshot.id).execute()
@@ -310,6 +331,11 @@ export class PostgresAccountRepository implements AccountRepositoryPort, AdminAc
       countryCode:
         persisted.country_code === null ? null : CountryCode.create(persisted.country_code),
       version,
+      preferredLanguage:
+        persisted.preferred_language === null
+          ? null
+          : PreferredLanguage.create(persisted.preferred_language),
+      languageVersion,
     }
   }
 
@@ -335,6 +361,7 @@ interface AccountSnapshotRow {
   readonly email: string
   readonly display_name: string
   readonly country_code: string | null
+  readonly preferred_language: string | null
   readonly first_names: string
   readonly last_names: string
   readonly terms_accepted: boolean

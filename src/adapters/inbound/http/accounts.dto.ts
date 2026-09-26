@@ -22,6 +22,7 @@ import {
 } from '../../../domain/entities/AccountStatus'
 import { Role, type Role as RoleValue } from '../../../domain/entities/Role'
 import { DisplayName } from '../../../domain/value-objects/DisplayName'
+import { PREFERRED_LANGUAGES } from '../../../domain/value-objects/PreferredLanguage'
 import type { AdminAccountStatusCountsDto } from '../../../application/dto/AdminAccountSummaryDto'
 import type { OwnPersonalDataDto } from '../../../application/dto/OwnPersonalDataDto'
 
@@ -109,6 +110,15 @@ export class AccountResponse {
     description: 'País declarado, ISO 3166-1 alpha-2; null si no se conoce.',
   })
   readonly countryCode!: string | null
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    enum: PREFERRED_LANGUAGES,
+    example: 'es',
+    description: 'Idioma de interfaz elegido; null si la persona nunca eligio uno.',
+  })
+  readonly preferredLanguage!: string | null
 
   @ApiProperty({ example: 'Ana' })
   readonly firstNames!: string
@@ -203,6 +213,19 @@ export class UpdateOwnAccountRequest {
   @IsOptional()
   @IsString()
   countryCode?: string | null
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    enum: PREFERRED_LANGUAGES,
+    example: 'fr',
+    description: 'Idioma de la interfaz. Omitido conserva el actual; null lo borra.',
+  })
+  @IsOptional()
+  @IsIn(PREFERRED_LANGUAGES, {
+    message: `preferredLanguage debe ser uno de: ${PREFERRED_LANGUAGES.join(', ')}.`,
+  })
+  preferredLanguage?: string | null
 }
 
 export class FindAccountByEmailQuery {

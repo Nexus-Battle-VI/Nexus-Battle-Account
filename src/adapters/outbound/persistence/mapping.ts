@@ -23,6 +23,7 @@ export interface AccountRow {
   readonly email: string
   readonly display_name: string
   readonly country_code: string | null
+  readonly preferred_language: string | null
   readonly first_names: string
   readonly last_names: string
   readonly terms_accepted: boolean
@@ -71,6 +72,7 @@ export const toSnapshot = (row: AccountRow, roles: readonly string[]): AccountSn
     email: row.email,
     displayName: row.display_name,
     countryCode: row.country_code,
+    preferredLanguage: row.preferred_language,
     firstNames: row.first_names,
     lastNames: row.last_names,
     termsAccepted: row.terms_accepted,
@@ -90,6 +92,7 @@ export const toRow = (snapshot: AccountSnapshot): AccountRow => ({
   email: snapshot.email,
   display_name: snapshot.displayName,
   country_code: snapshot.countryCode,
+  preferred_language: snapshot.preferredLanguage,
   first_names: snapshot.firstNames,
   last_names: snapshot.lastNames,
   terms_accepted: snapshot.termsAccepted,
