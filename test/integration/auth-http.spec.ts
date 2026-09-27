@@ -394,7 +394,7 @@ describe('API de cuentas con autenticacion activa', () => {
       expect(noMfa.status).toBe(409)
       expect(noMfa.body.message).toMatch(/aplicacion autenticadora/)
 
-      for (const role of [Role.SuperAdministrator, 'INVENTADO']) {
+      for (const role of [Role.SuperAdministrator, Role.GameMaster, 'INVENTADO']) {
         const response = await request(app.getHttpServer())
           .post(`/api/accounts/${accountId}/roles`)
           .set('Authorization', bearer('token-super-administrador'))
