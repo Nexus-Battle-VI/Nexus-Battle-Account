@@ -16,6 +16,13 @@ export const Role = {
    * aprovisionamiento.
    */
   SuperAdministrator: 'SUPER_ADMINISTRATOR',
+  /**
+   * Identidad comercial exclusiva de UPB-COMPANY (HU-66).
+   *
+   * No es un administrador del sistema y no se concede mediante las APIs de
+   * gestion de roles. Se aprovisiona de forma controlada y viaja en el token.
+   */
+  GameMaster: 'GAME_MASTER',
 } as const
 
 export type Role = (typeof Role)[keyof typeof Role]
@@ -25,10 +32,15 @@ export const ALL_ROLES: readonly Role[] = [
   Role.Moderator,
   Role.Administrator,
   Role.SuperAdministrator,
+  Role.GameMaster,
 ]
 
 /** Roles que exigen segundo factor antes de completar la autenticacion (HU-02, CA-06). */
-export const ADMINISTRATIVE_ROLES: readonly Role[] = [Role.Administrator, Role.SuperAdministrator]
+export const ADMINISTRATIVE_ROLES: readonly Role[] = [
+  Role.Administrator,
+  Role.SuperAdministrator,
+  Role.GameMaster,
+]
 
 export const isAdministrativeRole = (roles: Iterable<Role>): boolean => {
   for (const role of roles) {

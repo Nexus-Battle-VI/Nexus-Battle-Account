@@ -97,10 +97,13 @@ describe('AssignRole', () => {
     })
   })
 
-  it('rechaza SUPER_ADMINISTRATOR y a un ADMINISTRATOR como actor', async () => {
+  it('rechaza roles de aprovisionamiento controlado y a un ADMINISTRATOR como actor', async () => {
     const harness = await buildHarness()
 
     await expect(harness.assignRole.execute(command(Role.SuperAdministrator))).rejects.toThrow(
+      /no se concede mediante la API/,
+    )
+    await expect(harness.assignRole.execute(command(Role.GameMaster))).rejects.toThrow(
       /no se concede mediante la API/,
     )
 

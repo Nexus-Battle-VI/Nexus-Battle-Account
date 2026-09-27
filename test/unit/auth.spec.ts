@@ -56,10 +56,10 @@ describe('Traduccion del token a identidad verificada', () => {
       token_use: 'access',
       scope: 'aws.cognito.signin.user.admin',
       username: 'sujeto-1',
-      'cognito:groups': ['ADMINISTRATOR', 'PLAYER', 'SUPERUSUARIO', 'admin'],
+      'cognito:groups': ['ADMINISTRATOR', 'PLAYER', 'GAME_MASTER', 'SUPERUSUARIO', 'admin'],
     })
 
-    expect([...identity.roles].sort()).toEqual([Role.Administrator, Role.Player])
+    expect([...identity.roles].sort()).toEqual([Role.Administrator, Role.GameMaster, Role.Player])
   })
 
   it('modela un access token sin inventar atributos del perfil', () => {

@@ -90,16 +90,18 @@ describe('AccountId', () => {
 })
 
 describe('Role', () => {
-  it('reconoce los roles validos, incluido SUPER_ADMINISTRATOR (HU-02)', () => {
-    expect(ALL_ROLES).toHaveLength(4)
+  it('reconoce los roles validos, incluidos los aprovisionados de forma controlada', () => {
+    expect(ALL_ROLES).toHaveLength(5)
     expect(isRole('ADMINISTRATOR')).toBe(true)
     expect(isRole('SUPER_ADMINISTRATOR')).toBe(true)
+    expect(isRole('GAME_MASTER')).toBe(true)
     expect(isRole('SUPERUSER')).toBe(false)
   })
 
   it('identifica los roles que exigen segundo factor (HU-02, CA-06)', () => {
     expect(isAdministrativeRole([Role.Administrator])).toBe(true)
     expect(isAdministrativeRole([Role.SuperAdministrator])).toBe(true)
+    expect(isAdministrativeRole([Role.GameMaster])).toBe(true)
     expect(isAdministrativeRole([Role.Player, Role.Moderator])).toBe(false)
     expect(isAdministrativeRole([])).toBe(false)
   })

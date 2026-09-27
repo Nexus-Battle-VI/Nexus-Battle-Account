@@ -10,6 +10,7 @@ import { AccountDeletionController } from '../../adapters/inbound/http/account-d
 import { SessionsController } from '../../adapters/inbound/http/sessions.controller'
 import { InternalMfaEvidenceController } from '../../adapters/inbound/http/internal-mfa-evidence.controller'
 import { InternalBattleProfileController } from '../../adapters/inbound/http/internal-battle-profile.controller'
+import { InternalSellerSanctionsController } from '../../adapters/inbound/http/internal-seller-sanctions.controller'
 import { InternalServiceGuard } from '../../adapters/inbound/http/auth/internal-service.guard'
 import { VerifyMfaEvidence } from '../../application/use-cases/VerifyMfaEvidence'
 import { MFA_EVIDENCE_REPOSITORY } from '../../application/ports/MfaEvidenceRepositoryPort'
@@ -38,6 +39,7 @@ import {
   FIND_ACCOUNT_BY_EMAIL,
   ASSIGN_ROLE,
   APPLY_SANCTION,
+  GET_ACTIVE_SANCTION_STATUS,
   REVOKE_ROLE,
   LOGOUT_ACCOUNT,
   REFRESH_SESSION,
@@ -60,6 +62,7 @@ import { ConfirmTotpEnrollment } from '../../application/use-cases/ConfirmTotpEn
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetAccountAvatar } from '../../application/use-cases/GetAccountAvatar'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
+import { GetActiveSanctionStatus } from '../../application/use-cases/GetActiveSanctionStatus'
 import { GetOwnPersonalData } from '../../application/use-cases/GetOwnPersonalData'
 import { ExportPortablePersonalData } from '../../application/use-cases/ExportPortablePersonalData'
 import { GeneratePrivacyPdfReport } from '../../application/use-cases/GeneratePrivacyPdfReport'
@@ -238,6 +241,7 @@ export const DATABASE = Symbol('Database')
     SessionsController,
     InternalMfaEvidenceController,
     InternalBattleProfileController,
+    InternalSellerSanctionsController,
     HealthController,
   ],
   providers: [
@@ -716,6 +720,15 @@ export const DATABASE = Symbol('Database')
       provide: GET_OWN_ACCOUNT,
       useFactory: (accounts: AccountRepositoryPort): GetOwnAccount => new GetOwnAccount(accounts),
       inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: GET_ACTIVE_SANCTION_STATUS,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        sanctions: SanctionRepositoryPort,
+        clock: ClockPort,
+      ): GetActiveSanctionStatus => new GetActiveSanctionStatus(accounts, sanctions, clock),
+      inject: [ACCOUNT_REPOSITORY, SANCTION_REPOSITORY, CLOCK],
     },
     {
       provide: GET_OWN_PERSONAL_DATA,
