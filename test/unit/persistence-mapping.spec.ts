@@ -11,7 +11,7 @@ import { ALL_ROLES, Role } from '../../src/domain/entities/Role'
 import { up } from '../../src/adapters/outbound/persistence/migrations/001-accounts'
 import { up as upSuperAdministratorRole } from '../../src/adapters/outbound/persistence/migrations/hu03-super-administrator-role'
 import { up as upAccountBanStatus } from '../../src/adapters/outbound/persistence/migrations/z20260906-hu42-account-ban-status'
-import { up as upGameMasterRole } from '../../src/adapters/outbound/persistence/migrations/z20260921-hu66-game-master-role'
+import { up as upGameMasterRole } from '../../src/adapters/outbound/persistence/migrations/z20260927-hu66-game-master-role'
 import { describeError } from '../../src/infrastructure/observability/describe-error'
 
 const ROW: AccountRow = {
