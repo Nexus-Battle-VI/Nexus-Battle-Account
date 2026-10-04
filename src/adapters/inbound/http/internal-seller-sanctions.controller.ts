@@ -11,8 +11,27 @@ import { ApiExcludeController, ApiOperation, ApiProperty, ApiResponse } from '@n
 
 import type { GetActiveSanctionStatus } from '../../../application/use-cases/GetActiveSanctionStatus'
 import { AccountNotFoundError } from '../../../application/errors/ApplicationError'
+import type { SanctionType } from '../../../domain/entities/SanctionType'
+import type { SanctionReasonCode } from '../../../domain/entities/SanctionReasonCode'
 import { InternalOnly, Public } from './auth/decorators'
 import { GET_ACTIVE_SANCTION_STATUS } from './tokens'
+
+export class ActiveSanctionEntryResponse {
+  @ApiProperty()
+  readonly id!: string
+
+  @ApiProperty({ enum: ['PERMANENT_BAN', 'TEMPORARY_SUSPENSION'] })
+  readonly type!: SanctionType
+
+  @ApiProperty({ enum: ['OTHER', 'AUCTION_TERMS_VIOLATION'] })
+  readonly reasonCode!: SanctionReasonCode
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Fin de una suspension temporal. Null para un veto permanente.',
+  })
+  readonly expiresAt!: Date | null
+}
 
 export class ActiveSanctionStatusResponse {
   @ApiProperty({
@@ -20,6 +39,12 @@ export class ActiveSanctionStatusResponse {
       'Cierto si la cuenta esta bloqueada por PERMANENT_BAN o TEMPORARY_SUSPENSION vigente.',
   })
   readonly hasActiveSanctions!: boolean
+
+  @ApiProperty({
+    type: [ActiveSanctionEntryResponse],
+    description: 'Sanciones que bloquean ahora mismo la cuenta. Las advertencias no aparecen aqui.',
+  })
+  readonly sanctions!: readonly ActiveSanctionEntryResponse[]
 }
 
 /**
@@ -59,9 +84,17 @@ export class InternalSellerSanctionsController {
   @ApiResponse({ status: 503, description: 'El contrato interno no esta configurado' })
   async activeSanctions(@Param('subject') subject: string): Promise<ActiveSanctionStatusResponse> {
     try {
-      const hasActiveSanctions = await this.getActiveSanctionStatus.execute(subject)
+      const status = await this.getActiveSanctionStatus.execute(subject)
 
-      return { hasActiveSanctions }
+      return {
+        hasActiveSanctions: status.hasActiveSanctions,
+        sanctions: status.sanctions.map((sanction) => ({
+          id: sanction.id,
+          type: sanction.type,
+          reasonCode: sanction.reasonCode,
+          expiresAt: sanction.expiresAt,
+        })),
+      }
     } catch (error: unknown) {
       if (error instanceof AccountNotFoundError) {
         throw new NotFoundException(error.message)

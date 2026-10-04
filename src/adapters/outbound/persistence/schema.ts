@@ -134,6 +134,7 @@ export interface SanctionsTable {
   readonly actor_account_id: string
   readonly type: string
   readonly reason: string
+  readonly reason_code: string
   readonly created_at: Generated<Date>
   readonly expires_at: Date | null
 }

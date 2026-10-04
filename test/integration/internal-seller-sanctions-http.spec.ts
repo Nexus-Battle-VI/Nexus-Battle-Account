@@ -1,3 +1,4 @@
+import { SanctionReasonCode } from '../../src/domain/entities/SanctionReasonCode'
 import { ValidationPipe, type INestApplication } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import request from 'supertest'
@@ -105,7 +106,7 @@ describe('Contrato interno de estado de sanciones (HU-62)', () => {
     const response = await request(app.getHttpServer()).get(ruta).set(firmar(ruta))
 
     expect(response.status).toBe(200)
-    expect(response.body).toEqual({ hasActiveSanctions: false })
+    expect(response.body).toEqual({ hasActiveSanctions: false, sanctions: [] })
   })
 
   it('responde true para una cuenta con veto permanente', async () => {
@@ -117,7 +118,7 @@ describe('Contrato interno de estado de sanciones (HU-62)', () => {
     const response = await request(app.getHttpServer()).get(ruta).set(firmar(ruta))
 
     expect(response.status).toBe(200)
-    expect(response.body).toEqual({ hasActiveSanctions: true })
+    expect(response.body).toEqual({ hasActiveSanctions: true, sanctions: [] })
   })
 
   it('responde true para una cuenta con suspension temporal vigente', async () => {
@@ -130,6 +131,7 @@ describe('Contrato interno de estado de sanciones (HU-62)', () => {
         actorAccountId: 'moderador-pruebas',
         type: SanctionType.TemporarySuspension,
         reason: 'Comportamiento reportado',
+        reasonCode: SanctionReasonCode.Other,
         createdAt: new Date(Date.now() - 60_000),
         expiresAt: new Date(Date.now() + 60 * 60_000),
       }),
@@ -139,7 +141,19 @@ describe('Contrato interno de estado de sanciones (HU-62)', () => {
     const response = await request(app.getHttpServer()).get(ruta).set(firmar(ruta))
 
     expect(response.status).toBe(200)
-    expect(response.body).toEqual({ hasActiveSanctions: true })
+    expect(response.body).toEqual({
+      hasActiveSanctions: true,
+      sanctions: [
+        {
+          id: `sancion-${id}`,
+          type: SanctionType.TemporarySuspension,
+          reasonCode: SanctionReasonCode.Other,
+          expiresAt: expect.any(String),
+        },
+      ],
+    })
+    expect(JSON.stringify(response.body)).not.toContain('Comportamiento reportado')
+    expect(JSON.stringify(response.body)).not.toContain('moderador-pruebas')
   })
 
   /**
@@ -157,6 +171,7 @@ describe('Contrato interno de estado de sanciones (HU-62)', () => {
         actorAccountId: 'moderador-pruebas',
         type: SanctionType.TemporarySuspension,
         reason: 'Comportamiento reportado',
+        reasonCode: SanctionReasonCode.Other,
         createdAt: new Date(Date.now() - 120 * 60_000),
         expiresAt: new Date(Date.now() - 60_000),
       }),
@@ -166,7 +181,7 @@ describe('Contrato interno de estado de sanciones (HU-62)', () => {
     const response = await request(app.getHttpServer()).get(ruta).set(firmar(ruta))
 
     expect(response.status).toBe(200)
-    expect(response.body).toEqual({ hasActiveSanctions: false })
+    expect(response.body).toEqual({ hasActiveSanctions: false, sanctions: [] })
 
     const stillSuspended = await accounts.findById(AccountId.create(id))
     expect(stillSuspended?.currentStatus).toBe(AccountStatus.Suspended)
@@ -196,5 +211,27 @@ describe('Contrato interno de estado de sanciones (HU-62)', () => {
       .set(firmar(ruta, { service: 'servicio-no-listado' }))
 
     expect(response.status).toBe(401)
+  })
+
+  it('no incluye una advertencia con AUCTION_TERMS_VIOLATION: no es una restriccion activa', async () => {
+    const id = 'advertido-terminos'
+    await accounts.save(buildAccount(id, `sub:${id}`, AccountStatus.Active))
+    await sanctions.save(
+      Sanction.create({
+        id: `sancion-${id}`,
+        targetAccountId: id,
+        actorAccountId: 'moderador-pruebas',
+        type: SanctionType.Warning,
+        reason: 'Aviso por violacion de terminos',
+        reasonCode: SanctionReasonCode.AuctionTermsViolation,
+        createdAt: new Date(Date.now() - 60_000),
+      }),
+    )
+    const ruta = rutaSanciones(`sub:${id}`)
+
+    const response = await request(app.getHttpServer()).get(ruta).set(firmar(ruta))
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ hasActiveSanctions: false, sanctions: [] })
   })
 })

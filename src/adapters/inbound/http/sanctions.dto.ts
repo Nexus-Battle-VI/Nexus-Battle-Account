@@ -2,6 +2,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { IsIn, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString } from 'class-validator'
 
 import { ALL_SANCTION_TYPES, type SanctionType } from '../../../domain/entities/SanctionType'
+import {
+  ALL_SANCTION_REASON_CODES,
+  type SanctionReasonCode,
+} from '../../../domain/entities/SanctionReasonCode'
 
 export class ApplySanctionRequest {
   @ApiProperty({
@@ -18,6 +22,18 @@ export class ApplySanctionRequest {
   @IsString()
   @IsNotEmpty()
   readonly reason!: string
+
+  @ApiPropertyOptional({
+    enum: ALL_SANCTION_REASON_CODES,
+    default: 'OTHER',
+    example: 'OTHER',
+    description:
+      'Código estructurado del motivo. Si se omite, la sanción se registra como OTHER. AUCTION_TERMS_VIOLATION solo cuenta para cancelar subastas cuando la sanción es una restricción activa.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(ALL_SANCTION_REASON_CODES)
+  readonly reasonCode?: SanctionReasonCode
 
   @ApiPropertyOptional({
     description:
@@ -48,6 +64,11 @@ export class SanctionResponse {
 
   @ApiProperty()
   readonly reason!: string
+
+  @ApiProperty({
+    enum: ALL_SANCTION_REASON_CODES,
+  })
+  readonly reasonCode!: SanctionReasonCode
 
   @ApiProperty()
   readonly createdAt!: Date

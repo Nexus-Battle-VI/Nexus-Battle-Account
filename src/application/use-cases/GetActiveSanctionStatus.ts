@@ -3,16 +3,24 @@ import type { SanctionRepositoryPort } from '../ports/SanctionRepositoryPort'
 import type { ClockPort } from '../ports/ClockPort'
 import { AccountNotFoundError } from '../errors/ApplicationError'
 import { AccountStatus } from '../../domain/entities/AccountStatus'
+import type { Sanction } from '../../domain/entities/Sanction'
+import { SanctionType } from '../../domain/entities/SanctionType'
+
+export interface ActiveSanctionStatus {
+  readonly hasActiveSanctions: boolean
+  readonly sanctions: readonly Sanction[]
+}
 
 /**
- * Responde si una cuenta esta actualmente impedida de operar por una sancion
- * (HU-42), para que otro servicio decida sin duplicar el modelo de sanciones.
+ * Responde qué sanciones impiden actualmente operar a una cuenta (HU-42),
+ * para que otro servicio decida sin duplicar el modelo de sanciones.
  *
  * Replica la MISMA semantica que `LoginAccount`: bloqueada siempre por
  * PERMANENT_BAN; bloqueada por TEMPORARY_SUSPENSION solo mientras no haya
- * vencido. A diferencia de `LoginAccount`, es una consulta pura: no
- * reincorpora la cuenta cuando la suspension ya vencio -esa reincorporacion es
- * un efecto de iniciar sesion, no de que otro servicio pregunte.
+ * vencido. Las advertencias nunca bloquean y no aparecen en la lista. A
+ * diferencia de `LoginAccount`, es una consulta pura: no reincorpora la
+ * cuenta cuando la suspension ya vencio -esa reincorporacion es un efecto de
+ * iniciar sesion, no de que otro servicio pregunte.
  */
 export class GetActiveSanctionStatus {
   constructor(
@@ -21,7 +29,7 @@ export class GetActiveSanctionStatus {
     private readonly clock: ClockPort,
   ) {}
 
-  async execute(subject: string): Promise<boolean> {
+  async execute(subject: string): Promise<ActiveSanctionStatus> {
     const account = await this.accounts.findBySubject(subject)
 
     if (account === null) {
@@ -31,19 +39,24 @@ export class GetActiveSanctionStatus {
       )
     }
 
-    if (account.currentStatus === AccountStatus.Banned) {
-      return true
+    const status = account.currentStatus
+
+    if (status !== AccountStatus.Banned && status !== AccountStatus.Suspended) {
+      return { hasActiveSanctions: false, sanctions: [] }
     }
 
-    if (account.currentStatus === AccountStatus.Suspended) {
-      const activeSuspension = await this.sanctions.findActiveTemporarySuspension(
-        account.id.value,
-        this.clock.now(),
-      )
+    const restrictions = await this.sanctions.findActiveRestrictions(
+      account.id.value,
+      this.clock.now(),
+    )
 
-      return activeSuspension !== null
+    const expectedType =
+      status === AccountStatus.Banned ? SanctionType.PermanentBan : SanctionType.TemporarySuspension
+    const sanctions = restrictions.filter((sanction) => sanction.type === expectedType)
+
+    return {
+      hasActiveSanctions: status === AccountStatus.Banned || sanctions.length > 0,
+      sanctions,
     }
-
-    return false
   }
 }
