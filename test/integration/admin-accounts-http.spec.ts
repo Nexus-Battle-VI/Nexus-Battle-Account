@@ -1,3 +1,4 @@
+import { SanctionReasonCode } from '../../src/domain/entities/SanctionReasonCode'
 import 'reflect-metadata'
 
 import { ValidationPipe, type INestApplication } from '@nestjs/common'
@@ -209,6 +210,7 @@ describe('Listado administrativo de cuentas HU-44.2', () => {
           actorAccountId: 'acc-panel-super',
           type,
           reason: 'Causal sintetica HU-44.2',
+          reasonCode: SanctionReasonCode.Other,
           createdAt: new Date('2020-01-01T00:00:00.000Z'),
           expiresAt:
             type === SanctionType.TemporarySuspension ? new Date('2020-01-02T00:00:00.000Z') : null,
@@ -510,6 +512,7 @@ describe('Listado administrativo de cuentas HU-44.2', () => {
           actorAccountId: 'acc-panel-super',
           type: SanctionType.TemporarySuspension,
           reason: 'Causal sintetica',
+          reasonCode: SanctionReasonCode.Other,
           createdAt: new Date('2020-01-01T00:00:00.000Z'),
           expiresAt: new Date('2020-01-02T00:00:00.000Z'),
         }),
@@ -655,6 +658,7 @@ describe('Listado administrativo de cuentas HU-44.2', () => {
         actorAccountId: 'acc-panel-super',
         type,
         reason: 'Causal sintetica',
+        reasonCode: SanctionReasonCode.Other,
         createdAt: new Date('2020-01-01T00:00:00.000Z'),
         expiresAt:
           type === SanctionType.TemporarySuspension ? new Date('2100-01-01T00:00:00.000Z') : null,

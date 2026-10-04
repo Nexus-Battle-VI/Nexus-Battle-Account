@@ -1,3 +1,4 @@
+import { SanctionReasonCode } from '../../src/domain/entities/SanctionReasonCode'
 import { Sanction } from '../../src/domain/entities/Sanction'
 import { SanctionType } from '../../src/domain/entities/SanctionType'
 
@@ -11,6 +12,7 @@ const buildSanction = (): Sanction =>
     actorAccountId: 'actor-1',
     type: SanctionType.Warning,
     reason: 'Conducta ofensiva reiterada.',
+    reasonCode: SanctionReasonCode.Other,
     createdAt: CREATED_AT,
   })
 

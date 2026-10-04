@@ -1,3 +1,4 @@
+import { SanctionReasonCode } from '../../src/domain/entities/SanctionReasonCode'
 import { RegisterAccount } from '../../src/application/use-cases/RegisterAccount'
 import { GetAccount } from '../../src/application/use-cases/GetAccount'
 import { GetAccountAvatar } from '../../src/application/use-cases/GetAccountAvatar'
@@ -826,6 +827,7 @@ describe('LoginAccount', () => {
         actorAccountId: 'admin-1',
         type: SanctionType.TemporarySuspension,
         reason: 'Suspension temporal vigente.',
+        reasonCode: SanctionReasonCode.Other,
         createdAt: new Date(AHORA.getTime() - 30 * 60_000),
         expiresAt: new Date(AHORA.getTime() + 30 * 60_000),
       }),
@@ -866,6 +868,7 @@ describe('LoginAccount', () => {
         actorAccountId: 'admin-1',
         type: SanctionType.TemporarySuspension,
         reason: 'Suspension temporal vencida.',
+        reasonCode: SanctionReasonCode.Other,
         createdAt: new Date(AHORA.getTime() - 120 * 60_000),
         expiresAt: new Date(AHORA.getTime() - 60 * 60_000),
       }),

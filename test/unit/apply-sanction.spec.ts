@@ -1,3 +1,4 @@
+import { SanctionReasonCode } from '../../src/domain/entities/SanctionReasonCode'
 import { ApplySanction } from '../../src/application/use-cases/ApplySanction'
 import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
 import { InMemorySanctionRepository } from '../../src/adapters/outbound/persistence/InMemorySanctionRepository'
@@ -93,6 +94,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       targetAccountId: 'target-1',
       type: SanctionType.Warning,
       reason: 'Conducta ofensiva reiterada.',
+      reasonCode: SanctionReasonCode.Other,
     })
 
     expect(sanction.toSnapshot()).toMatchObject({
@@ -101,6 +103,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       actorAccountId: 'actor-1',
       type: SanctionType.Warning,
       reason: 'Conducta ofensiva reiterada.',
+      reasonCode: SanctionReasonCode.Other,
       expiresAt: null,
     })
 
@@ -122,6 +125,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       targetAccountId: 'target-1',
       type: SanctionType.TemporarySuspension,
       reason: 'Incumplimiento reiterado de las normas.',
+      reasonCode: SanctionReasonCode.Other,
       suspensionDurationMinutes: 60,
     })
 
@@ -148,6 +152,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       targetAccountId: 'target-1',
       type: SanctionType.TemporarySuspension,
       reason: 'Suspension configurable.',
+      reasonCode: SanctionReasonCode.Other,
       suspensionDurationMinutes: 90,
     })
 
@@ -165,6 +170,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         targetAccountId: 'target-1',
         type: SanctionType.TemporarySuspension,
         reason: 'Suspension sin duracion.',
+        reasonCode: SanctionReasonCode.Other,
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
@@ -187,6 +193,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         targetAccountId: 'target-1',
         type: SanctionType.TemporarySuspension,
         reason: 'Suspension invalida.',
+        reasonCode: SanctionReasonCode.Other,
         suspensionDurationMinutes: 0,
       }),
     ).rejects.toBeInstanceOf(DomainError)
@@ -210,6 +217,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         targetAccountId: 'target-1',
         type: SanctionType.Warning,
         reason: 'Advertencia.',
+        reasonCode: SanctionReasonCode.Other,
         suspensionDurationMinutes: 30,
       }),
     ).rejects.toBeInstanceOf(DomainError)
@@ -233,6 +241,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         targetAccountId: 'target-1',
         type: SanctionType.PermanentBan,
         reason: 'Conducta grave.',
+        reasonCode: SanctionReasonCode.Other,
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
@@ -254,6 +263,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       targetAccountId: 'target-1',
       type: SanctionType.PermanentBan,
       reason: 'Incumplimiento grave y reiterado.',
+      reasonCode: SanctionReasonCode.Other,
     })
 
     expect(sanction.type).toBe(SanctionType.PermanentBan)
@@ -276,6 +286,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       targetAccountId: 'target-1',
       type: SanctionType.PermanentBan,
       reason: 'Violacion grave de las reglas.',
+      reasonCode: SanctionReasonCode.Other,
     })
 
     expect(sanction.type).toBe(SanctionType.PermanentBan)
@@ -297,6 +308,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         targetAccountId: 'target-1',
         type: SanctionType.Warning,
         reason: 'Intento no autorizado.',
+        reasonCode: SanctionReasonCode.Other,
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
@@ -326,6 +338,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         targetAccountId: 'target-1',
         type: SanctionType.Warning,
         reason: 'Motivo de prueba.',
+        reasonCode: SanctionReasonCode.Other,
       }),
     ).rejects.toBeInstanceOf(AccountNotFoundError)
 
@@ -354,6 +367,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         targetAccountId: 'target-inexistente',
         type: SanctionType.Warning,
         reason: 'Motivo de prueba.',
+        reasonCode: SanctionReasonCode.Other,
       }),
     ).rejects.toBeInstanceOf(AccountNotFoundError)
 
@@ -371,6 +385,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         targetAccountId: 'target-1',
         type: SanctionType.Warning,
         reason: '   ',
+        reasonCode: SanctionReasonCode.Other,
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
@@ -392,6 +407,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       targetAccountId: 'target-1',
       type: SanctionType.Warning,
       reason: 'Conducta ofensiva.',
+      reasonCode: SanctionReasonCode.Other,
     })
 
     expect(harness.requestedNotifications).toHaveLength(1)
@@ -423,6 +439,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       targetAccountId: 'target-1',
       type: SanctionType.TemporarySuspension,
       reason: 'Suspension de prueba.',
+      reasonCode: SanctionReasonCode.Other,
       suspensionDurationMinutes: 60,
     })
 
@@ -447,6 +464,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         targetAccountId: 'target-1',
         type: SanctionType.Warning,
         reason: 'Intento no autorizado.',
+        reasonCode: SanctionReasonCode.Other,
       }),
     ).rejects.toBeInstanceOf(DomainError)
 
@@ -484,6 +502,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       targetAccountId: 'target-1',
       type: SanctionType.Warning,
       reason: 'Validar orden.',
+      reasonCode: SanctionReasonCode.Other,
     })
 
     expect(sanctionWasPersistedBeforeNotification).toBe(true)
@@ -518,9 +537,45 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         targetAccountId: 'target-1',
         type: SanctionType.Warning,
         reason: 'Prueba de fallo de correo.',
+        reasonCode: SanctionReasonCode.Other,
       }),
     ).rejects.toThrow('Notifications no disponible')
 
     expect(sanctions.findAll()).toHaveLength(1)
+  })
+
+  it('persiste el código AUCTION_TERMS_VIOLATION junto con el motivo humano', async () => {
+    const harness = buildHarness()
+
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
+
+    const sanction = await harness.applySanction.execute({
+      actorSubject: 'actor-subject',
+      targetAccountId: 'target-1',
+      type: SanctionType.Warning,
+      reason: 'Violacion de terminos en subasta.',
+      reasonCode: SanctionReasonCode.AuctionTermsViolation,
+    })
+
+    expect(sanction.toSnapshot()).toMatchObject({
+      reason: 'Violacion de terminos en subasta.',
+      reasonCode: SanctionReasonCode.AuctionTermsViolation,
+    })
+  })
+
+  it('rechaza un código de motivo que no pertenece al catálogo', async () => {
+    const harness = buildHarness()
+
+    await saveActorAndTarget(harness.accounts, [Role.Moderator])
+
+    await expect(
+      harness.applySanction.execute({
+        actorSubject: 'actor-subject',
+        targetAccountId: 'target-1',
+        type: SanctionType.Warning,
+        reason: 'Aviso.',
+        reasonCode: 'CODIGO_INVENTADO' as SanctionReasonCode,
+      }),
+    ).rejects.toBeInstanceOf(DomainError)
   })
 })
