@@ -16,6 +16,7 @@ import { ApplySanction } from '../../../application/use-cases/ApplySanction'
 import { AccountNotFoundError } from '../../../application/errors/ApplicationError'
 import { DomainError } from '../../../domain/errors/DomainError'
 import { Role } from '../../../domain/entities/Role'
+import { SanctionReasonCode } from '../../../domain/entities/SanctionReasonCode'
 import { CurrentIdentity, Roles } from './auth/decorators'
 import type { VerifiedIdentity } from '../../../application/ports/TokenVerifierPort'
 import { APPLY_SANCTION } from './tokens'
@@ -64,6 +65,7 @@ export class SanctionsController {
         targetAccountId,
         type: body.type,
         reason: body.reason,
+        reasonCode: body.reasonCode ?? SanctionReasonCode.Other,
         suspensionDurationMinutes: body.suspensionDurationMinutes,
       })
 

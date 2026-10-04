@@ -1,3 +1,4 @@
+import { SanctionReasonCode } from '../../src/domain/entities/SanctionReasonCode'
 import { InMemoryAccountRepository } from '../../src/adapters/outbound/persistence/InMemoryAccountRepository'
 import { ListAdminAccounts } from '../../src/application/use-cases/ListAdminAccounts'
 import { Account } from '../../src/domain/entities/Account'
@@ -139,6 +140,7 @@ describe('ListAdminAccounts', () => {
           actorAccountId: 'acc-super-active',
           type,
           reason: 'Causal sintetica HU-44.2',
+          reasonCode: SanctionReasonCode.Other,
           createdAt: new Date('2020-01-01T00:00:00.000Z'),
           expiresAt:
             type === SanctionType.TemporarySuspension ? new Date('2020-01-02T00:00:00.000Z') : null,

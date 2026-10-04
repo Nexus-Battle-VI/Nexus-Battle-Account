@@ -1,3 +1,4 @@
+import { SanctionReasonCode } from '../../src/domain/entities/SanctionReasonCode'
 import 'reflect-metadata'
 
 import { startTestPostgres, type TestPostgres } from './postgres-runtime'
@@ -451,6 +452,7 @@ describe('PostgresAccountRepository', () => {
         actorAccountId: 'acc-query-super',
         type,
         reason: 'Causal sintetica HU-44.2',
+        reasonCode: SanctionReasonCode.Other,
         createdAt: new Date('2020-01-01T00:00:00.000Z'),
         expiresAt:
           type === SanctionType.TemporarySuspension ? new Date('2020-01-02T00:00:00.000Z') : null,
@@ -535,6 +537,7 @@ describe('PostgresAccountRepository', () => {
       actorAccountId: 'acc-query-super',
       type: SanctionType.Warning,
       reason: 'Causal sintetica',
+      reasonCode: SanctionReasonCode.Other,
       createdAt: AT,
     })
     await sanctions.save(sanction)

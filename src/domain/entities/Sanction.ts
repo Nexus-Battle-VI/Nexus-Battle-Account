@@ -1,5 +1,9 @@
 import { DomainError } from '../errors/DomainError'
 import { SanctionType, type SanctionType as SanctionTypeValue } from './SanctionType'
+import {
+  isSanctionReasonCode,
+  type SanctionReasonCode as SanctionReasonCodeValue,
+} from './SanctionReasonCode'
 
 const APPEAL_WINDOW_DAYS = 30
 const APPEAL_WINDOW_MS = APPEAL_WINDOW_DAYS * 24 * 60 * 60 * 1000
@@ -10,6 +14,7 @@ export interface SanctionSnapshot {
   readonly actorAccountId: string
   readonly type: SanctionTypeValue
   readonly reason: string
+  readonly reasonCode: SanctionReasonCodeValue
   readonly createdAt: Date
   readonly expiresAt: Date | null
   readonly appealDeadline: Date
@@ -24,6 +29,7 @@ export class Sanction {
     readonly actorAccountId: string,
     readonly type: SanctionTypeValue,
     readonly reason: string,
+    readonly reasonCode: SanctionReasonCodeValue,
     readonly createdAt: Date,
     readonly expiresAt: Date | null,
   ) {}
@@ -34,6 +40,7 @@ export class Sanction {
     actorAccountId: string
     type: SanctionTypeValue
     reason: string
+    reasonCode: SanctionReasonCodeValue
     createdAt: Date
     expiresAt?: Date | null
   }): Sanction {
@@ -51,6 +58,10 @@ export class Sanction {
 
     if (params.reason.trim().length === 0) {
       throw new DomainError('La sancion debe incluir una causal.')
+    }
+
+    if (!isSanctionReasonCode(params.reasonCode)) {
+      throw new DomainError('El codigo de motivo de la sancion no es valido.')
     }
 
     const expiresAt = params.expiresAt ?? null
@@ -77,6 +88,7 @@ export class Sanction {
       params.actorAccountId,
       params.type,
       params.reason.trim(),
+      params.reasonCode,
       params.createdAt,
       expiresAt,
     )
@@ -89,6 +101,7 @@ export class Sanction {
       snapshot.actorAccountId,
       snapshot.type,
       snapshot.reason,
+      snapshot.reasonCode,
       snapshot.createdAt,
       snapshot.expiresAt,
     )
@@ -123,6 +136,7 @@ export class Sanction {
       actorAccountId: this.actorAccountId,
       type: this.type,
       reason: this.reason,
+      reasonCode: this.reasonCode,
       createdAt: this.createdAt,
       expiresAt: this.expiresAt,
       appealDeadline: this.appealDeadline,

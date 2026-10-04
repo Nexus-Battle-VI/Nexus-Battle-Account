@@ -8,6 +8,7 @@ import { AppModule } from '../../src/infrastructure/bootstrap/app.module'
 import { Account } from '../../src/domain/entities/Account'
 import { AccountStatus } from '../../src/domain/entities/AccountStatus'
 import { Role } from '../../src/domain/entities/Role'
+import { SanctionReasonCode } from '../../src/domain/entities/SanctionReasonCode'
 import { SanctionType } from '../../src/domain/entities/SanctionType'
 import { AccountId } from '../../src/domain/value-objects/AccountId'
 import { DisplayName } from '../../src/domain/value-objects/DisplayName'
@@ -23,6 +24,10 @@ import {
   ACCOUNT_REPOSITORY,
   type AccountRepositoryPort,
 } from '../../src/application/ports/AccountRepositoryPort'
+import {
+  SANCTION_REPOSITORY,
+  type SanctionRepositoryPort,
+} from '../../src/application/ports/SanctionRepositoryPort'
 import {
   NOTIFICATION_REQUEST,
   type NotificationRequest,
@@ -179,6 +184,7 @@ const buildAccount = (seed: AccountSeed): Account =>
 describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
   let app: INestApplication
   let accounts: AccountRepositoryPort
+  let sanctions: SanctionRepositoryPort
   let previousEnv: Record<string, string | undefined>
 
   const requestedNotifications: NotificationRequest[] = []
@@ -232,6 +238,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
     await app.init()
 
     accounts = app.get<AccountRepositoryPort>(ACCOUNT_REPOSITORY)
+    sanctions = app.get<SanctionRepositoryPort>(SANCTION_REPOSITORY)
 
     for (const seed of [...ACTORS, ...TARGETS]) {
       await accounts.save(buildAccount(seed))
@@ -261,6 +268,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
       .send({
         type: SanctionType.Warning,
         reason: 'Conducta ofensiva reiterada.',
+        reasonCode: SanctionReasonCode.Other,
       })
 
     expect(response.status).toBe(201)
@@ -290,6 +298,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
       .send({
         type: SanctionType.TemporarySuspension,
         reason: 'Incumplimiento reiterado.',
+        reasonCode: SanctionReasonCode.Other,
         suspensionDurationMinutes: 60,
       })
 
@@ -317,6 +326,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
       .send({
         type: SanctionType.PermanentBan,
         reason: 'Violacion grave y reiterada.',
+        reasonCode: SanctionReasonCode.Other,
       })
 
     expect(response.status).toBe(201)
@@ -342,6 +352,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
       .send({
         type: SanctionType.PermanentBan,
         reason: 'Violacion critica de las reglas.',
+        reasonCode: SanctionReasonCode.Other,
       })
 
     expect(response.status).toBe(201)
@@ -366,6 +377,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
       .send({
         type: SanctionType.PermanentBan,
         reason: 'Intento de baneo no autorizado.',
+        reasonCode: SanctionReasonCode.Other,
       })
 
     expect(response.status).toBe(403)
@@ -385,6 +397,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
       .send({
         type: SanctionType.Warning,
         reason: 'Intento no autorizado.',
+        reasonCode: SanctionReasonCode.Other,
       })
 
     expect(response.status).toBe(403)
@@ -416,6 +429,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
       .send({
         type: SanctionType.Warning,
         reason: 'Prueba de integracion con RF-55.',
+        reasonCode: SanctionReasonCode.Other,
       })
 
     expect(response.status).toBe(201)
@@ -452,6 +466,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
       .send({
         type: SanctionType.Warning,
         reason: 'Validar ventana de apelacion.',
+        reasonCode: SanctionReasonCode.Other,
       })
 
     expect(response.status).toBe(201)
@@ -489,6 +504,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
       .send({
         type: SanctionType.TemporarySuspension,
         reason: 'Suspension sin duracion.',
+        reasonCode: SanctionReasonCode.Other,
       })
 
     expect(response.status).toBe(400)
@@ -499,5 +515,98 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
     expect(target?.canAuthenticate).toBe(true)
 
     expect(requestedNotifications).toHaveLength(0)
+  })
+
+  it('acepta AUCTION_TERMS_VIOLATION y lo devuelve en la respuesta', async () => {
+    const targetId = 'target-terms-violation'
+    await accounts.save(
+      Account.restore({
+        id: AccountId.create(targetId),
+        subject: `subject-${targetId}`,
+        email: EmailAddress.create(`${targetId}@nexus.test`),
+        displayName: DisplayName.create('Objetivo Terminos'),
+        firstNames: PersonName.create('Objetivo', 'Terminos'),
+        lastNames: PersonName.create('Prueba', 'Terminos'),
+        termsAccepted: true,
+        avatar: defaultAvatarMetadata(targetId),
+        status: AccountStatus.Active,
+        roles: [Role.Player],
+      }),
+    )
+
+    const response = await request(app.getHttpServer())
+      .post(sanctionUrl(targetId))
+      .set('Authorization', bearer('token-moderator'))
+      .send({
+        type: SanctionType.TemporarySuspension,
+        reason: 'Violacion de terminos en subasta.',
+        reasonCode: SanctionReasonCode.AuctionTermsViolation,
+        suspensionDurationMinutes: 60,
+      })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toMatchObject({
+      targetAccountId: targetId,
+      reasonCode: SanctionReasonCode.AuctionTermsViolation,
+    })
+  })
+
+  it('acepta una sancion sin reasonCode y la registra como OTHER', async () => {
+    const targetId = 'target-reason-omitted'
+    await accounts.save(
+      Account.restore({
+        id: AccountId.create(targetId),
+        subject: `subject-${targetId}`,
+        email: EmailAddress.create(`${targetId}@nexus.test`),
+        displayName: DisplayName.create('Objetivo Sin Motivo'),
+        firstNames: PersonName.create('Objetivo', 'Sin'),
+        lastNames: PersonName.create('Prueba', 'Motivo'),
+        termsAccepted: true,
+        avatar: defaultAvatarMetadata(targetId),
+        status: AccountStatus.Active,
+        roles: [Role.Player],
+      }),
+    )
+
+    const response = await request(app.getHttpServer())
+      .post(sanctionUrl(targetId))
+      .set('Authorization', bearer('token-moderator'))
+      .send({
+        type: SanctionType.TemporarySuspension,
+        reason: 'Suspension sin codigo explicito.',
+        suspensionDurationMinutes: 60,
+      })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toMatchObject({ reasonCode: SanctionReasonCode.Other })
+
+    const restrictions = await sanctions.findActiveRestrictions(targetId, new Date())
+    expect(restrictions).toHaveLength(1)
+    expect(restrictions[0]?.reasonCode).toBe(SanctionReasonCode.Other)
+  })
+
+  it('rechaza una sancion con un codigo desconocido', async () => {
+    const targetId = 'target-reason-invalid'
+    await accounts.save(
+      Account.restore({
+        id: AccountId.create(targetId),
+        subject: `subject-${targetId}`,
+        email: EmailAddress.create(`${targetId}@nexus.test`),
+        displayName: DisplayName.create('Objetivo Motivo'),
+        firstNames: PersonName.create('Objetivo', 'Motivo'),
+        lastNames: PersonName.create('Prueba', 'Motivo'),
+        termsAccepted: true,
+        avatar: defaultAvatarMetadata(targetId),
+        status: AccountStatus.Active,
+        roles: [Role.Player],
+      }),
+    )
+
+    const response = await request(app.getHttpServer())
+      .post(sanctionUrl(targetId))
+      .set('Authorization', bearer('token-moderator'))
+      .send({ type: SanctionType.Warning, reason: 'Aviso.', reasonCode: 'CODIGO_INVENTADO' })
+
+    expect(response.status).toBe(400)
   })
 })

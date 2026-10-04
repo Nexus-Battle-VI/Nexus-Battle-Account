@@ -9,6 +9,7 @@ import {
   SanctionType,
   type SanctionType as SanctionTypeValue,
 } from '../../domain/entities/SanctionType'
+import type { SanctionReasonCode } from '../../domain/entities/SanctionReasonCode'
 import { SanctionPolicy } from '../../domain/policies/SanctionPolicy'
 import { DomainError } from '../../domain/errors/DomainError'
 import { AccountId } from '../../domain/value-objects/AccountId'
@@ -31,6 +32,7 @@ export class ApplySanction {
     readonly targetAccountId: string
     readonly type: SanctionTypeValue
     readonly reason: string
+    readonly reasonCode: SanctionReasonCode
     readonly suspensionDurationMinutes?: number
   }): Promise<Sanction> {
     const actor = await this.accounts.findBySubject(command.actorSubject)
@@ -80,6 +82,7 @@ export class ApplySanction {
       actorAccountId: actor.id.value,
       type: command.type,
       reason: command.reason,
+      reasonCode: command.reasonCode,
       createdAt,
       expiresAt,
     })

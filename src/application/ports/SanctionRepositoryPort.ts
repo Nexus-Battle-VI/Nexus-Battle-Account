@@ -8,6 +8,9 @@ export interface SanctionRepositoryPort {
 
   findActiveTemporarySuspension(targetAccountId: string, at: Date): Promise<Sanction | null>
 
+  /** Vetos permanentes y suspensiones temporales vigentes en `at`, sin advertencias. */
+  findActiveRestrictions(targetAccountId: string, at: Date): Promise<readonly Sanction[]>
+
   findLatestTemporarySuspension(targetAccountId: string): Promise<Sanction | null>
 }
 

@@ -1,3 +1,4 @@
+import { SanctionReasonCode } from '../../src/domain/entities/SanctionReasonCode'
 import 'reflect-metadata'
 
 import { ForbiddenException, UnauthorizedException, type ExecutionContext } from '@nestjs/common'
@@ -269,6 +270,7 @@ describe('JwtAuthGuard', () => {
         actorAccountId: 'admin-1',
         type: SanctionType.TemporarySuspension,
         reason: 'Suspension temporal de prueba.',
+        reasonCode: SanctionReasonCode.Other,
         createdAt: NOW,
         expiresAt: new Date('2026-09-06T13:00:00.000Z'),
       }),
@@ -304,6 +306,7 @@ describe('JwtAuthGuard', () => {
         actorAccountId: 'admin-1',
         type: SanctionType.TemporarySuspension,
         reason: 'Suspension temporal vencida.',
+        reasonCode: SanctionReasonCode.Other,
         createdAt: new Date('2026-09-06T10:00:00.000Z'),
         expiresAt: new Date('2026-09-06T11:00:00.000Z'),
       }),
