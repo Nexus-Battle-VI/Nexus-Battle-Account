@@ -1,7 +1,7 @@
 import type { Account } from '../../domain/entities/Account'
 import { AccountId } from '../../domain/value-objects/AccountId'
 import type { AccountRepositoryPort } from '../ports/AccountRepositoryPort'
-import type { AvatarStoragePort } from '../ports/AvatarStoragePort'
+import type { AvatarReadOptions, AvatarStoragePort } from '../ports/AvatarStoragePort'
 import { AccountNotFoundError, AvatarNotFoundError } from '../errors/ApplicationError'
 
 export interface AccountAvatar {
@@ -51,17 +51,21 @@ export class GetAccountAvatar {
    * `playerId` en salas y batallas, asi que la Web puede pedir el avatar de
    * un companero sin conocer el identificador interno de su cuenta.
    */
-  async executeBySubject(subject: string): Promise<AccountAvatar> {
+  async executeBySubject(subject: string, options?: AvatarReadOptions): Promise<AccountAvatar> {
     const account = await this.accounts.findBySubject(subject)
 
     if (account === null) {
       throw new AccountNotFoundError(subject)
     }
 
-    return this.readAvatar(account, subject)
+    return this.readAvatar(account, subject, options)
   }
 
-  private async readAvatar(account: Account, reference: string): Promise<AccountAvatar> {
+  private async readAvatar(
+    account: Account,
+    reference: string,
+    options?: AvatarReadOptions,
+  ): Promise<AccountAvatar> {
     const metadata = account.currentAvatar
 
     // Cuenta historica sin avatar recuperable: la regla vigente de registro lo
@@ -71,7 +75,10 @@ export class GetAccountAvatar {
       throw new AvatarNotFoundError(reference)
     }
 
-    const bytes = await this.avatars.read(metadata.storageKey)
+    const bytes =
+      options === undefined
+        ? await this.avatars.read(metadata.storageKey)
+        : await this.avatars.read(metadata.storageKey, options)
 
     if (bytes === null) {
       throw new AvatarNotFoundError(reference)

@@ -11,6 +11,7 @@ import { SessionsController } from '../../adapters/inbound/http/sessions.control
 import { InternalMfaEvidenceController } from '../../adapters/inbound/http/internal-mfa-evidence.controller'
 import { InternalBattleProfileController } from '../../adapters/inbound/http/internal-battle-profile.controller'
 import { InternalSellerSanctionsController } from '../../adapters/inbound/http/internal-seller-sanctions.controller'
+import { InternalTournamentEligibilityController } from '../../adapters/inbound/http/internal-tournament-eligibility.controller'
 import { InternalServiceGuard } from '../../adapters/inbound/http/auth/internal-service.guard'
 import { VerifyMfaEvidence } from '../../application/use-cases/VerifyMfaEvidence'
 import { MFA_EVIDENCE_REPOSITORY } from '../../application/ports/MfaEvidenceRepositoryPort'
@@ -24,6 +25,8 @@ import {
   COMPLETE_SECOND_FACTOR,
   GET_ACCOUNT,
   GET_OWN_ACCOUNT,
+  GET_TOURNAMENT_ELIGIBILITY,
+  VALIDATE_TOURNAMENT_TEAM_IDENTITY,
   GET_OWN_PERSONAL_DATA,
   EXPORT_PORTABLE_PERSONAL_DATA,
   GENERATE_PRIVACY_PDF_REPORT,
@@ -62,6 +65,8 @@ import { ConfirmTotpEnrollment } from '../../application/use-cases/ConfirmTotpEn
 import { GetAccount } from '../../application/use-cases/GetAccount'
 import { GetAccountAvatar } from '../../application/use-cases/GetAccountAvatar'
 import { GetOwnAccount } from '../../application/use-cases/GetOwnAccount'
+import { GetTournamentEligibility } from '../../application/use-cases/GetTournamentEligibility'
+import { ValidateTournamentTeamIdentity } from '../../application/use-cases/ValidateTournamentTeamIdentity'
 import { GetActiveSanctionStatus } from '../../application/use-cases/GetActiveSanctionStatus'
 import { GetOwnPersonalData } from '../../application/use-cases/GetOwnPersonalData'
 import { ExportPortablePersonalData } from '../../application/use-cases/ExportPortablePersonalData'
@@ -242,6 +247,7 @@ export const DATABASE = Symbol('Database')
     InternalMfaEvidenceController,
     InternalBattleProfileController,
     InternalSellerSanctionsController,
+    InternalTournamentEligibilityController,
     HealthController,
   ],
   providers: [
@@ -409,6 +415,7 @@ export const DATABASE = Symbol('Database')
           reflector,
           secret: config.internalServiceAuthSecret,
           allowedServices: config.internalServiceAllowed,
+          routeOnlyServices: ['tournament'],
           clock,
           logger,
         }),
@@ -720,6 +727,20 @@ export const DATABASE = Symbol('Database')
       provide: GET_OWN_ACCOUNT,
       useFactory: (accounts: AccountRepositoryPort): GetOwnAccount => new GetOwnAccount(accounts),
       inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: GET_TOURNAMENT_ELIGIBILITY,
+      useFactory: (accounts: AccountRepositoryPort): GetTournamentEligibility =>
+        new GetTournamentEligibility(accounts),
+      inject: [ACCOUNT_REPOSITORY],
+    },
+    {
+      provide: VALIDATE_TOURNAMENT_TEAM_IDENTITY,
+      useFactory: (
+        blacklist: NicknameBlacklistPort,
+        avatars: GetAccountAvatar,
+      ): ValidateTournamentTeamIdentity => new ValidateTournamentTeamIdentity(blacklist, avatars),
+      inject: [NICKNAME_BLACKLIST, GET_ACCOUNT_AVATAR],
     },
     {
       provide: GET_ACTIVE_SANCTION_STATUS,

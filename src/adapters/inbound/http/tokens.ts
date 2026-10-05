@@ -8,6 +8,8 @@
 export const REGISTER_ACCOUNT = Symbol('RegisterAccount')
 export const GET_ACCOUNT = Symbol('GetAccount')
 export const GET_OWN_ACCOUNT = Symbol('GetOwnAccount')
+export const GET_TOURNAMENT_ELIGIBILITY = Symbol('GetTournamentEligibility')
+export const VALIDATE_TOURNAMENT_TEAM_IDENTITY = Symbol('ValidateTournamentTeamIdentity')
 export const GET_OWN_PERSONAL_DATA = Symbol('GetOwnPersonalData')
 export const EXPORT_PORTABLE_PERSONAL_DATA = Symbol('ExportPortablePersonalData')
 export const UPDATE_OWN_ACCOUNT = Symbol('UpdateOwnAccount')
