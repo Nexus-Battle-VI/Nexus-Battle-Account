@@ -1,6 +1,7 @@
 import {
   SetMetadata,
   UnauthorizedException,
+  applyDecorators,
   createParamDecorator,
   type ExecutionContext,
 } from '@nestjs/common'
@@ -10,6 +11,7 @@ import type { VerifiedIdentity } from '../../../../application/ports/TokenVerifi
 
 export const IS_PUBLIC = 'auth:public'
 export const IS_INTERNAL = 'auth:internal'
+export const INTERNAL_ALLOWED_SERVICES = 'auth:internal-allowed-services'
 export const REQUIRED_ROLES = 'auth:roles'
 export const READ_ONLY_ACCOUNT_QUERY = 'account:read-only-query'
 
@@ -33,8 +35,17 @@ export const Public = (): MethodDecorator & ClassDecorator => SetMetadata(IS_PUB
  * No la invoca una persona: la invoca otro servicio, que lo demuestra firmando
  * la peticion. Se combina con `@Public()`, que excluye la ruta del guard de
  * testimonios de usuario; la proteccion la aporta `InternalServiceGuard`.
+ * Con callers explicitos, la ruta usa solo esa lista en lugar de la global.
  */
-export const InternalOnly = (): MethodDecorator & ClassDecorator => SetMetadata(IS_INTERNAL, true)
+export const InternalOnly = (
+  ...allowedServices: readonly string[]
+): MethodDecorator & ClassDecorator =>
+  applyDecorators(
+    SetMetadata(IS_INTERNAL, true),
+    ...(allowedServices.length === 0
+      ? []
+      : [SetMetadata(INTERNAL_ALLOWED_SERVICES, allowedServices)]),
+  )
 
 /** Exige que el testimonio incluya al menos uno de los roles indicados. */
 export const Roles = (...roles: readonly Role[]): MethodDecorator & ClassDecorator =>

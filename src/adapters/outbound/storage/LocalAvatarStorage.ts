@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import type {
   AvatarStoragePort,
+  AvatarReadOptions,
   AvatarStoreInput,
   StoredAvatar,
 } from '../../../application/ports/AvatarStoragePort'
@@ -44,7 +45,7 @@ export class LocalAvatarStorage implements AvatarStoragePort {
    * por un ataque) leeria fuera del area de avatares y lo devolveria como si
    * fuera una imagen de cuenta.
    */
-  async read(storageKey: string): Promise<Buffer | null> {
+  async read(storageKey: string, options?: AvatarReadOptions): Promise<Buffer | null> {
     const fullPath = path.resolve(this.basePath, storageKey)
 
     if (
@@ -56,7 +57,20 @@ export class LocalAvatarStorage implements AvatarStoragePort {
 
     try {
       return await readFile(fullPath)
-    } catch {
+    } catch (error: unknown) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      ) {
+        return null
+      }
+      // La consulta nueva exige disponibilidad comprobada; las lecturas
+      // publicadas conservan su comportamiento cuando no piden esa garantia.
+      if (options?.failOnUnavailable === true) {
+        throw error
+      }
       return null
     }
   }
