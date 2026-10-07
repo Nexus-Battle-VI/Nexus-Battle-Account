@@ -10,6 +10,11 @@ export interface StoredAvatar {
   readonly sizeBytes: number
 }
 
+export interface AvatarReadOptions {
+  /** Para consultas internas que deben distinguir error de disco y ausencia. */
+  readonly failOnUnavailable?: boolean
+}
+
 /**
  * Puerto de almacenamiento de avatares.
  *
@@ -31,8 +36,10 @@ export interface AvatarStoragePort {
    * El propio adaptador es responsable de impedir que `storageKey` escape del
    * area de almacenamiento (recorrido de rutas via `../`): el valor persistido
    * en la cuenta deberia ser siempre seguro, pero el metodo no confia en eso.
+   * Con failOnUnavailable, los errores de permisos/disco se propagan en lugar
+   * de convertirse en null. Sin esa opcion se conserva la lectura historica.
    */
-  read(storageKey: string): Promise<Buffer | null>
+  read(storageKey: string, options?: AvatarReadOptions): Promise<Buffer | null>
 }
 
 export const AVATAR_STORAGE = Symbol('AvatarStoragePort')

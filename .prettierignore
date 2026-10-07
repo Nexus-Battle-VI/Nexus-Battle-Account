@@ -1,4 +1,6 @@
 dist/
 coverage/
+coverage-db/
+.tmp/
 node_modules/
 package-lock.json

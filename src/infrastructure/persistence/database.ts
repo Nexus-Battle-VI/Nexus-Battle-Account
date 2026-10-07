@@ -23,6 +23,7 @@ import * as migrationHu42AccountBanStatus from '../../adapters/outbound/persiste
 import * as migrationHu42SanctionExpiration from '../../adapters/outbound/persistence/migrations/z20260906-hu42-sanction-expiration'
 import * as migrationHu05PreferredLanguage from '../../adapters/outbound/persistence/migrations/z20260924-hu05-preferred-language'
 import * as migrationHu66GameMasterRole from '../../adapters/outbound/persistence/migrations/z20260927-hu66-game-master-role'
+import * as migrationHu90SanctionReasonCode from '../../adapters/outbound/persistence/migrations/z20261003-hu90-sanction-reason-code'
 
 export interface DatabaseOptions {
   readonly connectionString: string
@@ -122,6 +123,7 @@ const migrations: MigrationProvider = {
       'z20260906-hu42-sanction-expiration': migrationHu42SanctionExpiration,
       'z20260924-hu05-preferred-language': migrationHu05PreferredLanguage,
       'z20260927-hu66-game-master-role': migrationHu66GameMasterRole,
+      'z20261003-hu90-sanction-reason-code': migrationHu90SanctionReasonCode,
     }),
 }
 

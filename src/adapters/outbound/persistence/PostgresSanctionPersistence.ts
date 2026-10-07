@@ -35,6 +35,7 @@ export class PostgresSanctionPersistence implements SanctionPersistencePort {
           actor_account_id: snapshot.actorAccountId,
           type: snapshot.type,
           reason: snapshot.reason,
+          reason_code: snapshot.reasonCode,
           created_at: snapshot.createdAt,
           expires_at: snapshot.expiresAt,
         })

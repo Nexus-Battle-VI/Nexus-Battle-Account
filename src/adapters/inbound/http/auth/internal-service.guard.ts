@@ -9,7 +9,7 @@ import type { Reflector } from '@nestjs/core'
 
 import type { ClockPort } from '../../../../application/ports/ClockPort'
 import type { Logger } from '../../../../infrastructure/observability/logger'
-import { IS_INTERNAL } from './decorators'
+import { INTERNAL_ALLOWED_SERVICES, IS_INTERNAL } from './decorators'
 import {
   INTERNAL_CLOCK_SKEW_MS,
   INTERNAL_SERVICE_HEADER,
@@ -32,6 +32,8 @@ export interface InternalServiceGuardOptions {
   readonly reflector: Reflector
   readonly secret: string | null
   readonly allowedServices: readonly string[]
+  /** Estos consumidores necesitan autorizacion explicita en cada ruta. */
+  readonly routeOnlyServices?: readonly string[]
   readonly clock: ClockPort
   readonly logger: Logger
   readonly skewMs?: number
@@ -98,7 +100,20 @@ export class InternalServiceGuard implements CanActivate {
       return this.reject('cabeceras_incompletas')
     }
 
-    if (!this.options.allowedServices.includes(service)) {
+    const routeServices = this.options.reflector.getAllAndOverride<readonly string[] | undefined>(
+      INTERNAL_ALLOWED_SERVICES,
+      [context.getHandler(), context.getClass()],
+    )
+    // Una lista de ruta sustituye, no amplia, la lista global antigua.
+    // Los nuevos consumidores reservados no heredan permisos sobre rutas
+    // antiguas aunque aparezcan por error en la configuracion global.
+    const allowedServices =
+      routeServices ??
+      this.options.allowedServices.filter(
+        (caller) => !this.options.routeOnlyServices?.includes(caller),
+      )
+
+    if (!allowedServices.includes(service)) {
       return this.reject('servicio_no_permitido')
     }
 
