@@ -13,7 +13,21 @@ import type {
   NotificationRequest,
   NotificationRequestPort,
 } from '../../src/application/ports/NotificationRequestPort'
+import type { SessionRevocationPort } from '../../src/application/ports/SessionRevocationPort'
 import { buildActiveAccount } from '../support/account-factory'
+
+const buildSessionRevocation = (): SessionRevocationPort & { revoked: string[] } => {
+  const revoked: string[] = []
+
+  return {
+    revoked,
+    globalSignOut: (subject: string): Promise<void> => {
+      revoked.push(subject)
+
+      return Promise.resolve()
+    },
+  }
+}
 
 const NOW = new Date('2026-09-06T12:00:00.000Z')
 const TARGET_ID = AccountId.create('target-1')
@@ -47,6 +61,8 @@ const buildHarness = () => {
     },
   }
 
+  const sessionRevocation = buildSessionRevocation()
+
   return {
     accounts,
     sanctions,
@@ -54,7 +70,15 @@ const buildHarness = () => {
     clock,
     notifications,
     requestedNotifications,
-    applySanction: new ApplySanction(accounts, persistence, ids, clock, notifications),
+    sessionRevocation,
+    applySanction: new ApplySanction(
+      accounts,
+      persistence,
+      ids,
+      clock,
+      notifications,
+      sessionRevocation,
+    ),
   }
 }
 
@@ -495,6 +519,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       },
       harness.clock,
       notifications,
+      buildSessionRevocation(),
     )
 
     await applySanction.execute({
@@ -529,6 +554,7 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         now: (): Date => new Date(NOW),
       },
       notifications,
+      buildSessionRevocation(),
     )
 
     await expect(

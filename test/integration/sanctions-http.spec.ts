@@ -186,6 +186,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
   let accounts: AccountRepositoryPort
   let sanctions: SanctionRepositoryPort
   let previousEnv: Record<string, string | undefined>
+  let sessionRevocation: InMemorySessionRevocation
 
   const requestedNotifications: NotificationRequest[] = []
 
@@ -222,7 +223,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
       .overrideProvider(MFA_STATUS)
       .useValue(new InMemoryMfaStatus())
       .overrideProvider(SESSION_REVOCATION)
-      .useValue(new InMemorySessionRevocation())
+      .useValue((sessionRevocation = new InMemorySessionRevocation()))
       .compile()
 
     app = moduleRef.createNestApplication()
@@ -289,6 +290,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
 
     expect(target?.currentStatus).toBe(AccountStatus.Active)
     expect(target?.canAuthenticate).toBe(true)
+    expect(sessionRevocation.wasSignedOut('subject-target-warning')).toBe(false)
   })
 
   it('CA-02: permite a Moderador aplicar suspension temporal y restringe el acceso', async () => {
@@ -317,6 +319,9 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
 
     expect(target?.currentStatus).toBe(AccountStatus.Suspended)
     expect(target?.canAuthenticate).toBe(false)
+    // La suspension cierra las sesiones ya abiertas: un testimonio emitido
+    // antes de sancionar no debe seguir sirviendo hasta su `exp` (ADR-004).
+    expect(sessionRevocation.wasSignedOut('subject-target-suspension')).toBe(true)
   })
 
   it('CA-03: permite a Administrador aplicar baneo definitivo', async () => {
@@ -343,6 +348,7 @@ describe('HU-42.5 - Aceptacion e integracion de sanciones', () => {
 
     expect(target?.currentStatus).toBe(AccountStatus.Banned)
     expect(target?.canAuthenticate).toBe(false)
+    expect(sessionRevocation.wasSignedOut('subject-target-admin-ban')).toBe(true)
   })
 
   it('CA-03: permite a Super Administrador aplicar baneo definitivo', async () => {

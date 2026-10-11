@@ -23,7 +23,12 @@ import {
 } from '../../../../application/ports/SanctionRepositoryPort'
 import { CLOCK, type ClockPort } from '../../../../application/ports/ClockPort'
 import { AccountStatus } from '../../../../domain/entities/AccountStatus'
-import { IS_PUBLIC, READ_ONLY_ACCOUNT_QUERY, type RequestWithIdentity } from './decorators'
+import {
+  ALLOW_SANCTIONED_SELF,
+  IS_PUBLIC,
+  READ_ONLY_ACCOUNT_QUERY,
+  type RequestWithIdentity,
+} from './decorators'
 
 interface RequestWithAuthHeader extends RequestWithIdentity {
   headers: Record<string, string | string[] | undefined>
@@ -87,7 +92,17 @@ export class JwtAuthGuard implements CanActivate {
     if (account === null) {
       return true
     }
+
+    const allowSanctionedSelf = this.reflector.getAllAndOverride<boolean | undefined>(
+      ALLOW_SANCTIONED_SELF,
+      [context.getHandler()],
+    )
+
     if (account.currentStatus === AccountStatus.Banned) {
+      if (allowSanctionedSelf === true) {
+        return true
+      }
+
       throw new ForbiddenException('La cuenta tiene un baneo permanente.')
     }
 
@@ -100,6 +115,10 @@ export class JwtAuthGuard implements CanActivate {
       )
 
       if (activeSuspension !== null) {
+        if (allowSanctionedSelf === true) {
+          return true
+        }
+
         throw new ForbiddenException('La cuenta tiene una suspension temporal activa.')
       }
 
@@ -111,7 +130,10 @@ export class JwtAuthGuard implements CanActivate {
         READ_ONLY_ACCOUNT_QUERY,
         [context.getHandler()],
       )
-      if (latestTemporarySuspension !== null && readOnly !== true) {
+      // Una ruta de autoservicio para una cuenta sancionada (p. ej. consultar
+      // el propio estado) nunca debe reincorporar como efecto secundario de
+      // leer: reincorporar es un efecto de iniciar sesion, no de consultar.
+      if (latestTemporarySuspension !== null && readOnly !== true && allowSanctionedSelf !== true) {
         account.reinstate()
         await this.accounts.save(account)
       }

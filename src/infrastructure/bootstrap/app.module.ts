@@ -3,6 +3,7 @@ import { APP_GUARD, Reflector } from '@nestjs/core'
 
 import { AccountsController } from '../../adapters/inbound/http/accounts.controller'
 import { SanctionsController } from '../../adapters/inbound/http/sanctions.controller'
+import { MySanctionsController } from '../../adapters/inbound/http/my-sanctions.controller'
 import { RecoveryController } from '../../adapters/inbound/http/recovery.controller'
 import { MfaController } from '../../adapters/inbound/http/mfa.controller'
 import { PasswordController } from '../../adapters/inbound/http/password.controller'
@@ -239,6 +240,7 @@ export const DATABASE = Symbol('Database')
   controllers: [
     AccountsController,
     SanctionsController,
+    MySanctionsController,
     RecoveryController,
     MfaController,
     PasswordController,
@@ -710,8 +712,17 @@ export const DATABASE = Symbol('Database')
         ids: IdGeneratorPort,
         clock: ClockPort,
         notifications: NotificationRequestPort,
-      ): ApplySanction => new ApplySanction(accounts, persistence, ids, clock, notifications),
-      inject: [ACCOUNT_REPOSITORY, SANCTION_PERSISTENCE, ID_GENERATOR, CLOCK, NOTIFICATION_REQUEST],
+        sessionRevocation: SessionRevocationPort,
+      ): ApplySanction =>
+        new ApplySanction(accounts, persistence, ids, clock, notifications, sessionRevocation),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        SANCTION_PERSISTENCE,
+        ID_GENERATOR,
+        CLOCK,
+        NOTIFICATION_REQUEST,
+        SESSION_REVOCATION,
+      ],
     },
 
     {

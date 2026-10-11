@@ -4,6 +4,7 @@ import type { ClockPort } from '../ports/ClockPort'
 import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
 import type { NotificationRequestPort } from '../ports/NotificationRequestPort'
 import type { SanctionPersistencePort } from '../ports/SanctionPersistencePort'
+import type { SessionRevocationPort } from '../ports/SessionRevocationPort'
 import { Sanction } from '../../domain/entities/Sanction'
 import {
   SanctionType,
@@ -25,6 +26,7 @@ export class ApplySanction {
     private readonly ids: IdGeneratorPort,
     private readonly clock: ClockPort,
     private readonly notifications: NotificationRequestPort,
+    private readonly sessionRevocation: SessionRevocationPort,
   ) {}
 
   async execute(command: {
@@ -100,6 +102,15 @@ export class ApplySanction {
     }
 
     await this.persistence.saveAppliedSanction(sanction, target, accountStatusChanged)
+
+    if (accountStatusChanged) {
+      // Una suspension o un baneo deben cerrar las sesiones ya abiertas, no
+      // solo impedir una futura: sin esto, un testimonio emitido antes de la
+      // sancion seguiria sirviendo hasta su `exp` (ADR-004). Igual que
+      // RevokeRole, va despues de persistir: un fallo aqui no deja la sancion
+      // sin aplicar.
+      await this.sessionRevocation.globalSignOut(target.subject)
+    }
 
     await this.notifications.request({
       notificationId: `sanction-${sanction.id}`,
