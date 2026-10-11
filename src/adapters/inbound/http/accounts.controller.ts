@@ -535,7 +535,7 @@ export class AccountsController {
   async findDisplayName(@Param('id') id: string): Promise<AccountDisplayNameResponse> {
     try {
       const account = await this.getOwnAccount.execute(id)
-      return { displayName: account.displayName }
+      return { displayName: account.displayName, id: account.id }
     } catch (error: unknown) {
       throw AccountsController.translate(error)
     }
