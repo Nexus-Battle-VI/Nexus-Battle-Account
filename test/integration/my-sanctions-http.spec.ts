@@ -26,7 +26,6 @@ import {
 } from '../../src/application/ports/AccountRepositoryPort'
 import {
   NOTIFICATION_REQUEST,
-  type NotificationRequest,
   type NotificationRequestPort,
 } from '../../src/application/ports/NotificationRequestPort'
 import { IDENTITY_SIGN_UP } from '../../src/application/ports/IdentitySignUpPort'
@@ -107,7 +106,7 @@ describe('HU-42 - Autoservicio de sanciones del propio titular (contador visible
   let previousEnv: Record<string, string | undefined>
 
   const notifications: NotificationRequestPort = {
-    request: (_notification: NotificationRequest): Promise<void> => Promise.resolve(),
+    request: (): Promise<void> => Promise.resolve(),
   }
 
   beforeAll(async () => {

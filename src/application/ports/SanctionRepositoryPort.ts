@@ -3,6 +3,8 @@ import type { Sanction } from '../../domain/entities/Sanction'
 export interface SanctionRepositoryPort {
   save(sanction: Sanction): Promise<void>
 
+  findById(id: string): Promise<Sanction | null>
+
   /** Subconjunto sin duplicados de los IDs consultados que recibieron alguna sancion. */
   findAccountIdsWithHistory(accountIds: readonly string[]): Promise<readonly string[]>
 

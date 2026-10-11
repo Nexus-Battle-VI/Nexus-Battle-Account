@@ -52,6 +52,16 @@ export class PostgresSanctionRepository implements SanctionRepositoryPort {
     return rows.map((row) => row.target_account_id)
   }
 
+  async findById(id: string): Promise<Sanction | null> {
+    const row = await this.db
+      .selectFrom('sanctions')
+      .select([...SANCTION_COLUMNS])
+      .where('id', '=', id)
+      .executeTakeFirst()
+
+    return row === undefined ? null : restoreSanction(row)
+  }
+
   async save(sanction: Sanction): Promise<void> {
     const snapshot = sanction.toSnapshot()
 

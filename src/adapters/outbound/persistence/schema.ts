@@ -139,6 +139,20 @@ export interface SanctionsTable {
   readonly expires_at: Date | null
 }
 
+export interface AppealsTable {
+  readonly id: string
+  readonly sanction_id: string
+  readonly account_id: string
+  readonly statement: string
+  readonly submitted_at: Generated<Date>
+  readonly decision_due_at: Date
+  readonly status: string
+  readonly decision: string | null
+  readonly resolution_notes: string | null
+  readonly resolved_by_account_id: string | null
+  readonly resolved_at: Date | null
+}
+
 export interface Database {
   readonly accounts: AccountsTable
   readonly account_roles: AccountRolesTable
@@ -149,4 +163,5 @@ export interface Database {
   readonly mfa_evidences: MfaEvidencesTable
   readonly account_deletion_requests: AccountDeletionRequestsTable
   readonly sanctions: SanctionsTable
+  readonly appeals: AppealsTable
 }

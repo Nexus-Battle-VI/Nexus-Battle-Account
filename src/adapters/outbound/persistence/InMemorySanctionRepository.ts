@@ -22,6 +22,10 @@ export class InMemorySanctionRepository implements SanctionRepositoryPort {
     return Promise.resolve()
   }
 
+  findById(id: string): Promise<Sanction | null> {
+    return Promise.resolve(this.sanctions.get(id) ?? null)
+  }
+
   findActiveRestrictions(targetAccountId: string, at: Date): Promise<readonly Sanction[]> {
     const restrictions = [...this.sanctions.values()]
       .filter(

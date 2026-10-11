@@ -351,6 +351,22 @@ export class Account {
     this.status = AccountStatus.Active
   }
 
+  /**
+   * Revierte un baneo definitivo cuando una apelacion (HU-42, §7.3.2) se
+   * resuelve como OVERTURNED. No es un metodo publico de administracion de
+   * cuentas: el unico llamador legitimo es `ResolveAppeal`, igual que
+   * `ApplySanction` es el unico llamador de `ban()`. "Cualquier mecanismo de
+   * anulacion... debe derivarse de reglas formales aprobadas" es justo lo que
+   * modela: la unica anulacion de un baneo es una apelacion resuelta a favor.
+   */
+  liftBan(): void {
+    if (this.status !== AccountStatus.Banned) {
+      throw new DomainError(`La cuenta ${this.id.value} no esta baneada.`)
+    }
+
+    this.status = AccountStatus.Active
+  }
+
   rename(displayName: DisplayName): void {
     this.displayName = displayName
   }
