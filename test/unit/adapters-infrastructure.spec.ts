@@ -532,6 +532,7 @@ describe('loadConfig', () => {
     AUTHENTICATION_DRIVER: 'cognito',
     COGNITO_USER_POOL_ID: 'us-east-1_abc',
     COGNITO_CLIENT_ID: 'cliente',
+    APPEAL_TOKEN_SECRET: 'secreto-de-apelacion-de-pruebas',
   } as const
 
   it('en produccion no abre CORS salvo lista explicita, y rechaza *', () => {

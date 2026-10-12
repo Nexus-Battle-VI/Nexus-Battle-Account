@@ -87,3 +87,24 @@ export class SanctionResponse {
   })
   readonly appealDeadline!: Date
 }
+
+export class MySanctionStatusResponse {
+  @ApiProperty({
+    description: 'true si la cuenta tiene un baneo definitivo o una suspension temporal vigente.',
+  })
+  readonly hasActiveSanctions!: boolean
+
+  @ApiProperty({
+    type: [SanctionResponse],
+    description: 'Las sanciones que hoy restringen el acceso. Las advertencias no aparecen aqui.',
+  })
+  readonly sanctions!: readonly SanctionResponse[]
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Segundos restantes de la suspension temporal vigente, para el contador visible exigido por §7.3.2. Null si no hay suspension con fecha de fin (p. ej. baneo definitivo o sin sancion activa).',
+    example: 3600,
+  })
+  readonly remainingSeconds!: number | null
+}

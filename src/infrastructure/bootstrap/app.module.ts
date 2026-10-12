@@ -1,8 +1,15 @@
+import { randomBytes } from 'node:crypto'
+
 import { Module, type CanActivate } from '@nestjs/common'
 import { APP_GUARD, Reflector } from '@nestjs/core'
 
 import { AccountsController } from '../../adapters/inbound/http/accounts.controller'
 import { SanctionsController } from '../../adapters/inbound/http/sanctions.controller'
+import { MySanctionsController } from '../../adapters/inbound/http/my-sanctions.controller'
+import { AppealAuthController } from '../../adapters/inbound/http/appeal-auth.controller'
+import { MyAppealsController } from '../../adapters/inbound/http/my-appeals.controller'
+import { ReviewAppealsController } from '../../adapters/inbound/http/review-appeals.controller'
+import { AppealAccessGuard } from '../../adapters/inbound/http/auth/appeal-access.guard'
 import { RecoveryController } from '../../adapters/inbound/http/recovery.controller'
 import { MfaController } from '../../adapters/inbound/http/mfa.controller'
 import { PasswordController } from '../../adapters/inbound/http/password.controller'
@@ -43,6 +50,12 @@ import {
   ASSIGN_ROLE,
   APPLY_SANCTION,
   GET_ACTIVE_SANCTION_STATUS,
+  AUTHENTICATE_FOR_APPEAL,
+  SUBMIT_APPEAL,
+  GET_MY_APPEAL_STATUS,
+  GET_APPEALABLE_SANCTIONS,
+  LIST_APPEALS_FOR_REVIEW,
+  RESOLVE_APPEAL,
   REVOKE_ROLE,
   LOGOUT_ACCOUNT,
   REFRESH_SESSION,
@@ -91,6 +104,12 @@ import { RequestAccountDeletion } from '../../application/use-cases/RequestAccou
 import { ProcessAccountDeletion } from '../../application/use-cases/ProcessAccountDeletion'
 import { RevokeRole } from '../../application/use-cases/RevokeRole'
 import { ApplySanction } from '../../application/use-cases/ApplySanction'
+import { AuthenticateForAppeal } from '../../application/use-cases/AuthenticateForAppeal'
+import { SubmitAppeal } from '../../application/use-cases/SubmitAppeal'
+import { GetMyAppealStatus } from '../../application/use-cases/GetMyAppealStatus'
+import { GetAppealableSanctions } from '../../application/use-cases/GetAppealableSanctions'
+import { ListAppealsForReview } from '../../application/use-cases/ListAppealsForReview'
+import { ResolveAppeal } from '../../application/use-cases/ResolveAppeal'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
 import {
   ADMIN_ACCOUNT_QUERY,
@@ -152,6 +171,14 @@ import {
   SANCTION_PERSISTENCE,
   type SanctionPersistencePort,
 } from '../../application/ports/SanctionPersistencePort'
+import {
+  APPEAL_REPOSITORY,
+  type AppealRepositoryPort,
+} from '../../application/ports/AppealRepositoryPort'
+import {
+  APPEAL_ACCESS_TOKEN,
+  type AppealAccessTokenPort,
+} from '../../application/ports/AppealAccessTokenPort'
 import type { AuthenticationProviderPort } from '../../application/ports/AuthenticationProviderPort'
 import type { NotificationRequestPort } from '../../application/ports/NotificationRequestPort'
 import type { ClockPort } from '../../application/ports/ClockPort'
@@ -173,6 +200,9 @@ import { InMemorySanctionRepository } from '../../adapters/outbound/persistence/
 import { PostgresSanctionRepository } from '../../adapters/outbound/persistence/PostgresSanctionRepository'
 import { InMemorySanctionPersistence } from '../../adapters/outbound/persistence/InMemorySanctionPersistence'
 import { PostgresSanctionPersistence } from '../../adapters/outbound/persistence/PostgresSanctionPersistence'
+import { InMemoryAppealRepository } from '../../adapters/outbound/persistence/InMemoryAppealRepository'
+import { PostgresAppealRepository } from '../../adapters/outbound/persistence/PostgresAppealRepository'
+import { HmacAppealAccessToken } from '../../adapters/outbound/identity/HmacAppealAccessToken'
 import { InMemoryNicknameBlacklist } from '../../adapters/outbound/persistence/InMemoryNicknameBlacklist'
 import { PostgresNicknameBlacklist } from '../../adapters/outbound/persistence/PostgresNicknameBlacklist'
 import { InMemorySecurityQuestionCatalog } from '../../adapters/outbound/persistence/InMemorySecurityQuestionCatalog'
@@ -237,8 +267,17 @@ export const DATABASE = Symbol('Database')
 
 @Module({
   controllers: [
+    // ReviewAppealsController ('accounts/appeals') debe registrarse ANTES de
+    // AccountsController: su `GET /accounts/:id` coincidiria con
+    // `GET /accounts/appeals` -misma forma de dos segmentos- y, registrado
+    // primero, se quedaria con la peticion. Express/Nest resuelven por orden
+    // de registro, no por especificidad.
+    ReviewAppealsController,
     AccountsController,
     SanctionsController,
+    MySanctionsController,
+    AppealAuthController,
+    MyAppealsController,
     RecoveryController,
     MfaController,
     PasswordController,
@@ -251,6 +290,7 @@ export const DATABASE = Symbol('Database')
     HealthController,
   ],
   providers: [
+    AppealAccessGuard,
     {
       provide: APP_CONFIG,
       useFactory: (): AppConfig => loadConfig(process.env),
@@ -321,6 +361,37 @@ export const DATABASE = Symbol('Database')
           ? new InMemorySanctionPersistence(accounts, sanctions)
           : new PostgresSanctionPersistence(db),
       inject: [DATABASE, ACCOUNT_REPOSITORY, SANCTION_REPOSITORY],
+    },
+    {
+      provide: APPEAL_REPOSITORY,
+      useFactory: (db: Kysely<Database> | null): AppealRepositoryPort =>
+        db === null ? new InMemoryAppealRepository() : new PostgresAppealRepository(db),
+      inject: [DATABASE],
+    },
+    {
+      provide: APPEAL_ACCESS_TOKEN,
+      useFactory: (config: AppConfig, clock: ClockPort, logger: Logger): AppealAccessTokenPort => {
+        if (config.appealTokenSecret !== null) {
+          return new HmacAppealAccessToken(config.appealTokenSecret, clock)
+        }
+
+        // Solo alcanzable fuera de produccion: `loadConfig` ya falla cerrado
+        // si falta en produccion (vease esa comprobacion). Aqui NO se cae a
+        // un valor fijo: un secreto fijo y publico en el codigo fuente
+        // permitiria a cualquiera que lo lea fabricar tokens de apelacion
+        // para CUALQUIER cuenta, exactamente la suplantacion que HU-42 §6
+        // prohibe. Se genera uno aleatorio por arranque del proceso en su
+        // lugar -no sobrevive un reinicio, igual que la sesion en memoria de
+        // Web (`shared/appealSession.ts`)-, lo que mantiene el desarrollo
+        // funcional sin crear un secreto adivinable.
+        logger.warn('appeal_token_random_dev_secret', {
+          detail:
+            'APPEAL_TOKEN_SECRET no configurado: se genero un secreto aleatorio para este arranque.',
+        })
+
+        return new HmacAppealAccessToken(randomBytes(32).toString('hex'), clock)
+      },
+      inject: [APP_CONFIG, CLOCK, LOGGER],
     },
     {
       provide: ADMIN_ACCOUNT_QUERY,
@@ -710,8 +781,27 @@ export const DATABASE = Symbol('Database')
         ids: IdGeneratorPort,
         clock: ClockPort,
         notifications: NotificationRequestPort,
-      ): ApplySanction => new ApplySanction(accounts, persistence, ids, clock, notifications),
-      inject: [ACCOUNT_REPOSITORY, SANCTION_PERSISTENCE, ID_GENERATOR, CLOCK, NOTIFICATION_REQUEST],
+        sessionRevocation: SessionRevocationPort,
+        logger: Logger,
+      ): ApplySanction =>
+        new ApplySanction(
+          accounts,
+          persistence,
+          ids,
+          clock,
+          notifications,
+          sessionRevocation,
+          logger,
+        ),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        SANCTION_PERSISTENCE,
+        ID_GENERATOR,
+        CLOCK,
+        NOTIFICATION_REQUEST,
+        SESSION_REVOCATION,
+        LOGGER,
+      ],
     },
 
     {
@@ -750,6 +840,73 @@ export const DATABASE = Symbol('Database')
         clock: ClockPort,
       ): GetActiveSanctionStatus => new GetActiveSanctionStatus(accounts, sanctions, clock),
       inject: [ACCOUNT_REPOSITORY, SANCTION_REPOSITORY, CLOCK],
+    },
+    {
+      provide: AUTHENTICATE_FOR_APPEAL,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        authenticationProvider: AuthenticationProviderPort,
+        appealAccessToken: AppealAccessTokenPort,
+      ): AuthenticateForAppeal =>
+        new AuthenticateForAppeal(accounts, authenticationProvider, appealAccessToken),
+      inject: [ACCOUNT_REPOSITORY, AUTHENTICATION_PROVIDER, APPEAL_ACCESS_TOKEN],
+    },
+    {
+      provide: SUBMIT_APPEAL,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        sanctions: SanctionRepositoryPort,
+        appeals: AppealRepositoryPort,
+        ids: IdGeneratorPort,
+        clock: ClockPort,
+        notifications: NotificationRequestPort,
+      ): SubmitAppeal => new SubmitAppeal(accounts, sanctions, appeals, ids, clock, notifications),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        SANCTION_REPOSITORY,
+        APPEAL_REPOSITORY,
+        ID_GENERATOR,
+        CLOCK,
+        NOTIFICATION_REQUEST,
+      ],
+    },
+    {
+      provide: GET_MY_APPEAL_STATUS,
+      useFactory: (appeals: AppealRepositoryPort): GetMyAppealStatus =>
+        new GetMyAppealStatus(appeals),
+      inject: [APPEAL_REPOSITORY],
+    },
+    {
+      provide: GET_APPEALABLE_SANCTIONS,
+      useFactory: (
+        sanctions: SanctionRepositoryPort,
+        appeals: AppealRepositoryPort,
+        clock: ClockPort,
+      ): GetAppealableSanctions => new GetAppealableSanctions(sanctions, appeals, clock),
+      inject: [SANCTION_REPOSITORY, APPEAL_REPOSITORY, CLOCK],
+    },
+    {
+      provide: LIST_APPEALS_FOR_REVIEW,
+      useFactory: (appeals: AppealRepositoryPort): ListAppealsForReview =>
+        new ListAppealsForReview(appeals),
+      inject: [APPEAL_REPOSITORY],
+    },
+    {
+      provide: RESOLVE_APPEAL,
+      useFactory: (
+        accounts: AccountRepositoryPort,
+        sanctions: SanctionRepositoryPort,
+        appeals: AppealRepositoryPort,
+        clock: ClockPort,
+        notifications: NotificationRequestPort,
+      ): ResolveAppeal => new ResolveAppeal(accounts, sanctions, appeals, clock, notifications),
+      inject: [
+        ACCOUNT_REPOSITORY,
+        SANCTION_REPOSITORY,
+        APPEAL_REPOSITORY,
+        CLOCK,
+        NOTIFICATION_REQUEST,
+      ],
     },
     {
       provide: GET_OWN_PERSONAL_DATA,

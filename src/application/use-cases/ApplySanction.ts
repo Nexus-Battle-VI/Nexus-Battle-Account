@@ -4,6 +4,7 @@ import type { ClockPort } from '../ports/ClockPort'
 import type { IdGeneratorPort } from '../ports/IdGeneratorPort'
 import type { NotificationRequestPort } from '../ports/NotificationRequestPort'
 import type { SanctionPersistencePort } from '../ports/SanctionPersistencePort'
+import type { SessionRevocationPort } from '../ports/SessionRevocationPort'
 import { Sanction } from '../../domain/entities/Sanction'
 import {
   SanctionType,
@@ -18,6 +19,11 @@ const SANCTION_NOTIFICATION_TEMPLATE = 'account-sanction-applied'
 
 const APPEAL_WINDOW_DAYS = 30
 
+/** Mismo contrato minimo que `ProcessAccountDeletionLog`: info/warn/error con contexto plano. */
+export interface ApplySanctionLog {
+  warn(message: string, context?: Readonly<Record<string, string | number | boolean | null>>): void
+}
+
 export class ApplySanction {
   constructor(
     private readonly accounts: AccountRepositoryPort,
@@ -25,6 +31,8 @@ export class ApplySanction {
     private readonly ids: IdGeneratorPort,
     private readonly clock: ClockPort,
     private readonly notifications: NotificationRequestPort,
+    private readonly sessionRevocation: SessionRevocationPort,
+    private readonly logger: ApplySanctionLog,
   ) {}
 
   async execute(command: {
@@ -100,6 +108,32 @@ export class ApplySanction {
     }
 
     await this.persistence.saveAppliedSanction(sanction, target, accountStatusChanged)
+
+    if (accountStatusChanged) {
+      // Una suspension o un baneo deben cerrar las sesiones ya abiertas, no
+      // solo impedir una futura: sin esto, un testimonio emitido antes de la
+      // sancion seguiria sirviendo hasta su `exp` (ADR-004). Igual que
+      // RevokeRole, va despues de persistir: un fallo aqui no deja la sancion
+      // sin aplicar.
+      //
+      // A DIFERENCIA de RevokeRole, el fallo NO se propaga. La sancion ya es
+      // real -persistida y aplicada en `target`- y cada peticion protegida
+      // ya la respeta por su cuenta (`JwtAuthGuard` vuelve a comprobar el
+      // estado en cada llamada, no solo al emitir el testimonio). Dejar que
+      // un fallo transitorio del proveedor de identidad aqui abortara TODO
+      // el caso de uso tendria dos efectos peores que perder esta
+      // revocacion puntual: el admin veria un 500 sobre una sancion que SI
+      // se aplico, y la notificacion -mas abajo- ni siquiera se intentaria.
+      try {
+        await this.sessionRevocation.globalSignOut(target.subject)
+      } catch (error: unknown) {
+        this.logger.warn('apply_sanction_session_revocation_failed', {
+          sanctionId: sanction.id,
+          targetAccountId: target.id.value,
+          detail: error instanceof Error ? error.message : 'fallo desconocido',
+        })
+      }
+    }
 
     await this.notifications.request({
       notificationId: `sanction-${sanction.id}`,

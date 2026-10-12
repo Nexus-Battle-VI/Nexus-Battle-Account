@@ -14,10 +14,25 @@ export const IS_INTERNAL = 'auth:internal'
 export const INTERNAL_ALLOWED_SERVICES = 'auth:internal-allowed-services'
 export const REQUIRED_ROLES = 'auth:roles'
 export const READ_ONLY_ACCOUNT_QUERY = 'account:read-only-query'
+export const ALLOW_SANCTIONED_SELF = 'account:allow-sanctioned-self'
 
 /** Evita persistir la reactivacion por expiracion durante una consulta administrativa. */
 export const ReadOnlyAccountQuery = (): MethodDecorator =>
   SetMetadata(READ_ONLY_ACCOUNT_QUERY, true)
+
+/**
+ * Marca una ruta como accesible por el propio titular aunque su cuenta este
+ * suspendida o baneada (HU-42, §7.3.2: "contador visible del tiempo
+ * restante" y apelacion con "identidad restringida").
+ *
+ * El guard sigue verificando el testimonio con la misma exigencia de siempre
+ * -no sustituye la autenticacion-; solo evita el 403 que hoy bloquea CUALQUIER
+ * ruta a una cuenta sancionada. Es, a proposito, una lista de permitidos
+ * minima: cada ruta que la use debe limitarse a leer o actuar sobre la propia
+ * sancion, nunca a devolver una capacidad general (inventario, comercio,
+ * comentarios, administracion).
+ */
+export const AllowSanctionedSelf = (): MethodDecorator => SetMetadata(ALLOW_SANCTIONED_SELF, true)
 
 /**
  * Marca una ruta como accesible sin testimonio.

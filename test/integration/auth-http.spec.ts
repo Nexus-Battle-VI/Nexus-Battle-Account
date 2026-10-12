@@ -316,13 +316,15 @@ describe('API de cuentas con autenticacion activa', () => {
      * modera necesita identificar al autor de un comentario reportado, sin
      * exponerle el correo, el nombre legal, el estado ni los roles de la cuenta.
      */
-    it('permite a un moderador leer solo el nombre visible, sin datos personales', async () => {
+    it('permite a un moderador leer el nombre visible y el id, sin otros datos personales', async () => {
       const response = await request(app.getHttpServer())
         .get(`/api/accounts/${anaSubject}/display-name`)
         .set('Authorization', bearer('token-moderador'))
 
       expect(response.status).toBe(200)
-      expect(response.body).toEqual({ displayName: 'Ana Ramirez' })
+      expect(response.body).toMatchObject({ displayName: 'Ana Ramirez' })
+      expect(response.body.id).toEqual(expect.any(String))
+      expect(Object.keys(response.body).sort()).toEqual(['displayName', 'id'])
     })
 
     it('permite tambien a un administrador', async () => {
@@ -331,7 +333,8 @@ describe('API de cuentas con autenticacion activa', () => {
         .set('Authorization', bearer('token-administrador'))
 
       expect(response.status).toBe(200)
-      expect(response.body).toEqual({ displayName: 'Ana Ramirez' })
+      expect(response.body).toMatchObject({ displayName: 'Ana Ramirez' })
+      expect(response.body.id).toEqual(expect.any(String))
     })
 
     it('responde 404 si el sujeto no tiene cuenta asociada', async () => {

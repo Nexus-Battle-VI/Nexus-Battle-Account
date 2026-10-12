@@ -24,6 +24,8 @@ import * as migrationHu42SanctionExpiration from '../../adapters/outbound/persis
 import * as migrationHu05PreferredLanguage from '../../adapters/outbound/persistence/migrations/z20260924-hu05-preferred-language'
 import * as migrationHu66GameMasterRole from '../../adapters/outbound/persistence/migrations/z20260927-hu66-game-master-role'
 import * as migrationHu90SanctionReasonCode from '../../adapters/outbound/persistence/migrations/z20261003-hu90-sanction-reason-code'
+import * as migrationHu42Appeals from '../../adapters/outbound/persistence/migrations/z20261011-hu42-appeals'
+import * as migrationHu42OfficialReasonCodes from '../../adapters/outbound/persistence/migrations/z20261011-hu42-official-reason-codes'
 
 export interface DatabaseOptions {
   readonly connectionString: string
@@ -124,6 +126,8 @@ const migrations: MigrationProvider = {
       'z20260924-hu05-preferred-language': migrationHu05PreferredLanguage,
       'z20260927-hu66-game-master-role': migrationHu66GameMasterRole,
       'z20261003-hu90-sanction-reason-code': migrationHu90SanctionReasonCode,
+      'z20261011-hu42-appeals': migrationHu42Appeals,
+      'z20261011-hu42-official-reason-codes': migrationHu42OfficialReasonCodes,
     }),
 }
 

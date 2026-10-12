@@ -159,9 +159,16 @@ jobs:
             exit 1
           fi
 
+      # HU-42 anade una tercera regla del mismo tipo: `APPEAL_TOKEN_SECRET` es
+      # obligatorio con `NODE_ENV=production` (vease env.ts), porque sin el la
+      # imagen firmaria o verificaria testimonios de apelacion con un secreto
+      # aleatorio distinto en cada arranque -inservible en un despliegue con
+      # mas de una replica- en vez de fallar visiblemente. El mismo principio
+      # de la nota de arriba aplica: se aporta un valor de relleno, no se
+      # rebaja la regla.
       - name: Verificar arranque del contenedor
         run: |
-          docker run -d --name account-ci -p 3000:3000             -e AUTH_MODE=jwt             -e AUTHENTICATION_DRIVER=cognito             -e COGNITO_USER_POOL_ID=us-east-1_ci             -e COGNITO_CLIENT_ID=cliente-ci             nexus-battle-account:ci
+          docker run -d --name account-ci -p 3000:3000             -e AUTH_MODE=jwt             -e AUTHENTICATION_DRIVER=cognito             -e COGNITO_USER_POOL_ID=us-east-1_ci             -e COGNITO_CLIENT_ID=cliente-ci             -e APPEAL_TOKEN_SECRET=secreto-de-apelacion-de-ci             nexus-battle-account:ci
           for attempt in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:3000/api/health/ready > /dev/null; then
               echo "readiness correcta en el intento ${attempt}"

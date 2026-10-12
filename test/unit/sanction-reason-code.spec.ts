@@ -20,14 +20,27 @@ const warning = (reasonCode: SanctionReasonCode, reason = 'Aviso al vendedor.') 
     createdAt: CREATED_AT,
   })
 
-describe('SanctionReasonCode (HU-90, CA-05)', () => {
-  it('expone exactamente OTHER y AUCTION_TERMS_VIOLATION', () => {
-    expect(ALL_SANCTION_REASON_CODES).toEqual(['OTHER', 'AUCTION_TERMS_VIOLATION'])
+describe('SanctionReasonCode (HU-90 CA-05 / HU-42 §7.3.2)', () => {
+  it('expone OTHER y AUCTION_TERMS_VIOLATION (compatibilidad HU-90) mas las 8 causales oficiales de HU-42', () => {
+    expect(ALL_SANCTION_REASON_CODES).toEqual([
+      'OTHER',
+      'AUCTION_TERMS_VIOLATION',
+      'OFFENSIVE_LANGUAGE',
+      'HARASSMENT',
+      'FRAUD_OR_MANIPULATION',
+      'UNAUTHORIZED_SOFTWARE_OR_CHEATING',
+      'IDENTITY_IMPERSONATION',
+      'PRIVACY_POLICY_VIOLATION',
+      'TERMS_OF_SERVICE_VIOLATION',
+      'LEGAL_RELATIONSHIP_TERMINATION',
+    ])
   })
 
   it('acepta solo códigos conocidos', () => {
     expect(isSanctionReasonCode('OTHER')).toBe(true)
     expect(isSanctionReasonCode('AUCTION_TERMS_VIOLATION')).toBe(true)
+    expect(isSanctionReasonCode('HARASSMENT')).toBe(true)
+    expect(isSanctionReasonCode('LEGAL_RELATIONSHIP_TERMINATION')).toBe(true)
     expect(isSanctionReasonCode('auction_terms_violation')).toBe(false)
     expect(isSanctionReasonCode('CODIGO_INVENTADO')).toBe(false)
     expect(isSanctionReasonCode('')).toBe(false)
@@ -41,6 +54,19 @@ describe('SanctionReasonCode (HU-90, CA-05)', () => {
     expect(warning(SanctionReasonCode.AuctionTermsViolation).toSnapshot().reasonCode).toBe(
       'AUCTION_TERMS_VIOLATION',
     )
+  })
+
+  it.each([
+    SanctionReasonCode.OffensiveLanguage,
+    SanctionReasonCode.Harassment,
+    SanctionReasonCode.FraudOrManipulation,
+    SanctionReasonCode.UnauthorizedSoftwareOrCheating,
+    SanctionReasonCode.IdentityImpersonation,
+    SanctionReasonCode.PrivacyPolicyViolation,
+    SanctionReasonCode.TermsOfServiceViolation,
+    SanctionReasonCode.LegalRelationshipTermination,
+  ])('crea una sanción con la causal oficial %s', (reasonCode) => {
+    expect(warning(reasonCode).toSnapshot().reasonCode).toBe(reasonCode)
   })
 
   it('rechaza un código desconocido', () => {
