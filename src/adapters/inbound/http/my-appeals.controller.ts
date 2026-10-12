@@ -13,6 +13,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 
 import { SubmitAppeal } from '../../../application/use-cases/SubmitAppeal'
 import { GetMyAppealStatus } from '../../../application/use-cases/GetMyAppealStatus'
+import { GetAppealableSanctions } from '../../../application/use-cases/GetAppealableSanctions'
 import {
   AccountNotFoundError,
   SanctionNotFoundError,
@@ -21,8 +22,9 @@ import { DomainError } from '../../../domain/errors/DomainError'
 import { Public } from './auth/decorators'
 import { AppealAccessGuard, CurrentAppealAccess } from './auth/appeal-access.guard'
 import type { AppealAccessTokenPayload } from '../../../application/ports/AppealAccessTokenPort'
-import { GET_MY_APPEAL_STATUS, SUBMIT_APPEAL } from './tokens'
+import { GET_APPEALABLE_SANCTIONS, GET_MY_APPEAL_STATUS, SUBMIT_APPEAL } from './tokens'
 import { AppealResponse, SubmitAppealRequest } from './appeals.dto'
+import { SanctionResponse } from './sanctions.dto'
 
 /**
  * Autoservicio de apelaciones del propio titular (HU-42, §6). Protegido por
@@ -39,7 +41,23 @@ export class MyAppealsController {
   constructor(
     @Inject(SUBMIT_APPEAL) private readonly submitAppeal: SubmitAppeal,
     @Inject(GET_MY_APPEAL_STATUS) private readonly getMyAppealStatus: GetMyAppealStatus,
+    @Inject(GET_APPEALABLE_SANCTIONS)
+    private readonly getAppealableSanctions: GetAppealableSanctions,
   ) {}
+
+  @Get('sanctions')
+  @ApiOperation({
+    summary:
+      'Sanciones de la propia cuenta que todavia pueden apelarse (dentro de 30 dias, sin apelacion previa)',
+  })
+  @ApiResponse({ status: 200, type: [SanctionResponse] })
+  async appealableSanctions(
+    @CurrentAppealAccess() access: AppealAccessTokenPayload,
+  ): Promise<readonly SanctionResponse[]> {
+    const sanctions = await this.getAppealableSanctions.execute(access.accountId)
+
+    return sanctions.map((sanction) => sanction.toSnapshot())
+  }
 
   @Post()
   @ApiOperation({ summary: 'Presenta una apelacion sobre una sancion propia' })

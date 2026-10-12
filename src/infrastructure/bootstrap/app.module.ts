@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto'
+
 import { Module, type CanActivate } from '@nestjs/common'
 import { APP_GUARD, Reflector } from '@nestjs/core'
 
@@ -51,6 +53,7 @@ import {
   AUTHENTICATE_FOR_APPEAL,
   SUBMIT_APPEAL,
   GET_MY_APPEAL_STATUS,
+  GET_APPEALABLE_SANCTIONS,
   LIST_APPEALS_FOR_REVIEW,
   RESOLVE_APPEAL,
   REVOKE_ROLE,
@@ -104,6 +107,7 @@ import { ApplySanction } from '../../application/use-cases/ApplySanction'
 import { AuthenticateForAppeal } from '../../application/use-cases/AuthenticateForAppeal'
 import { SubmitAppeal } from '../../application/use-cases/SubmitAppeal'
 import { GetMyAppealStatus } from '../../application/use-cases/GetMyAppealStatus'
+import { GetAppealableSanctions } from '../../application/use-cases/GetAppealableSanctions'
 import { ListAppealsForReview } from '../../application/use-cases/ListAppealsForReview'
 import { ResolveAppeal } from '../../application/use-cases/ResolveAppeal'
 import { ACCOUNT_REPOSITORY } from '../../application/ports/AccountRepositoryPort'
@@ -367,19 +371,25 @@ export const DATABASE = Symbol('Database')
     {
       provide: APPEAL_ACCESS_TOKEN,
       useFactory: (config: AppConfig, clock: ClockPort, logger: Logger): AppealAccessTokenPort => {
-        if (config.appealTokenSecret === null) {
-          // Solo alcanzable fuera de produccion: `loadConfig` ya falla cerrado
-          // si falta en produccion. El valor es fijo y visible a proposito,
-          // para que nadie lo confunda con un secreto real.
-          logger.warn('appeal_token_dev_secret', {
-            detail: 'APPEAL_TOKEN_SECRET no configurado: usando secreto de desarrollo.',
-          })
+        if (config.appealTokenSecret !== null) {
+          return new HmacAppealAccessToken(config.appealTokenSecret, clock)
         }
 
-        return new HmacAppealAccessToken(
-          config.appealTokenSecret ?? 'dev-only-appeal-token-secret',
-          clock,
-        )
+        // Solo alcanzable fuera de produccion: `loadConfig` ya falla cerrado
+        // si falta en produccion (vease esa comprobacion). Aqui NO se cae a
+        // un valor fijo: un secreto fijo y publico en el codigo fuente
+        // permitiria a cualquiera que lo lea fabricar tokens de apelacion
+        // para CUALQUIER cuenta, exactamente la suplantacion que HU-42 §6
+        // prohibe. Se genera uno aleatorio por arranque del proceso en su
+        // lugar -no sobrevive un reinicio, igual que la sesion en memoria de
+        // Web (`shared/appealSession.ts`)-, lo que mantiene el desarrollo
+        // funcional sin crear un secreto adivinable.
+        logger.warn('appeal_token_random_dev_secret', {
+          detail:
+            'APPEAL_TOKEN_SECRET no configurado: se genero un secreto aleatorio para este arranque.',
+        })
+
+        return new HmacAppealAccessToken(randomBytes(32).toString('hex'), clock)
       },
       inject: [APP_CONFIG, CLOCK, LOGGER],
     },
@@ -772,8 +782,17 @@ export const DATABASE = Symbol('Database')
         clock: ClockPort,
         notifications: NotificationRequestPort,
         sessionRevocation: SessionRevocationPort,
+        logger: Logger,
       ): ApplySanction =>
-        new ApplySanction(accounts, persistence, ids, clock, notifications, sessionRevocation),
+        new ApplySanction(
+          accounts,
+          persistence,
+          ids,
+          clock,
+          notifications,
+          sessionRevocation,
+          logger,
+        ),
       inject: [
         ACCOUNT_REPOSITORY,
         SANCTION_PERSISTENCE,
@@ -781,6 +800,7 @@ export const DATABASE = Symbol('Database')
         CLOCK,
         NOTIFICATION_REQUEST,
         SESSION_REVOCATION,
+        LOGGER,
       ],
     },
 
@@ -840,8 +860,7 @@ export const DATABASE = Symbol('Database')
         ids: IdGeneratorPort,
         clock: ClockPort,
         notifications: NotificationRequestPort,
-      ): SubmitAppeal =>
-        new SubmitAppeal(accounts, sanctions, appeals, ids, clock, notifications),
+      ): SubmitAppeal => new SubmitAppeal(accounts, sanctions, appeals, ids, clock, notifications),
       inject: [
         ACCOUNT_REPOSITORY,
         SANCTION_REPOSITORY,
@@ -858,6 +877,15 @@ export const DATABASE = Symbol('Database')
       inject: [APPEAL_REPOSITORY],
     },
     {
+      provide: GET_APPEALABLE_SANCTIONS,
+      useFactory: (
+        sanctions: SanctionRepositoryPort,
+        appeals: AppealRepositoryPort,
+        clock: ClockPort,
+      ): GetAppealableSanctions => new GetAppealableSanctions(sanctions, appeals, clock),
+      inject: [SANCTION_REPOSITORY, APPEAL_REPOSITORY, CLOCK],
+    },
+    {
       provide: LIST_APPEALS_FOR_REVIEW,
       useFactory: (appeals: AppealRepositoryPort): ListAppealsForReview =>
         new ListAppealsForReview(appeals),
@@ -872,7 +900,13 @@ export const DATABASE = Symbol('Database')
         clock: ClockPort,
         notifications: NotificationRequestPort,
       ): ResolveAppeal => new ResolveAppeal(accounts, sanctions, appeals, clock, notifications),
-      inject: [ACCOUNT_REPOSITORY, SANCTION_REPOSITORY, APPEAL_REPOSITORY, CLOCK, NOTIFICATION_REQUEST],
+      inject: [
+        ACCOUNT_REPOSITORY,
+        SANCTION_REPOSITORY,
+        APPEAL_REPOSITORY,
+        CLOCK,
+        NOTIFICATION_REQUEST,
+      ],
     },
     {
       provide: GET_OWN_PERSONAL_DATA,

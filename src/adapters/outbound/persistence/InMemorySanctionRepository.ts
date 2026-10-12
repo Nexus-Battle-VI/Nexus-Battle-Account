@@ -72,6 +72,14 @@ export class InMemorySanctionRepository implements SanctionRepositoryPort {
     return Promise.resolve(suspension ?? null)
   }
 
+  findByTargetAccountId(targetAccountId: string): Promise<readonly Sanction[]> {
+    const history = [...this.sanctions.values()]
+      .filter((sanction) => sanction.targetAccountId === targetAccountId)
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+
+    return Promise.resolve(history)
+  }
+
   findAll(): readonly Sanction[] {
     return [...this.sanctions.values()]
   }

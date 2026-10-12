@@ -153,9 +153,7 @@ describe('HU-42 - Apelaciones de sanciones (identidad restringida, §6/§7.3.2)'
   })
 
   const seedBannedTarget = async (id: string, email: string): Promise<void> => {
-    await accounts.save(
-      buildAccount({ id, subject: `subject-${id}`, email, roles: [Role.Player] }),
-    )
+    await accounts.save(buildAccount({ id, subject: `subject-${id}`, email, roles: [Role.Player] }))
     authProvider.seed({ email, password: TARGET_PASSWORD })
   }
 
@@ -245,6 +243,45 @@ describe('HU-42 - Apelaciones de sanciones (identidad restringida, §6/§7.3.2)'
       .set('Authorization', 'Bearer token-admin')
       .send({ decision: 'UPHELD', notes: 'Segundo intento sobre una apelacion ya resuelta.' })
     expect(secondResolution.status).toBe(400)
+  })
+
+  it('la identidad restringida descubre sus propias sanciones apelables sin conocer el id de memoria', async () => {
+    const targetId = 'target-discovery'
+    const targetEmail = 'discovery@nexus.test'
+    await seedBannedTarget(targetId, targetEmail)
+
+    const sanctionResponse = await request(app.getHttpServer())
+      .post(`/api/accounts/${targetId}/sanctions`)
+      .set('Authorization', 'Bearer token-admin')
+      .send({
+        type: SanctionType.PermanentBan,
+        reason: 'Fraude confirmado en subastas.',
+        reasonCode: SanctionReasonCode.FraudOrManipulation,
+      })
+    expect(sanctionResponse.status).toBe(201)
+    const sanctionId: string = sanctionResponse.body.id
+
+    const appealAuth = await request(app.getHttpServer())
+      .post('/api/accounts/appeals/auth')
+      .send({ identifier: targetEmail, password: TARGET_PASSWORD })
+    const appealToken: string = appealAuth.body.appealToken
+
+    const discoverable = await request(app.getHttpServer())
+      .get('/api/accounts/me/appeals/sanctions')
+      .set('Authorization', `Bearer ${appealToken}`)
+    expect(discoverable.status).toBe(200)
+    expect(discoverable.body.some((item: { id: string }) => item.id === sanctionId)).toBe(true)
+
+    await request(app.getHttpServer())
+      .post('/api/accounts/me/appeals')
+      .set('Authorization', `Bearer ${appealToken}`)
+      .send({ sanctionId, statement: 'No cometi fraude.' })
+
+    const afterSubmission = await request(app.getHttpServer())
+      .get('/api/accounts/me/appeals/sanctions')
+      .set('Authorization', `Bearer ${appealToken}`)
+    expect(afterSubmission.status).toBe(200)
+    expect(afterSubmission.body.some((item: { id: string }) => item.id === sanctionId)).toBe(false)
   })
 
   it('rechaza presentar apelacion con un token de apelacion invalido', async () => {

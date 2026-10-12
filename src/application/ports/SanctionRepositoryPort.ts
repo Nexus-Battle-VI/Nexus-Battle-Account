@@ -14,6 +14,14 @@ export interface SanctionRepositoryPort {
   findActiveRestrictions(targetAccountId: string, at: Date): Promise<readonly Sanction[]>
 
   findLatestTemporarySuspension(targetAccountId: string): Promise<Sanction | null>
+
+  /**
+   * Historial COMPLETO de una cuenta (advertencias incluidas, vencidas o no).
+   * Existe para HU-42 §6: quien se autentica con identidad restringida
+   * necesita ver que puede apelar sin tener que conocer de antemano el id de
+   * una sancion concreta.
+   */
+  findByTargetAccountId(targetAccountId: string): Promise<readonly Sanction[]>
 }
 
 export const SANCTION_REPOSITORY = Symbol('SanctionRepositoryPort')

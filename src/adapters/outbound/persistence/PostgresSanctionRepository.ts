@@ -121,4 +121,15 @@ export class PostgresSanctionRepository implements SanctionRepositoryPort {
 
     return row === undefined ? null : restoreSanction(row)
   }
+
+  async findByTargetAccountId(targetAccountId: string): Promise<readonly Sanction[]> {
+    const rows = await this.db
+      .selectFrom('sanctions')
+      .select([...SANCTION_COLUMNS])
+      .where('target_account_id', '=', targetAccountId)
+      .orderBy('created_at', 'desc')
+      .execute()
+
+    return rows.map(restoreSanction)
+  }
 }

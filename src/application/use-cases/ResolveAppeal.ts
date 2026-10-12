@@ -4,7 +4,10 @@ import type { SanctionRepositoryPort } from '../ports/SanctionRepositoryPort'
 import type { ClockPort } from '../ports/ClockPort'
 import type { NotificationRequestPort } from '../ports/NotificationRequestPort'
 import type { Appeal } from '../../domain/entities/Appeal'
-import { AppealDecision, type AppealDecision as AppealDecisionValue } from '../../domain/entities/AppealDecision'
+import {
+  AppealDecision,
+  type AppealDecision as AppealDecisionValue,
+} from '../../domain/entities/AppealDecision'
 import { SanctionType } from '../../domain/entities/SanctionType'
 import { AccountStatus } from '../../domain/entities/AccountStatus'
 import { SanctionPolicy } from '../../domain/policies/SanctionPolicy'
@@ -87,6 +90,19 @@ export class ResolveAppeal {
       resolvedAt: now,
     })
 
+    // Primero la escritura CONDICIONAL de la apelacion, antes de tocar la
+    // cuenta. Si dos revisiones llegan a la vez, la que pierde la carrera se
+    // entera aqui y nunca llega a mutar el estado de la cuenta -el orden
+    // importa: mutar la cuenta antes dejaria a la revision perdedora
+    // reactivando o reinstalando una decision que ya no es la vigente.
+    const persisted = await this.appeals.saveResolution(appeal)
+
+    if (!persisted) {
+      throw new DomainError(
+        `La apelacion ${appeal.id} ya fue resuelta por otra revision mientras tanto.`,
+      )
+    }
+
     const target = await this.accounts.findById(AccountId.create(appeal.accountId))
 
     if (target === null) {
@@ -94,8 +110,28 @@ export class ResolveAppeal {
     }
 
     if (command.decision === AppealDecision.Overturned) {
-      if (sanction.type === SanctionType.PermanentBan && target.currentStatus === AccountStatus.Banned) {
+      if (
+        sanction.type === SanctionType.PermanentBan &&
+        target.currentStatus === AccountStatus.Banned
+      ) {
         target.liftBan()
+
+        // La apelacion gana sobre ESTE baneo, no sobre otra restriccion que
+        // siguiera vigente por debajo: `Account.ban()` no exige que la
+        // cuenta estuviera ACTIVE para banearla, asi que un baneo pudo
+        // aplicarse sobre una suspension todavia no vencida. Se recalcula a
+        // partir de las restricciones que sigan activas en vez de asumir
+        // que la cuenta queda libre.
+        const stillActive = await this.sanctions.findActiveRestrictions(appeal.accountId, now)
+        const remainingSuspension = stillActive.find(
+          (candidate) =>
+            candidate.id !== sanction.id && candidate.type === SanctionType.TemporarySuspension,
+        )
+
+        if (remainingSuspension !== undefined) {
+          target.suspend()
+        }
+
         await this.accounts.save(target)
       }
 
@@ -107,8 +143,6 @@ export class ResolveAppeal {
         await this.accounts.save(target)
       }
     }
-
-    await this.appeals.save(appeal)
 
     await this.notifications.request({
       notificationId: `appeal-resolved-${appeal.id}`,

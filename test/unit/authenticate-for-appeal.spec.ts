@@ -10,9 +10,7 @@ const NOW = new Date('2026-10-05T12:00:00.000Z')
 const buildHarness = () => {
   const accounts = new InMemoryAccountRepository()
   let tokenCounter = 0
-  const authenticationProvider = new FakeAuthenticationProvider(
-    () => String((tokenCounter += 1)),
-  )
+  const authenticationProvider = new FakeAuthenticationProvider(() => String((tokenCounter += 1)))
   const clock = { now: (): Date => new Date(NOW) }
   const appealAccessToken = new HmacAppealAccessToken('secreto-de-prueba', clock)
 

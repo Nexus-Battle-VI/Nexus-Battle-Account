@@ -6,7 +6,10 @@ import { Sanction } from '../../src/domain/entities/Sanction'
 import { SanctionType } from '../../src/domain/entities/SanctionType'
 import { SanctionReasonCode } from '../../src/domain/entities/SanctionReasonCode'
 import { DomainError } from '../../src/domain/errors/DomainError'
-import { AccountNotFoundError, SanctionNotFoundError } from '../../src/application/errors/ApplicationError'
+import {
+  AccountNotFoundError,
+  SanctionNotFoundError,
+} from '../../src/application/errors/ApplicationError'
 import type {
   NotificationRequest,
   NotificationRequestPort,
@@ -45,9 +48,7 @@ const buildHarness = () => {
 
 const SANCTIONED_ACCOUNT_ID = 'account-sancionada'
 
-const seedSanctionedAccount = async (
-  accounts: InMemoryAccountRepository,
-): Promise<void> => {
+const seedSanctionedAccount = async (accounts: InMemoryAccountRepository): Promise<void> => {
   await accounts.save(
     buildActiveAccount({
       id: SANCTIONED_ACCOUNT_ID,

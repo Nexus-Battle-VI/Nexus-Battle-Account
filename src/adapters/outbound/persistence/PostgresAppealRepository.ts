@@ -2,7 +2,10 @@ import type { Kysely, Selectable } from 'kysely'
 
 import type { AppealRepositoryPort } from '../../../application/ports/AppealRepositoryPort'
 import { Appeal } from '../../../domain/entities/Appeal'
-import { AppealStatus, type AppealStatus as AppealStatusValue } from '../../../domain/entities/AppealStatus'
+import {
+  AppealStatus,
+  type AppealStatus as AppealStatusValue,
+} from '../../../domain/entities/AppealStatus'
 import { isAppealDecision } from '../../../domain/entities/AppealDecision'
 import type { AppealsTable, Database } from './schema'
 
@@ -71,6 +74,29 @@ export class PostgresAppealRepository implements AppealRepositoryPort {
       .values({ id: snapshot.id, ...values })
       .onConflict((oc) => oc.column('id').doUpdateSet(values))
       .execute()
+  }
+
+  async saveResolution(appeal: Appeal): Promise<boolean> {
+    const snapshot = appeal.toSnapshot()
+
+    const result = await this.db
+      .updateTable('appeals')
+      .set({
+        status: snapshot.status,
+        decision: snapshot.decision,
+        resolution_notes: snapshot.resolutionNotes,
+        resolved_by_account_id: snapshot.resolvedByAccountId,
+        resolved_at: snapshot.resolvedAt,
+      })
+      // La condicion es el punto: solo escribe si SEGUIA en SUBMITTED en
+      // la base, no en el momento en que `ResolveAppeal` la leyo. Es lo que
+      // impide que dos revisiones concurrentes pisen silenciosamente la
+      // decision de la otra.
+      .where('id', '=', snapshot.id)
+      .where('status', '=', AppealStatus.Submitted)
+      .executeTakeFirst()
+
+    return result.numUpdatedRows > 0n
   }
 
   async findById(id: string): Promise<Appeal | null> {

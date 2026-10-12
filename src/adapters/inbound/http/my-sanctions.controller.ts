@@ -38,9 +38,7 @@ export class MySanctionsController {
   @ApiResponse({ status: 200, type: MySanctionStatusResponse })
   @ApiResponse({ status: 401, description: 'Falta el testimonio o no es valido' })
   @ApiResponse({ status: 404, description: 'El sujeto no tiene cuenta en este servicio' })
-  async active(
-    @CurrentIdentity() identity: VerifiedIdentity,
-  ): Promise<MySanctionStatusResponse> {
+  async active(@CurrentIdentity() identity: VerifiedIdentity): Promise<MySanctionStatusResponse> {
     try {
       const status = await this.getActiveSanctionStatus.execute(identity.subject)
       const now = this.clock.now()

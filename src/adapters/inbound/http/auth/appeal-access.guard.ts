@@ -30,9 +30,7 @@ export interface RequestWithAppealAccess {
  */
 @Injectable()
 export class AppealAccessGuard implements CanActivate {
-  constructor(
-    @Inject(APPEAL_ACCESS_TOKEN) private readonly tokens: AppealAccessTokenPort,
-  ) {}
+  constructor(@Inject(APPEAL_ACCESS_TOKEN) private readonly tokens: AppealAccessTokenPort) {}
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<RequestWithAppealAccess>()

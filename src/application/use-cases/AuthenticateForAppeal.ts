@@ -14,7 +14,11 @@ export interface AuthenticateForAppealCommand {
 const APPEAL_TOKEN_TTL_SECONDS = 30 * 60
 
 export type AuthenticateForAppealOutcome =
-  | { readonly kind: 'appealAuthenticated'; readonly appealToken: string; readonly expiresIn: number }
+  | {
+      readonly kind: 'appealAuthenticated'
+      readonly appealToken: string
+      readonly expiresIn: number
+    }
   | { readonly kind: 'invalidCredentials' }
   | { readonly kind: 'providerUnavailable' }
   /**

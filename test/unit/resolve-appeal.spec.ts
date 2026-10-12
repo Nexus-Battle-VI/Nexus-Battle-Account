@@ -214,4 +214,129 @@ describe('ResolveAppeal (HU-42, §7.3.2)', () => {
       }),
     ).rejects.toBeInstanceOf(DomainError)
   })
+
+  it('dos revisiones concurrentes sobre la misma apelacion: solo una gana, la otra ve el conflicto', async () => {
+    const harness = await buildHarness(SanctionType.PermanentBan)
+
+    const [first, second] = await Promise.allSettled([
+      harness.resolveAppeal.execute({
+        actorSubject: 'subject-admin',
+        appealId: harness.appeal.id,
+        decision: AppealDecision.Upheld,
+        notes: 'Primera revision: se mantiene.',
+      }),
+      harness.resolveAppeal.execute({
+        actorSubject: 'subject-admin',
+        appealId: harness.appeal.id,
+        decision: AppealDecision.Overturned,
+        notes: 'Segunda revision: se revierte.',
+      }),
+    ])
+
+    // Exactamente una de las dos gana la carrera -no importa cual, el punto
+    // es que NUNCA las dos tengan exito a la vez-.
+    const outcomes = [first, second]
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1)
+    expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toHaveLength(1)
+
+    const rejected = outcomes.find(
+      (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+    )
+    expect(rejected?.reason).toBeInstanceOf(DomainError)
+    expect((rejected?.reason as DomainError).message).toContain('ya fue resuelta')
+
+    // El estado final de la apelacion es el de quien gano, sin mezclar campos.
+    const persisted = await harness.appeals.findById(harness.appeal.id)
+    expect(persisted?.isResolved).toBe(true)
+    expect(['UPHELD', 'OVERTURNED']).toContain(persisted?.currentDecision)
+  })
+
+  it('OVERTURNED sobre un baneo aplicado encima de una suspension todavia vigente reinstala la suspension, no deja la cuenta libre', async () => {
+    const accounts = new InMemoryAccountRepository()
+    const sanctions = new InMemorySanctionRepository()
+    const appeals = new InMemoryAppealRepository()
+    let counter = 0
+    const ids = { generate: (): string => `appeal-${String((counter += 1))}` }
+    const notifications: NotificationRequestPort = {
+      request: (): Promise<void> => Promise.resolve(),
+    }
+
+    await accounts.save(
+      buildActiveAccount({
+        id: 'actor-admin-2',
+        subject: 'subject-admin-2',
+        email: 'admin2@nexus.test',
+        displayName: 'Admin',
+        roles: [Role.Player, Role.Administrator],
+      }),
+    )
+
+    const target = buildActiveAccount({
+      id: 'target-layered',
+      subject: 'subject-target-layered',
+      email: 'layered@nexus.test',
+      displayName: 'Objetivo Apilado',
+    })
+
+    // Primero una suspension TODAVIA no vencida...
+    const suspension = Sanction.create({
+      id: 'sancion-suspension',
+      targetAccountId: target.id.value,
+      actorAccountId: 'actor-admin-2',
+      type: SanctionType.TemporarySuspension,
+      reason: 'Primera infraccion.',
+      reasonCode: SanctionReasonCode.Harassment,
+      createdAt: SUBMITTED_AT,
+      expiresAt: new Date(SUBMITTED_AT.getTime() + 24 * 60 * 60_000),
+    })
+    target.suspend()
+    await sanctions.save(suspension)
+
+    // ...y DESPUES un baneo, que `Account.ban()` permite aunque la cuenta ya
+    // estuviera suspendida (no exige partir de ACTIVE).
+    const ban = Sanction.create({
+      id: 'sancion-ban',
+      targetAccountId: target.id.value,
+      actorAccountId: 'actor-admin-2',
+      type: SanctionType.PermanentBan,
+      reason: 'Segunda infraccion, mas grave.',
+      reasonCode: SanctionReasonCode.FraudOrManipulation,
+      createdAt: new Date(SUBMITTED_AT.getTime() + 60_000),
+    })
+    target.ban()
+    await sanctions.save(ban)
+    await accounts.save(target)
+
+    const submitAppeal = new SubmitAppeal(
+      accounts,
+      sanctions,
+      appeals,
+      ids,
+      { now: (): Date => new Date(SUBMITTED_AT.getTime() + 120_000) },
+      notifications,
+    )
+    const appeal = await submitAppeal.execute({
+      accountId: target.id.value,
+      sanctionId: ban.id,
+      statement: 'El baneo es desproporcionado.',
+    })
+
+    const resolveAppeal = new ResolveAppeal(
+      accounts,
+      sanctions,
+      appeals,
+      { now: (): Date => new Date(SUBMITTED_AT.getTime() + 180_000) },
+      notifications,
+    )
+    await resolveAppeal.execute({
+      actorSubject: 'subject-admin-2',
+      appealId: appeal.id,
+      decision: AppealDecision.Overturned,
+      notes: 'El baneo no estaba justificado.',
+    })
+
+    const resolved = await accounts.findById(AccountId.create('target-layered'))
+    // NO Active: la suspension anterior, todavia vigente, sigue aplicando.
+    expect(resolved?.currentStatus).toBe(AccountStatus.Suspended)
+  })
 })
