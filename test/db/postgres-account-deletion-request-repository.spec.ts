@@ -253,24 +253,58 @@ describe('PostgresAccountDeletionRequestRepository', () => {
 
       const otroProcesador = new PostgresAccountDeletionRequestRepository(db)
 
-      // Sin `await` entre ambas: las dos transacciones llegan a PostgreSQL en
-      // vuelo al mismo tiempo. Si la proteccion fuera solo "leer y luego
-      // actualizar" a nivel de aplicacion, las dos podrian leer la misma fila
-      // como RECEIVED antes de que cualquiera la marque IN_PROGRESS. Con
-      // `FOR UPDATE SKIP LOCKED`, la segunda transaccion salta la fila
-      // bloqueada por la primera y, al no haber ninguna otra pendiente,
-      // recibe `null`.
-      const [primero, segundo] = await Promise.all([
-        repository.claimNextPending(),
-        otroProcesador.claimNextPending(),
-      ])
+      // Mantiene el bloqueo de la fila abierto con una transaccion propia
+      // mientras el segundo procesador intenta reclamarla.
+      //
+      // La version anterior lanzaba `Promise.all([repository.claimNextPending(),
+      // otroProcesador.claimNextPending()])` sin `await` entre ambas, confiando
+      // en que las dos transacciones llegaran a PostgreSQL en una ventana lo
+      // bastante estrecha para contender el bloqueo de verdad. Bajo la carga
+      // del runner de CI -varios workers de Jest, cada uno con su propio
+      // contenedor de Postgres- esa ventana no siempre se da: la primera
+      // transaccion puede confirmar (RECEIVED -> IN_PROGRESS) antes de que la
+      // segunda envie su `SELECT`, y entonces encuentra la fila ya
+      // IN_PROGRESS -un estado que el propio `claimNextPending` permite
+      // reclamar de nuevo para reanudar tras una interrupcion, ver la prueba
+      // de mas abajo-, lo que no es el escenario de contencion que esta
+      // prueba quiere comprobar y hacia que fallara de forma intermitente.
+      //
+      // Reteniendo el bloqueo explicitamente, el `SKIP LOCKED` del segundo
+      // procesador se ejercita de forma determinista.
+      let liberarBloqueo!: () => void
+      let liberado!: Promise<void>
+      const bloqueoTomado = new Promise<void>((resolveTomado) => {
+        liberado = db.transaction().execute(async (trx) => {
+          await trx
+            .selectFrom('account_deletion_requests')
+            .selectAll()
+            .where('id', '=', id)
+            .forUpdate()
+            .executeTakeFirstOrThrow()
 
-      const ganadores = [primero, segundo].filter(
-        (resultado): resultado is AccountDeletionRequest => resultado !== null,
-      )
+          resolveTomado()
 
-      expect(ganadores).toHaveLength(1)
-      expect(ganadores[0]!.id).toBe(id)
+          await new Promise<void>((resolveLiberar) => {
+            liberarBloqueo = resolveLiberar
+          })
+        })
+      })
+      await bloqueoTomado
+
+      await expect(otroProcesador.claimNextPending()).resolves.toBeNull()
+
+      liberarBloqueo()
+      // El `COMMIT` que libera el bloqueo es, el mismo, una operacion
+      // asincrona: sin esperar a que la transaccion de arriba termine de
+      // verdad, la siguiente llamada podia encontrar la fila todavia
+      // bloqueada y, al no haber otra candidata, recibir `null` -el mismo
+      // tipo de carrera que esta reescritura buscaba eliminar, solo que
+      // desplazada a este punto.
+      await liberado
+
+      const reclamada = await repository.claimNextPending()
+
+      expect(reclamada?.id).toBe(id)
     })
 
     it('reclama de nuevo una IN_PROGRESS sin lanzar (reanuda tras una interrupcion)', async () => {
