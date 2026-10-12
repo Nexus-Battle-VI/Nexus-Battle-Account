@@ -13,7 +13,33 @@ import type {
   NotificationRequest,
   NotificationRequestPort,
 } from '../../src/application/ports/NotificationRequestPort'
+import type { SessionRevocationPort } from '../../src/application/ports/SessionRevocationPort'
+import type { ApplySanctionLog } from '../../src/application/use-cases/ApplySanction'
 import { buildActiveAccount } from '../support/account-factory'
+
+const buildSessionRevocation = (): SessionRevocationPort & { revoked: string[] } => {
+  const revoked: string[] = []
+
+  return {
+    revoked,
+    globalSignOut: (subject: string): Promise<void> => {
+      revoked.push(subject)
+
+      return Promise.resolve()
+    },
+  }
+}
+
+const buildLogger = (): ApplySanctionLog & { warnings: unknown[] } => {
+  const warnings: unknown[] = []
+
+  return {
+    warnings,
+    warn: (message, context) => {
+      warnings.push({ message, context })
+    },
+  }
+}
 
 const NOW = new Date('2026-09-06T12:00:00.000Z')
 const TARGET_ID = AccountId.create('target-1')
@@ -47,6 +73,9 @@ const buildHarness = () => {
     },
   }
 
+  const sessionRevocation = buildSessionRevocation()
+  const logger = buildLogger()
+
   return {
     accounts,
     sanctions,
@@ -54,7 +83,17 @@ const buildHarness = () => {
     clock,
     notifications,
     requestedNotifications,
-    applySanction: new ApplySanction(accounts, persistence, ids, clock, notifications),
+    sessionRevocation,
+    logger,
+    applySanction: new ApplySanction(
+      accounts,
+      persistence,
+      ids,
+      clock,
+      notifications,
+      sessionRevocation,
+      logger,
+    ),
   }
 }
 
@@ -495,6 +534,8 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
       },
       harness.clock,
       notifications,
+      buildSessionRevocation(),
+      buildLogger(),
     )
 
     await applySanction.execute({
@@ -529,6 +570,8 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         now: (): Date => new Date(NOW),
       },
       notifications,
+      buildSessionRevocation(),
+      buildLogger(),
     )
 
     await expect(
@@ -577,5 +620,54 @@ describe('ApplySanction - HU-42.1 / HU-42.2 / HU-42.3', () => {
         reasonCode: 'CODIGO_INVENTADO' as SanctionReasonCode,
       }),
     ).rejects.toBeInstanceOf(DomainError)
+  })
+
+  it('un fallo al revocar la sesion no impide la notificacion ni hace fallar la sancion', async () => {
+    const accounts = new InMemoryAccountRepository()
+    const sanctions = new InMemorySanctionRepository()
+    const persistence = new InMemorySanctionPersistence(accounts, sanctions)
+    await saveActorAndTarget(accounts, [Role.Moderator])
+
+    const requestedNotifications: NotificationRequest[] = []
+    const notifications: NotificationRequestPort = {
+      request: (notification: NotificationRequest): Promise<void> => {
+        requestedNotifications.push(notification)
+
+        return Promise.resolve()
+      },
+    }
+    const failingSessionRevocation: SessionRevocationPort = {
+      globalSignOut: (): Promise<void> => Promise.reject(new Error('Cognito no disponible')),
+    }
+    const logger = buildLogger()
+
+    const applySanction = new ApplySanction(
+      accounts,
+      persistence,
+      { generate: (): string => 'sanction-revocation-failure-test' },
+      { now: (): Date => new Date(NOW) },
+      notifications,
+      failingSessionRevocation,
+      logger,
+    )
+
+    const sanction = await applySanction.execute({
+      actorSubject: 'actor-subject',
+      targetAccountId: 'target-1',
+      type: SanctionType.TemporarySuspension,
+      reason: 'Prueba de fallo de revocacion.',
+      reasonCode: SanctionReasonCode.Other,
+      suspensionDurationMinutes: 60,
+    })
+
+    // La sancion se aplica -y se devuelve- igual, y la notificacion SI se
+    // intenta: el fallo de revocacion no bloquea nada de lo demas.
+    expect(sanction.id).toBe('sanction-revocation-failure-test')
+    expect(requestedNotifications).toHaveLength(1)
+    expect(requestedNotifications[0]).toMatchObject({ templateId: 'account-sanction-applied' })
+    expect(logger.warnings).toHaveLength(1)
+    expect(logger.warnings[0]).toMatchObject({
+      message: 'apply_sanction_session_revocation_failed',
+    })
   })
 })

@@ -118,3 +118,17 @@ export class AvatarNotFoundError extends Error {
     this.name = 'AvatarNotFoundError'
   }
 }
+
+export class SanctionNotFoundError extends Error {
+  constructor(sanctionId: string) {
+    super(`No existe una sancion identificada por "${sanctionId}".`)
+    this.name = 'SanctionNotFoundError'
+  }
+}
+
+export class AppealNotFoundError extends Error {
+  constructor(appealId: string) {
+    super(`No existe una apelacion identificada por "${appealId}".`)
+    this.name = 'AppealNotFoundError'
+  }
+}

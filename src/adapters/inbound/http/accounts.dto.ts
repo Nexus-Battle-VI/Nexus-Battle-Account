@@ -154,6 +154,16 @@ export class AccountResponse {
 export class AccountDisplayNameResponse {
   @ApiProperty({ example: 'Ana Ramirez' })
   readonly displayName!: string
+
+  /**
+   * Identificador interno de Account (HU-42): quien modera necesita poder
+   * actuar sobre la cuenta -por ejemplo, aplicar una sancion- despues de
+   * identificarla por el sujeto. No es un dato adicional sobre la persona:
+   * ya se sabe que este sujeto tiene esta cuenta por haber llamado a este
+   * mismo endpoint; esto solo permite seguir operando sobre ella.
+   */
+  @ApiProperty({ example: 'f3b1c2d4-...' })
+  readonly id!: string
 }
 
 export class OwnPersonalDataResponse implements OwnPersonalDataDto {

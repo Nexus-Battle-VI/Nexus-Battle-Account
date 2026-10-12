@@ -96,6 +96,12 @@ export interface AppConfig {
   /** Servicios autorizados a invocar el contrato interno. */
   readonly internalServiceAllowed: readonly string[]
   /**
+   * Firma del token de apelacion de alcance limitado (HU-42, §6: "identidad
+   * restringida"). Obligatorio en produccion: sin el, cualquiera podria
+   * fabricar un token que `AppealAccessGuard` aceptara para cualquier cuenta.
+   */
+  readonly appealTokenSecret: string | null
+  /**
    * Procesamiento durable de HU-43.3 (Management #305). Apagado por
    * defecto, igual que `NOTIFICATIONS_INGEST_URL`: un entorno que no lo activa
    * explicitamente no ejecuta tratamiento de datos personales en segundo
@@ -309,6 +315,17 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     )
   }
 
+  const appealTokenSecret = readString(env, 'APPEAL_TOKEN_SECRET', '') || null
+
+  // Mismo razonamiento que AUTH_MODE/AUTHENTICATION_DRIVER arriba: un binario
+  // de produccion sin este secreto emitiria -o verificaria- tokens de
+  // apelacion con un valor por defecto conocido por cualquiera.
+  if (nodeEnv === 'production' && appealTokenSecret === null) {
+    throw new ConfigurationError(
+      'APPEAL_TOKEN_SECRET es obligatorio con NODE_ENV=production. Vease HU-42.',
+    )
+  }
+
   return {
     nodeEnv,
     serviceName: readString(env, 'SERVICE_NAME', 'nexus-battle-account'),
@@ -328,6 +345,7 @@ export const loadConfig = (env: RawEnv): AppConfig => {
     corsOrigins: readCorsOrigins(env, nodeEnv),
     notificationsIngestUrl: readString(env, 'NOTIFICATIONS_INGEST_URL', '') || null,
     internalServiceAuthSecret: readString(env, 'INTERNAL_SERVICE_AUTH_SECRET', '') || null,
+    appealTokenSecret,
     internalServiceAllowed: readAllowedServices(env),
     accountDeletionProcessingEnabled: readBoolean(
       env,

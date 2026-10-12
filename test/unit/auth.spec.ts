@@ -492,6 +492,7 @@ describe('Configuracion de autenticacion', () => {
       AUTHENTICATION_DRIVER: 'cognito',
       COGNITO_USER_POOL_ID: 'us-east-1_abc',
       COGNITO_CLIENT_ID: 'cliente',
+      APPEAL_TOKEN_SECRET: 'secreto-de-apelacion-de-pruebas',
     })
 
     expect(config.cognito).toEqual({
@@ -499,6 +500,23 @@ describe('Configuracion de autenticacion', () => {
       clientId: 'cliente',
     })
     expect(config.authenticationDriver).toBe('cognito')
+  })
+
+  /**
+   * Mismo razonamiento que el resto de BLOCKERs de produccion (HU-42): sin
+   * este secreto, `AppealAccessGuard` verificaria tokens de apelacion con un
+   * valor por defecto que cualquiera podria reproducir.
+   */
+  it('impide arrancar en produccion sin APPEAL_TOKEN_SECRET', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        AUTH_MODE: 'jwt',
+        AUTHENTICATION_DRIVER: 'cognito',
+        COGNITO_USER_POOL_ID: 'us-east-1_abc',
+        COGNITO_CLIENT_ID: 'cliente',
+      }),
+    ).toThrow(ConfigurationError)
   })
 
   /**
