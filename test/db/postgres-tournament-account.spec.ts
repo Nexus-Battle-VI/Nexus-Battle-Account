@@ -203,11 +203,11 @@ describe('Consultas Tournament con PostgreSQL y avatar en disco', () => {
       .executeTakeFirstOrThrow()
     expect(after).toEqual(before)
   })
-  it('avatar eliminado y cuenta inexistente conservan errores distintos', async () => {
+  it('avatar eliminado se acepta; cuenta inexistente sigue siendo 404', async () => {
     await avatars.remove('db-activo/a.png')
     const absent = await validate('Equipo Sin Imagen')
-    expect(absent.status).toBe(422)
-    expect(absent.body.code).toBe('INVALID_TEAM_AVATAR')
+    expect(absent.status).toBe(200)
+    expect(absent.body.avatar).toEqual({ kind: 'ACCOUNT_AVATAR', subject: SUBJECT })
     expect((await validate('Equipo Sin Cuenta', 'cuenta-inexistente')).status).toBe(404)
   })
 })

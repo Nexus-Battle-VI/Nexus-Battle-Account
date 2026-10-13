@@ -245,11 +245,13 @@ describe('Contrato Account/Tournament v2, composicion JWT activa', () => {
     expect((await validate(body)).body.code).toBe('INVALID_TEAM_NAME')
   })
   it.each(['sin-avatar', 'avatar-vacio'])(
-    'rechaza avatar no recuperable: %s',
+    'acepta una cuenta sin avatar recuperable y devuelve su referencia: %s',
     async (avatarSubject) => {
       const response = await validate({ ...BODY, avatarSubject })
-      expect(response.status).toBe(422)
-      expect(response.body.code).toBe('INVALID_TEAM_AVATAR')
+      expect(response.status).toBe(200)
+      expect(response.body.avatar).toEqual({ kind: 'ACCOUNT_AVATAR', subject: avatarSubject })
+      expect(response.body.policyVersion).toBe('account-team-identity-v1')
+      expect(response.body.code).toBeUndefined()
     },
   )
   it('cuenta de avatar inexistente devuelve 404', async () => {

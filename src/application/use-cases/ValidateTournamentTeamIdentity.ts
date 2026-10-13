@@ -41,18 +41,15 @@ export class ValidateTournamentTeamIdentity {
     }
 
     try {
-      const avatar = await this.avatars.executeBySubject(avatarSubject, { failOnUnavailable: true })
-      if (avatar.bytes.length === 0) {
-        throw new AvatarNotFoundError(avatarSubject)
-      }
+      await this.avatars.executeBySubject(avatarSubject, { failOnUnavailable: true })
     } catch (error: unknown) {
-      if (error instanceof AvatarNotFoundError) {
-        throw new TournamentIdentityError(
-          'INVALID_TEAM_AVATAR',
-          'La cuenta seleccionada no tiene un avatar recuperable.',
-        )
+      // Una cuenta SIN avatar recuperable (archivo perdido, vacio o clave vacia) sigue siendo una
+      // referencia valida: la identidad del equipo es la referencia a la cuenta, no que la imagen
+      // exista, y Web ya pinta el respaldo "Sin avatar". Se propagan la cuenta inexistente (404) y
+      // los errores de disco o permisos (503): esos NO son una ausencia, son un fallo.
+      if (!(error instanceof AvatarNotFoundError)) {
+        throw error
       }
-      throw error
     }
 
     return {
